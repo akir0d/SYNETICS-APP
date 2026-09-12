@@ -143,6 +143,16 @@ jobs:
           fi
 
           gh release upload apk-latest "${{ steps.apk.outputs.chemin }}" --clobber
+
+          # La release est glissante : sans nettoyage, elle accumulerait un APK
+          # par construction et le joueur ne saurait plus lequel telecharger.
+          # On ne garde que le fichier qui vient d'etre publie.
+          gh release view apk-latest --json assets --jq '.assets[].name' \
+            | grep -v '^${{ steps.apk.outputs.nom }}$' \
+            | while read -r ancien; do
+                [ -n "$ancien" ] && gh release delete-asset apk-latest "$ancien" --yes
+              done
+
           echo "RELEASE_URL=$(gh release view apk-latest --json url --jq .url)" >> "$GITHUB_ENV"
 
       - name: Recapitulatif

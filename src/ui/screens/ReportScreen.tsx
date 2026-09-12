@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AppSettings, EventType, MatchAnalysis, MatchEvent } from '../../core/types';
+import type { AppSettings, EventType, KnownMap, MatchAnalysis, MatchEvent } from '../../core/types';
 import { EVENT_TYPES, GAME_PROFILES } from '../../core/types';
 import { computeIntensity, runLocalAnalysis } from '../../core/analysis/heuristics';
 import { formatDuration } from '../../core/analysis/metrics';
@@ -14,6 +14,7 @@ import { MetricGrid } from '../components/MetricGrid';
 import { ScoreBars } from '../components/ScoreBars';
 import { EventList } from '../components/EventList';
 import { AiPanel } from '../components/AiPanel';
+import { MapPanel } from '../components/MapPanel';
 
 /** Types que le joueur peut poser a la main pendant la relecture. */
 const MARKABLE: EventType[] = ['kill', 'death', 'damage_taken', 'objective', 'respawn', 'note'];
@@ -23,18 +24,22 @@ type SourceFilter = 'all' | 'manual' | 'ai' | 'local';
 interface ReportScreenProps {
   analysis: MatchAnalysis;
   settings: AppSettings;
+  mapLibrary: readonly KnownMap[];
   initialKeyframes: readonly Keyframe[];
   initialVideoUrl: string | null;
   onChange: (analysis: MatchAnalysis) => void;
+  onConfirmMap: (analysis: MatchAnalysis, name: string, existingId: string | null) => void;
   onBack: () => void;
 }
 
 export function ReportScreen({
   analysis,
   settings,
+  mapLibrary,
   initialKeyframes,
   initialVideoUrl,
   onChange,
+  onConfirmMap,
   onBack,
 }: ReportScreenProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -67,11 +72,20 @@ export function ReportScreen({
     [analysis.features, analysis.settings.samplingHz],
   );
 
-  const seek = useCallback((t: number) => {
-    setCurrentTime(t);
-    const video = videoRef.current;
-    if (video) video.currentTime = t;
-  }, []);
+  // Les horodatages de l'analyse repartent de zero, mais le match peut se
+  // trouver a la deux-heure-trente d'une rediffusion : la lecture ajoute donc
+  // le decalage, et l'affichage le retire.
+  const offsetS = analysis.sourceOffsetS ?? 0;
+
+  const seek = useCallback(
+    (t: number) => {
+      const bounded = Math.min(analysis.video.durationS, Math.max(0, t));
+      setCurrentTime(bounded);
+      const video = videoRef.current;
+      if (video) video.currentTime = offsetS + bounded;
+    },
+    [offsetS, analysis.video.durationS],
+  );
 
   const addEvent = useCallback(
     (type: EventType) => {
@@ -173,7 +187,13 @@ export function ReportScreen({
       });
     });
     const times = selectKeyframeTimes(analysis.features, intensity, settings.aiFrameBudget);
-    const frames = await extractKeyframes(offscreen, times);
+    // On va chercher les images dans le fichier source, mais on les rend a
+    // l'IA en temps de match, coherent avec le reste de l'analyse.
+    const extracted = await extractKeyframes(
+      offscreen,
+      times.map((t) => t + offsetS),
+    );
+    const frames = extracted.map((frame, i) => ({ ...frame, t: times[i] ?? frame.t - offsetS }));
     keyframesRef.current = frames;
     return frames;
   };
@@ -193,6 +213,8 @@ export function ReportScreen({
           playerName: settings.playerName,
           frameTimes: frames.map((f) => f.t),
           notes: analysis.notes,
+          mapName: analysis.map.mapName,
+          segment: { index: analysis.segmentIndex, count: analysis.segmentCount },
         },
       });
       // On remplace les evenements IA precedents : deux passes ne doivent pas
@@ -279,8 +301,11 @@ export function ReportScreen({
         </div>
         <p className="hint" style={{ marginBottom: 0 }}>
           {GAME_PROFILES[analysis.profile].name} · {analysis.video.name} ·{' '}
-          {formatDuration(analysis.video.durationS)} · analyse le{' '}
-          {new Date(analysis.createdAt).toLocaleString('fr-FR')}
+          {formatDuration(analysis.video.durationS)}
+          {analysis.segmentCount > 1
+            ? ` · match ${analysis.segmentIndex}/${analysis.segmentCount}, a partir de ${formatDuration(offsetS)} dans la rediffusion`
+            : ''}{' '}
+          · analyse le {new Date(analysis.createdAt).toLocaleString('fr-FR')}
         </p>
       </div>
 
@@ -294,13 +319,29 @@ export function ReportScreen({
                 src={videoUrl}
                 controls
                 playsInline
-                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => {
+                  // Un fichier rattache s'ouvre au debut : on se place sur le match.
+                  if (offsetS > 0) e.currentTarget.currentTime = offsetS;
+                }}
+                onTimeUpdate={(e) => {
+                  const relative = e.currentTarget.currentTime - offsetS;
+                  // Ne pas deborder sur le match suivant de la meme rediffusion.
+                  if (relative > analysis.video.durationS + 0.5) {
+                    e.currentTarget.pause();
+                    seek(analysis.video.durationS);
+                    return;
+                  }
+                  setCurrentTime(Math.min(analysis.video.durationS, Math.max(0, relative)));
+                }}
               />
             ) : (
               <div className="player-missing">
                 <p style={{ marginTop: 0 }}>
                   La video n'est pas conservee dans l'application (les fichiers sont trop lourds
-                  pour le stockage local). Rattachez-la pour revoir les moments cles.
+                  pour le stockage local). Rattachez-la pour revoir les moments cles
+                  {analysis.segmentCount > 1
+                    ? ' : rattachez la rediffusion complete, la lecture se placera toute seule sur ce match.'
+                    : '.'}
                 </p>
                 <button className="btn-ghost" onClick={() => attachRef.current?.click()}>
                   Rattacher la video
@@ -366,6 +407,13 @@ export function ReportScreen({
             <h2>Mesures</h2>
             <MetricGrid metrics={analysis.metrics} />
           </div>
+
+          <MapPanel
+            analysis={analysis}
+            mapLibrary={mapLibrary}
+            environment={analysis.ai?.environment}
+            onConfirm={(name, existingId) => onConfirmMap(analysis, name, existingId)}
+          />
 
           <div className="card">
             <h2>Profil de jeu</h2>

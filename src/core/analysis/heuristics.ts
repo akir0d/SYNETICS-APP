@@ -1,5 +1,5 @@
 import type { Engagement, FrameFeature, MatchEvent } from '../types';
-import { clamp01, mad, median, movingAverage, normalizeRobust, percentile } from './stats';
+import { clamp01, mad, median, movingAverage, movingMedian, normalizeRobust, percentile } from './stats';
 
 /**
  * Moteur d'analyse local : il ne connait rien a EVA, il lit uniquement le
@@ -155,6 +155,9 @@ const MIN_RED_JUMP = 0.05;
 /** Ecart de mouvement, au-dessus du fond, qui trahit une coupure franche. */
 const MIN_CUT_JUMP = 0.25;
 
+/** Largeur de la fenetre servant a mesurer le fond de scene, en secondes. */
+const BASELINE_WINDOW_S = 10;
+
 /**
  * Calcule un seuil de detection en combinant deux lectures.
  *
@@ -184,7 +187,15 @@ export function detectExposure(
   if (features.length < 3) return [];
 
   const red = features.map((f) => f.redBias);
-  const threshold = detectionThreshold(red, opts.exposureZ, MIN_RED_JUMP);
+
+  // Une arene aux tons chauds — eclairage orange, murs rouges, desert — a un
+  // fond naturellement riche en rouge. Comparer chaque image a une reference
+  // *locale* plutot qu'a la moyenne du match entier evite de compter tout le
+  // decor comme une suite de degats subis, tout en restant sensible a un
+  // voile bref, trop court pour deplacer une mediane glissante.
+  const baselineWindow = Math.max(3, Math.round(BASELINE_WINDOW_S * opts.samplingHz));
+  const baseline = movingMedian(red, baselineWindow);
+  const jump = Math.max(MIN_RED_JUMP, opts.exposureZ * mad(red));
 
   const events: MatchEvent[] = [];
   let lastT = Number.NEGATIVE_INFINITY;
@@ -192,6 +203,7 @@ export function detectExposure(
   for (let i = 1; i < features.length - 1; i++) {
     const f = features[i] as FrameFeature;
     const value = red[i] as number;
+    const threshold = (baseline[i] as number) + jump;
     const isLocalMax = value >= (red[i - 1] as number) && value >= (red[i + 1] as number);
 
     if (value >= threshold && isLocalMax && f.t - lastT >= opts.refractoryS) {

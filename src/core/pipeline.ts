@@ -2,12 +2,21 @@ import type {
   AppSettings,
   FrameFeature,
   GameProfileId,
+  KnownMap,
   MatchAnalysis,
   MatchEvent,
   VideoMeta,
 } from './types';
-import { runLocalAnalysis, selectKeyframeTimes } from './analysis/heuristics';
+import { computeIntensity, runLocalAnalysis, selectKeyframeTimes } from './analysis/heuristics';
 import { computeMetrics } from './analysis/metrics';
+import {
+  detectMatchSegments,
+  sliceFeatures,
+  wholeVideoSegment,
+  type Segment,
+} from './analysis/segmentation';
+import { identifyMap, unknownMap } from './analysis/mapmatch';
+import { buildMapFingerprint } from './video/fingerprint';
 import {
   extractKeyframes,
   loadVideo,
@@ -17,11 +26,22 @@ import {
 } from './video/sampler';
 
 /**
- * Orchestration d'une analyse complete. L'interface ne fait qu'appeler
- * `analyzeVideoFile` et afficher la progression ; toute la logique est ici.
+ * Orchestration d'une analyse complete.
+ *
+ * Le fichier est parcouru une seule fois, quelle que soit sa longueur. On en
+ * tire d'abord le signal brut, puis on decoupe la rediffusion en matchs, et
+ * chaque match est ensuite analyse comme s'il s'agissait d'un fichier
+ * autonome — horodatages remis a zero compris.
  */
 
-export type PipelineStage = 'chargement' | 'echantillonnage' | 'analyse' | 'images-cles' | 'termine';
+export type PipelineStage =
+  | 'chargement'
+  | 'echantillonnage'
+  | 'decoupage'
+  | 'analyse'
+  | 'carte'
+  | 'images-cles'
+  | 'termine';
 
 export interface PipelineProgress {
   stage: PipelineStage;
@@ -34,24 +54,29 @@ export interface PipelineOptions {
   file: File;
   profile: GameProfileId;
   settings: AppSettings;
+  /** Arenes deja connues de l'appareil, pour reconnaitre la carte de chaque match. */
+  mapLibrary?: readonly KnownMap[];
   title?: string;
   onProgress?: (p: PipelineProgress) => void;
   signal?: AbortSignal;
 }
 
 export interface PipelineResult {
-  analysis: MatchAnalysis;
-  /** Images retenues pour l'IA, conservees en memoire le temps de la session. */
-  keyframes: Keyframe[];
-  /** Conserve pour la relecture ; a revoquer quand on quitte l'analyse. */
+  sessionId: string;
+  analyses: MatchAnalysis[];
+  /** Images cles par identifiant d'analyse, conservees le temps de la session. */
+  keyframes: Map<string, Keyframe[]>;
+  segments: Segment[];
+  sourceDurationS: number;
+  /** A revoquer quand on quitte la session. */
   objectUrl: string;
   videoElement: HTMLVideoElement;
 }
 
-function newId(): string {
+function newId(prefix: string): string {
   const crypto = globalThis.crypto;
-  if (crypto && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `match-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  if (crypto && 'randomUUID' in crypto) return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Titre par defaut lisible : nom du fichier sans extension. */
@@ -62,72 +87,177 @@ export function defaultTitle(meta: VideoMeta): string {
 
 export async function analyzeVideoFile(opts: PipelineOptions): Promise<PipelineResult> {
   const { file, profile, settings, onProgress, signal } = opts;
+  const library = opts.mapLibrary ?? [];
 
   onProgress?.({ stage: 'chargement', ratio: 0, message: 'Lecture du fichier video...' });
   const loaded = await loadVideo(file);
-
-  const forward = (stage: PipelineStage, label: string) => (p: SampleProgress) =>
-    onProgress?.({
-      stage,
-      ratio: p.total > 0 ? p.done / p.total : 0,
-      message: `${label} ${p.done}/${p.total}`,
-    });
+  const sourceDurationS = loaded.meta.durationS;
 
   const sampleOptions: Parameters<typeof sampleVideoFeatures>[1] = {
     samplingHz: settings.samplingHz,
-    onProgress: forward('echantillonnage', 'Image'),
+    onProgress: (p: SampleProgress) =>
+      onProgress?.({
+        stage: 'echantillonnage',
+        ratio: p.total > 0 ? p.done / p.total : 0,
+        message: `Image ${p.done}/${p.total}`,
+      }),
   };
   if (signal) sampleOptions.signal = signal;
 
   const features: FrameFeature[] = await sampleVideoFeatures(loaded.element, sampleOptions);
 
-  onProgress?.({ stage: 'analyse', ratio: 0.5, message: 'Detection des phases de jeu...' });
-  const local = runLocalAnalysis(features, { samplingHz: settings.samplingHz });
-  const metrics = computeMetrics({
-    features,
-    engagements: local.engagements,
-    events: local.events,
-    durationS: loaded.meta.durationS,
-    samplingHz: settings.samplingHz,
-    profile,
+  onProgress?.({ stage: 'decoupage', ratio: 0.5, message: 'Recherche des matchs...' });
+  const intensity = computeIntensity(features, settings.samplingHz);
+  const segments = resolveSegments(features, intensity, settings, sourceDurationS);
+
+  const sessionId = newId('session');
+  const baseTitle = opts.title?.trim() || defaultTitle(loaded.meta);
+  const now = new Date().toISOString();
+
+  const analyses: MatchAnalysis[] = [];
+  const keyframes = new Map<string, Keyframe[]>();
+
+  for (const [position, segment] of segments.entries()) {
+    const label = segments.length > 1 ? ` (match ${segment.index}/${segments.length})` : '';
+    const segmentRatio = (step: number) => (position + step) / segments.length;
+
+    onProgress?.({
+      stage: 'analyse',
+      ratio: segmentRatio(0.1),
+      message: `Analyse du match ${segment.index}/${segments.length}`,
+    });
+
+    const segmentFeatures = sliceFeatures(features, segment);
+    const durationS = segment.endS - segment.startS;
+    const local = runLocalAnalysis(segmentFeatures, { samplingHz: settings.samplingHz });
+    const metrics = computeMetrics({
+      features: segmentFeatures,
+      engagements: local.engagements,
+      events: local.events,
+      durationS,
+      samplingHz: settings.samplingHz,
+      profile,
+    });
+
+    onProgress?.({
+      stage: 'carte',
+      ratio: segmentRatio(0.4),
+      message: `Identification de l arene${label}`,
+    });
+
+    const fingerprintOptions: Parameters<typeof buildMapFingerprint>[3] = {};
+    if (signal) fingerprintOptions.signal = signal;
+    const fingerprint = await buildMapFingerprint(
+      loaded.element,
+      segment.startS,
+      segment.endS,
+      fingerprintOptions,
+    );
+    const identification = library.length > 0 ? identifyMap(fingerprint, library) : unknownMap();
+
+    onProgress?.({
+      stage: 'images-cles',
+      ratio: segmentRatio(0.6),
+      message: `Extraction des images cles${label}`,
+    });
+
+    const segmentIntensity = computeIntensity(segmentFeatures, settings.samplingHz);
+    const relativeTimes = selectKeyframeTimes(
+      segmentFeatures,
+      segmentIntensity,
+      settings.aiFrameBudget,
+    );
+    const keyframeOptions: Parameters<typeof extractKeyframes>[2] = {};
+    if (signal) keyframeOptions.signal = signal;
+    const extracted = await extractKeyframes(
+      loaded.element,
+      relativeTimes.map((t) => t + segment.startS),
+      keyframeOptions,
+    );
+    // Les images sont prelevees dans le fichier source, mais l'analyse raisonne
+    // en temps de match : on repasse donc en horodatage relatif.
+    const segmentKeyframes = extracted.map((frame, i) => ({
+      ...frame,
+      t: relativeTimes[i] ?? frame.t - segment.startS,
+    }));
+
+    const analysis: MatchAnalysis = {
+      id: newId('match'),
+      title: segments.length > 1 ? `${baseTitle} — match ${segment.index}` : baseTitle,
+      createdAt: now,
+      updatedAt: now,
+      profile,
+      video: { ...loaded.meta, durationS, sourceDurationS },
+      sourceOffsetS: segment.startS,
+      segmentIndex: segment.index,
+      segmentCount: segments.length,
+      sessionId,
+      map: {
+        mapId: identification.mapId,
+        mapName: identification.mapName,
+        confidence: identification.confidence,
+        confirmed: false,
+        distance: identification.distance,
+      },
+      mapFingerprint: fingerprint,
+      settings: {
+        samplingHz: settings.samplingHz,
+        aiEnabled: settings.aiEnabled,
+        aiModel: settings.aiModel,
+        aiFrameBudget: settings.aiFrameBudget,
+      },
+      features: segmentFeatures,
+      events: local.events,
+      metrics,
+      notes: '',
+    };
+
+    analyses.push(analysis);
+    keyframes.set(analysis.id, segmentKeyframes);
+  }
+
+  onProgress?.({
+    stage: 'termine',
+    ratio: 1,
+    message:
+      segments.length > 1
+        ? `${segments.length} matchs analyses.`
+        : 'Analyse locale terminee.',
   });
 
-  onProgress?.({ stage: 'images-cles', ratio: 0, message: 'Extraction des images cles...' });
-  const times = selectKeyframeTimes(features, local.intensity, settings.aiFrameBudget);
-  const keyframeOptions: Parameters<typeof extractKeyframes>[2] = {
-    onProgress: forward('images-cles', 'Image cle'),
-  };
-  if (signal) keyframeOptions.signal = signal;
-  const keyframes = await extractKeyframes(loaded.element, times, keyframeOptions);
-
-  const now = new Date().toISOString();
-  const analysis: MatchAnalysis = {
-    id: newId(),
-    title: opts.title?.trim() || defaultTitle(loaded.meta),
-    createdAt: now,
-    updatedAt: now,
-    profile,
-    video: loaded.meta,
-    settings: {
-      samplingHz: settings.samplingHz,
-      aiEnabled: settings.aiEnabled,
-      aiModel: settings.aiModel,
-      aiFrameBudget: settings.aiFrameBudget,
-    },
-    features,
-    events: local.events,
-    metrics,
-    notes: '',
-  };
-
-  onProgress?.({ stage: 'termine', ratio: 1, message: 'Analyse locale terminee.' });
-
   return {
-    analysis,
+    sessionId,
+    analyses,
     keyframes,
+    segments,
+    sourceDurationS,
     objectUrl: loaded.objectUrl,
     videoElement: loaded.element,
   };
+}
+
+/**
+ * Choisit le decoupage a appliquer.
+ *
+ * Si le decoupage automatique ne trouve rien — une video courte, ou une
+ * captation dont le signal ne se prete pas a la detection — on retombe sur le
+ * fichier entier plutot que de ne rien rendre au joueur.
+ */
+function resolveSegments(
+  features: readonly FrameFeature[],
+  intensity: readonly number[],
+  settings: AppSettings,
+  durationS: number,
+): Segment[] {
+  if (!settings.autoSegment) return [wholeVideoSegment(durationS)];
+
+  const { segments } = detectMatchSegments(features, intensity, {
+    samplingHz: settings.samplingHz,
+    minMatchS: settings.minMatchS,
+    minGapS: settings.minGapS,
+  });
+
+  return segments.length > 0 ? segments : [wholeVideoSegment(durationS)];
 }
 
 /**

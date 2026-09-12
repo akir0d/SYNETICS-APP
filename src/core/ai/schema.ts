@@ -29,12 +29,31 @@ export const AiDrillSchema = z.object({
   focus: z.string().describe('Competence travaillee : visee, placement, communication, rythme...'),
 });
 
+/**
+ * Description de l'arene par l'IA.
+ *
+ * On lui demande volontairement de *decrire* ce qu'elle voit, jamais de nommer
+ * une carte EVA : elle n'a aucun moyen de connaitre le catalogue officiel, et
+ * un nom invente serait plus nuisible qu'une description juste. Ce texte aide
+ * le joueur a nommer lui-meme l'arene, ce qui alimente ensuite la
+ * reconnaissance automatique.
+ */
+export const AiEnvironmentSchema = z.object({
+  description: z
+    .string()
+    .describe("L'arene en 1 a 2 phrases : materiaux, couleurs, eclairage, echelle"),
+  landmarks: z
+    .array(z.string())
+    .describe('2 a 4 elements remarquables permettant de reconnaitre le lieu'),
+});
+
 export const AiAnalysisSchema = z.object({
   summary: z.string().describe('Synthese du match en 3 a 5 phrases, adressee au joueur'),
   strengths: z.array(z.string()).describe('Points forts observes, 2 a 4 elements'),
   weaknesses: z.array(z.string()).describe('Axes de progres observes, 2 a 4 elements'),
   drills: z.array(AiDrillSchema).describe('2 a 3 exercices concrets pour la prochaine session'),
   timeline: z.array(AiTimelineNoteSchema).describe('Moments cles reperes sur les images'),
+  environment: AiEnvironmentSchema.describe("Description de l'arene, sans jamais nommer une carte EVA"),
   caveats: z
     .string()
     .describe("Ce que les images ne permettent pas de juger. Sois explicite sur l'incertitude."),

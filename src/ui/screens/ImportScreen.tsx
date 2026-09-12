@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
-import type { AppSettings, GameProfileId } from '../../core/types';
+import type { AppSettings, GameProfileId, KnownMap } from '../../core/types';
 import { GAME_PROFILES } from '../../core/types';
+import { formatDuration } from '../../core/analysis/metrics';
 import { analyzeVideoFile, type PipelineProgress, type PipelineResult } from '../../core/pipeline';
 import { AnalysisAbortedError } from '../../core/video/sampler';
 import { keepScreenAwake } from '../../platform';
@@ -8,17 +9,20 @@ import { keepScreenAwake } from '../../platform';
 const STAGE_LABEL: Record<PipelineProgress['stage'], string> = {
   chargement: 'Chargement de la video',
   echantillonnage: 'Lecture du signal video',
+  decoupage: 'Decoupage de la rediffusion',
   analyse: 'Detection des phases de jeu',
+  carte: 'Identification de l arene',
   'images-cles': 'Extraction des images cles',
   termine: 'Termine',
 };
 
 interface ImportScreenProps {
   settings: AppSettings;
+  mapLibrary: readonly KnownMap[];
   onComplete: (result: PipelineResult) => void;
 }
 
-export function ImportScreen({ settings, onComplete }: ImportScreenProps) {
+export function ImportScreen({ settings, mapLibrary, onComplete }: ImportScreenProps) {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
   const [profile, setProfile] = useState<GameProfileId>(settings.defaultProfile);
@@ -51,6 +55,7 @@ export function ImportScreen({ settings, onComplete }: ImportScreenProps) {
         file,
         profile,
         settings,
+        mapLibrary,
         title,
         onProgress: setProgress,
         signal: controller.signal,
@@ -161,6 +166,14 @@ export function ImportScreen({ settings, onComplete }: ImportScreenProps) {
           </div>
         )}
 
+        {settings.autoSegment && (
+          <div className="banner banner-info">
+            Decoupage automatique actif : une rediffusion de plusieurs heures est separee en
+            matchs distincts (pause d'au moins {settings.minGapS} s, match d'au moins{' '}
+            {formatDuration(settings.minMatchS)}). Chaque match devient une analyse autonome.
+          </div>
+        )}
+
         <div className="row">
           <button className="btn" onClick={start} disabled={!file || busy}>
             {busy ? 'Analyse en cours...' : "Lancer l'analyse locale"}
@@ -189,8 +202,9 @@ export function ImportScreen({ settings, onComplete }: ImportScreenProps) {
             camera qui bouge sans arret degrade la detection.
           </li>
           <li>
-            Une manche par fichier. Un enregistrement qui enchaine plusieurs manches fausse les
-            mesures de rythme et d'accalmie.
+            Pas besoin de decouper vous-meme : chargez la rediffusion entiere, l'application
+            separe les manches et analyse chacune a part. Le decoupage se regle dans les
+            Reglages, ou se desactive si votre fichier ne contient qu'un match.
           </li>
         </ul>
       </div>

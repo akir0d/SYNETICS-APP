@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import type { AppSettings, GameProfileId } from '../../core/types';
+import type { AppSettings, GameProfileId, KnownMap } from '../../core/types';
 import { AI_MODELS, GAME_PROFILES } from '../../core/types';
+import { formatDuration } from '../../core/analysis/metrics';
 import { detectPlatform } from '../../platform';
 
 interface SettingsScreenProps {
   settings: AppSettings;
+  maps: readonly KnownMap[];
   onChange: (settings: AppSettings) => void;
+  onDeleteMap: (id: string) => void;
 }
 
 const PLATFORM_LABEL: Record<ReturnType<typeof detectPlatform>, string> = {
@@ -14,7 +17,7 @@ const PLATFORM_LABEL: Record<ReturnType<typeof detectPlatform>, string> = {
   web: 'Navigateur',
 };
 
-export function SettingsScreen({ settings, onChange }: SettingsScreenProps) {
+export function SettingsScreen({ settings, maps, onChange, onDeleteMap }: SettingsScreenProps) {
   const [showKey, setShowKey] = useState(false);
   const platform = detectPlatform();
 
@@ -167,6 +170,109 @@ export function SettingsScreen({ settings, onChange }: SettingsScreenProps) {
       </div>
 
       <div className="card">
+        <h2>Decoupage des rediffusions</h2>
+
+        <div className="field">
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.autoSegment}
+              onChange={(e) => update('autoSegment', e.target.checked)}
+              style={{ width: 'auto', marginRight: 8 }}
+            />
+            Separer automatiquement les matchs d'une meme rediffusion
+          </label>
+          <p className="hint" style={{ margin: 0 }}>
+            Une captation de plusieurs heures contient en general plusieurs manches separees par
+            des temps morts. Chaque match devient une analyse autonome, avec ses propres mesures.
+            Desactivez si votre fichier ne contient qu'un seul match.
+          </p>
+        </div>
+
+        <div className="field">
+          <label htmlFor="minMatch">
+            Duree minimale d'un match : <b>{formatDuration(settings.minMatchS)}</b>
+          </label>
+          <input
+            id="minMatch"
+            type="range"
+            min={30}
+            max={600}
+            step={15}
+            value={settings.minMatchS}
+            disabled={!settings.autoSegment}
+            onChange={(e) => update('minMatchS', Number(e.target.value))}
+          />
+          <p className="hint" style={{ margin: 0 }}>
+            Tout bloc d'action plus court est ecarte : c'est ce qui evite qu'un echauffement ou un
+            faux depart devienne un match a part entiere.
+          </p>
+        </div>
+
+        <div className="field">
+          <label htmlFor="minGap">
+            Pause minimale entre deux matchs : <b>{settings.minGapS} s</b>
+          </label>
+          <input
+            id="minGap"
+            type="range"
+            min={10}
+            max={180}
+            step={5}
+            value={settings.minGapS}
+            disabled={!settings.autoSegment}
+            onChange={(e) => update('minGapS', Number(e.target.value))}
+          />
+          <p className="hint" style={{ margin: 0 }}>
+            En dessous de cette duree, un temps calme est considere comme une phase du match en
+            cours (rotation, attente de reapparition) et non comme une separation. Baissez si vos
+            manches s'enchainent vite, montez si un seul match se retrouve coupe en deux.
+          </p>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Arenes connues</h2>
+
+        {maps.length === 0 ? (
+          <p className="hint" style={{ marginBottom: 0 }}>
+            Aucune arene enregistree. L'application n'embarque pas le catalogue des cartes EVA :
+            elle apprend de vous. Nommez l'arene d'un match depuis son rapport, et les matchs
+            suivants joues au meme endroit seront reconnus tout seuls.
+          </p>
+        ) : (
+          <>
+            <p className="hint">
+              Reconnaissance apprise sur cet appareil, a partir de la signature visuelle des
+              matchs que vous avez nommes.
+            </p>
+            <div className="event-list" style={{ maxHeight: 300 }}>
+              {maps.map((m) => (
+                <div className="event" key={m.id} style={{ cursor: 'default' }}>
+                  <time>{m.matchCount}×</time>
+                  <div>
+                    <div className="title">{m.name}</div>
+                    <div className="meta">
+                      Signature issue de {m.fingerprint.frames} images · mise a jour le{' '}
+                      {new Date(m.updatedAt).toLocaleDateString('fr-FR')}
+                    </div>
+                  </div>
+                  <button
+                    className="btn-ghost btn-danger"
+                    style={{ padding: '4px 9px' }}
+                    onClick={() => onDeleteMap(m.id)}
+                    aria-label={`Oublier l arene ${m.name}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="card">
         <h2>Ce que l'application sait faire, et ne sait pas faire</h2>
         <ul className="ai-list">
           <li>
@@ -180,6 +286,16 @@ export function SettingsScreen({ settings, onChange }: SettingsScreenProps) {
           <li>
             Aucune connexion a un compte eva.gg : EVA ne publie pas d'API ouverte. L'analyse part
             de vos propres enregistrements.
+          </li>
+          <li>
+            Le decoupage repose sur le mouvement a l'image : il separe des blocs de jeu de temps
+            morts, il ne lit pas un tableau des scores. Verifiez le decoupage sur une premiere
+            rediffusion avant de lui faire confiance les yeux fermes.
+          </li>
+          <li>
+            La reconnaissance d'arene compare des <b>signatures de couleur et de lumiere</b>, pas
+            la geometrie du lieu. Deux arenes a l'ambiance tres proche peuvent etre confondues :
+            l'application prefere alors afficher un doute plutot que trancher au hasard.
           </li>
         </ul>
       </div>

@@ -39,6 +39,7 @@ export function LibraryScreen({ analyses, onOpen, onDelete, onNew }: LibraryScre
               <h3>{a.title}</h3>
               <div className="sub">
                 {GAME_PROFILES[a.profile].name} · {new Date(a.createdAt).toLocaleDateString('fr-FR')}
+                {a.segmentCount > 1 ? ` · match ${a.segmentIndex}/${a.segmentCount}` : ''}
               </div>
               <div className="stats">
                 <span>{formatDuration(a.metrics.durationS)}</span>
@@ -46,6 +47,11 @@ export function LibraryScreen({ analyses, onOpen, onDelete, onNew }: LibraryScre
                 <span>{Math.round(a.metrics.activeRatio * 100)} % actif</span>
               </div>
               <div className="row">
+                <span className="tag">
+                  {a.map.mapName
+                    ? `${a.map.mapName}${a.map.confirmed ? '' : ' ?'}`
+                    : 'Arene inconnue'}
+                </span>
                 {a.ai ? <span className="tag">Analyse IA</span> : <span className="tag">Local seul</span>}
                 {a.events.some((e) => e.source === 'manual') && <span className="tag">Annote</span>}
               </div>

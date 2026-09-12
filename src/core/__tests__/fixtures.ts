@@ -9,6 +9,12 @@ export interface SyntheticOptions {
   redFlashes: number[];
   /** Instants ou l'image change brutalement (mort, respawn, changement de vue). */
   cuts: number[];
+  /**
+   * Mouvement de fond hors action. La valeur par defaut represente une camera
+   * qui vit legerement ; passer une valeur tres basse imite un ecran fige
+   * (menu, briefing, attente entre deux manches).
+   */
+  idleDiff?: number;
 }
 
 /**
@@ -28,7 +34,7 @@ export function syntheticFeatures(opts: SyntheticOptions): FrameFeature[] {
     // Un peu de bruit deterministe : une video reelle n'est jamais parfaitement stable.
     const noise = ((i * 37) % 11) / 1000;
 
-    let diff = (inAction ? 0.22 : 0.03) + noise;
+    let diff = (inAction ? 0.22 : opts.idleDiff ?? 0.03) + noise;
     let redBias = 0.02 + noise;
     const saturation = (inAction ? 0.09 : 0.02) + noise;
 

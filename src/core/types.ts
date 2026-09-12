@@ -132,6 +132,11 @@ export interface AiTimelineNote {
   comment: string;
 }
 
+export interface AiEnvironment {
+  description: string;
+  landmarks: string[];
+}
+
 export interface AiReport {
   model: string;
   generatedAt: string;
@@ -141,6 +146,8 @@ export interface AiReport {
   weaknesses: string[];
   drills: AiDrill[];
   timeline: AiTimelineNote[];
+  /** Ce que l'IA voit de l'arene. Aide a nommer une carte encore inconnue. */
+  environment: AiEnvironment;
   /** Mise en garde de l'IA sur ce qu'elle n'a pas pu juger. */
   caveats: string;
   usage?: { inputTokens: number; outputTokens: number };
@@ -205,10 +212,56 @@ export const GAME_PROFILES: Record<GameProfileId, GameProfile> = {
 export interface VideoMeta {
   name: string;
   sizeBytes: number;
+  /** Duree de ce match. Egale a `sourceDurationS` quand le fichier n'en contient qu'un. */
   durationS: number;
+  /** Duree totale du fichier source, rediffusion complete comprise. */
+  sourceDurationS: number;
   width: number;
   height: number;
   mimeType: string;
+}
+
+/**
+ * Signature visuelle d'une arene.
+ *
+ * Elle ne reconnait aucune carte EVA d'origine : elle sert a rapprocher deux
+ * matchs joues au meme endroit. C'est le joueur qui nomme une arene la
+ * premiere fois ; l'application la reconnait ensuite toute seule.
+ */
+export interface MapFingerprint {
+  /** Histogramme de teinte pondere par la saturation, 12 classes, somme = 1. */
+  hue: number[];
+  /** Histogramme de luminance, 8 classes, somme = 1. */
+  luma: number[];
+  /** Moyenne RVB par zone d'image, grille 4x3, valeurs 0..255. */
+  zones: number[];
+  /** Nombre d'images agregees dans cette signature. */
+  frames: number;
+}
+
+/** Arene enregistree dans la bibliotheque de cartes de l'appareil. */
+export interface KnownMap {
+  id: string;
+  name: string;
+  fingerprint: MapFingerprint;
+  /** Nombre de matchs ayant servi a affiner cette signature. */
+  matchCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Rattachement d'un match a une arene. */
+export interface MapIdentification {
+  /** Identifiant de l'arene reconnue, ou null tant qu'aucune ne correspond. */
+  mapId: string | null;
+  /** Nom affiche. Vide tant que le joueur n'a pas nomme l'arene. */
+  mapName: string;
+  /** 0 a 1. Vaut 1 quand le joueur a confirme lui-meme. */
+  confidence: number;
+  /** Le joueur a-t-il valide ce rattachement ? */
+  confirmed: boolean;
+  /** Distance a la signature de reference, pour expliquer un doute. */
+  distance: number | null;
 }
 
 export interface AnalysisSettingsSnapshot {
@@ -225,6 +278,22 @@ export interface MatchAnalysis {
   updatedAt: string;
   profile: GameProfileId;
   video: VideoMeta;
+  /**
+   * Debut de ce match dans le fichier source, en secondes.
+   *
+   * Les horodatages internes (mesures, evenements) repartent de zero a chaque
+   * match : les mesures restent ainsi lisibles. Seule la lecture video ajoute
+   * ce decalage pour retrouver le bon endroit dans la rediffusion.
+   */
+  sourceOffsetS: number;
+  /** Rang du match dans la rediffusion, a partir de 1. */
+  segmentIndex: number;
+  /** Nombre de matchs detectes dans la meme rediffusion. */
+  segmentCount: number;
+  /** Identifiant commun a tous les matchs issus d'un meme fichier. */
+  sessionId: string;
+  map: MapIdentification;
+  mapFingerprint?: MapFingerprint;
   settings: AnalysisSettingsSnapshot;
   features: FrameFeature[];
   events: MatchEvent[];
@@ -250,6 +319,12 @@ export interface AppSettings {
   aiFrameBudget: number;
   defaultProfile: GameProfileId;
   playerName: string;
+  /** Decouper automatiquement une rediffusion en matchs distincts. */
+  autoSegment: boolean;
+  /** Duree minimale d'un match retenu, en secondes. */
+  minMatchS: number;
+  /** Duree minimale d'une pause entre deux matchs, en secondes. */
+  minGapS: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -265,4 +340,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiFrameBudget: 24,
   defaultProfile: 'tdm',
   playerName: '',
+  autoSegment: true,
+  minMatchS: 90,
+  minGapS: 40,
 };

@@ -81,3 +81,22 @@ export function robustZ(xs: readonly number[]): number[] {
   if (d <= 1e-9) return xs.map(() => 0);
   return xs.map((x) => (x - m) / d);
 }
+
+/**
+ * Mediane glissante centree, fenetre en nombre d'echantillons.
+ *
+ * Contrairement a la moyenne glissante, un pic bref ne deplace pas le
+ * resultat : c'est ce qui permet de mesurer le fond d'une scene sans que
+ * l'evenement qu'on cherche a detecter ne vienne relever sa propre reference.
+ */
+export function movingMedian(xs: readonly number[], window: number): number[] {
+  if (window <= 1 || xs.length === 0) return [...xs];
+  const half = Math.floor(window / 2);
+  const out: number[] = new Array(xs.length);
+  for (let i = 0; i < xs.length; i++) {
+    const from = Math.max(0, i - half);
+    const to = Math.min(xs.length - 1, i + half);
+    out[i] = median(xs.slice(from, to + 1));
+  }
+  return out;
+}

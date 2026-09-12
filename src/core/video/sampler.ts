@@ -98,6 +98,7 @@ export function loadVideo(file: File): Promise<LoadedVideo> {
           name: file.name,
           sizeBytes: file.size,
           durationS,
+          sourceDurationS: durationS,
           width: element.videoWidth,
           height: element.videoHeight,
           mimeType: file.type || 'video/mp4',

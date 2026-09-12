@@ -13,7 +13,42 @@ Une seule base de code, trois cibles : **Android**, **PC** (Windows / macOS / Li
 
 ## Ce que fait l'application
 
-### 1. Analyse locale, hors-ligne, sans cle API
+### 1. Decoupage automatique d'une rediffusion
+
+Chargez la captation complete d'une session, meme de trois heures : l'application y retrouve
+les manches et en fait des analyses separees.
+
+Le moteur ne lit pas un tableau des scores, il s'appuie sur une constante physique du free
+roaming : en jeu, le joueur bouge la tete en permanence, donc l'image bouge en permanence ;
+entre deux manches, elle est comparativement figee. Il mesure donc la densite de mouvement,
+isole les blocs de jeu, fusionne les accalmies internes (rotation, attente de reapparition) et
+ne coupe que sur les vrais temps morts.
+
+Chaque match devient une analyse autonome, avec ses horodatages remis a zero. La lecture video
+retrouve seule sa position dans le fichier d'origine : rattachez la rediffusion entiere et le
+lecteur se cale directement sur le match ouvert.
+
+Deux reglages pilotent le decoupage : la duree minimale d'un match et la pause minimale entre
+deux. Il se desactive entierement si vos fichiers ne contiennent qu'un match.
+
+### 2. Reconnaissance de l'arene
+
+L'application **n'embarque pas le catalogue des cartes EVA** — il n'existe aucune source
+publique pour le construire. Elle apprend de vous : vous nommez une arene une fois, depuis le
+rapport d'un match ; les matchs suivants joues au meme endroit sont reconnus tout seuls.
+
+Techniquement, chaque match produit une *signature visuelle* : histogramme de teinte pondere par
+la saturation, histogramme de luminance, et moyennes de couleur par zone d'image, agreges sur
+une douzaine d'images reparties sur la manche. La geometrie se moyenne — le joueur tourne la
+tete sans arret — et il ne reste que l'identite chromatique du lieu : couleur des murs,
+eclairage, repartition clair/sombre.
+
+Une arene n'est retenue que si elle est a la fois assez proche *et* nettement devant la
+suivante. Deux arenes qui se ressemblent produisent un doute affiche, pas un choix arbitraire.
+Chaque confirmation affine la signature de reference, ponderee par le nombre de matchs deja
+integres : une arene connue de longue date ne bascule pas sur un enregistrement atypique.
+
+### 3. Analyse locale, hors-ligne, sans cle API
 
 Le moteur echantillonne la video et mesure, image par image, quatre signaux : luminance, dominance
 du rouge, difference avec l'image precedente, et part de pixels satures. Il en deduit :
@@ -27,13 +62,13 @@ du rouge, difference avec l'image precedente, et part de pixels satures. Il en d
 
 Tout cela fonctionne sans reseau et sans compte.
 
-### 2. Marquage manuel
+### 4. Marquage manuel
 
 Pendant la relecture, vous posez vos propres reperes (elimination, mort, objectif, reapparition,
 note) au clavier ou au doigt. Ces marquages alimentent les compteurs et servent de verite terrain
 transmise a l'IA.
 
-### 3. Analyse IA, facultative
+### 5. Analyse IA, facultative
 
 Les images cles — les pics d'action, completes par une grille couvrant les phases calmes — sont
 envoyees a Claude, qui renvoie une analyse **structuree** : synthese, points forts, axes de
@@ -58,6 +93,16 @@ Ces limites sont assumees et visibles dans l'interface ; mieux vaut les connaitr
   expositions passent entre les images. L'application le signale dans les Reglages.
 - **Les scores sont des reperes de lecture**, calcules sur votre propre video. Ils servent a
   comparer vos matchs entre eux, pas a vous situer dans un classement EVA.
+- **Le decoupage separe des blocs de jeu de temps morts**, il ne lit pas un tableau des scores.
+  Deux manches enchainees sans pause franche resteront collees (un garde-fou de duree maximale
+  tente alors de les separer au creux d'activite). Verifiez le decoupage sur une premiere
+  rediffusion avant de lui faire confiance les yeux fermes.
+- **La reconnaissance d'arene compare des couleurs et des lumieres, pas de la geometrie.** Elle
+  ne peut rien reconnaitre tant que vous n'avez rien nomme, et deux arenes a l'ambiance tres
+  proche peuvent la mettre en echec — auquel cas elle affiche un doute plutot que de trancher.
+- **L'IA decrit l'arene, elle ne la nomme pas.** Elle n'a aucun moyen de connaitre le catalogue
+  EVA ; le prompt lui interdit explicitement d'inventer un nom de carte. Sa description
+  (materiaux, couleurs, eclairage, points de repere) sert a vous aider a nommer vous-meme.
 - **L'IA ne voit que des images fixes**, pas la partie en continu. Elle doit le dire elle-meme dans
   la section « limites » de son rapport, et son niveau de confiance est affiche pour chaque
   observation.
@@ -153,9 +198,16 @@ Le **controle bout en bout** merite une explication : il genere une vraie video 
 (canvas + MediaRecorder), avec des phases d'action et des voiles de degats a des instants connus,
 puis la fait traverser le code de production — decodage, recherche d'instant, lecture de pixels,
 detection, extraction des images cles — et verifie que le moteur retrouve la structure injectee.
-C'est le seul moyen de valider ce que les tests unitaires ne peuvent pas voir : il a deja rattrape
-deux defauts reels, une detection aveugle sur fond stable et un echantillonnage trente fois trop
-lent.
+La video de test imite une rediffusion : deux manches jouees dans deux arenes de couleurs
+opposees, separees par des ecrans d'attente. Le controle verifie le decoupage, la remise a zero
+des horodatages, la detection des degats, l'extraction des images cles, et que les deux arenes ne
+sont ni confondues entre elles ni confondues avec une arene inconnue.
+
+C'est le seul moyen de valider ce que les tests unitaires ne peuvent pas voir. Il a deja rattrape
+cinq defauts reels : une detection aveugle sur fond stable, un echantillonnage trente fois trop
+lent, un pas d'echantillonnage plus long qu'un voile de degats, une fenetre de lissage qui
+comblait les pauses courtes et collait deux manches, et un decor aux tons chauds compte comme une
+pluie de degats subis.
 
 Sur une machine Linux sans serveur graphique : `npm run test:e2e:headless`.
 
@@ -170,7 +222,8 @@ src/
 │  ├─ pipeline.ts        Orchestration d'une analyse complete
 │  ├─ export.ts          Exports JSON / CSV / Markdown
 │  ├─ video/sampler.ts   Decodage, echantillonnage, extraction d'images cles
-│  ├─ analysis/          Statistiques robustes, heuristiques, mesures
+│  ├─ video/fingerprint  Signature visuelle d'une arene
+│  ├─ analysis/          Statistiques robustes, heuristiques, decoupage, mesures, cartes
 │  ├─ ai/                Schema de sortie, prompts, client Claude
 │  └─ storage/           Persistance locale (IndexedDB, reglages)
 ├─ ui/                   Composants et ecrans React
@@ -188,6 +241,9 @@ Le dossier `core/` ne connait ni React, ni Electron, ni Capacitor : c'est lui qu
 | Reglage | Defaut | Effet |
 | --- | --- | --- |
 | Images analysees par seconde | 3 | Finesse de detection. Sous 3, des expositions sont manquees. |
+| Decoupage automatique | actif | Separe les manches d'une meme rediffusion. |
+| Duree minimale d'un match | 90 s | En dessous, un bloc d'action est ecarte comme du bruit. |
+| Pause minimale entre deux matchs | 40 s | En dessous, un temps calme est une phase du match en cours. |
 | Images cles envoyees a l'IA | 24 | Qualite de l'analyse IA, et son cout. |
 | Modele | `claude-opus-5` | `claude-sonnet-5` et `claude-haiku-4-5` sont proposes, moins chers. |
 

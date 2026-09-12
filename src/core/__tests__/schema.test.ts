@@ -34,6 +34,7 @@ describe('schema de sortie IA', () => {
     expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
       'caveats',
       'drills',
+      'environment',
       'strengths',
       'summary',
       'timeline',
@@ -50,6 +51,7 @@ describe('schema de sortie IA', () => {
       timeline: [
         { t: 42.5, type: 'death', confidence: 0.8, label: 'Mort au centre', comment: 'Angle ouvert' },
       ],
+      environment: { description: 'Hangar sombre', landmarks: ['Passerelle'] },
       caveats: 'Images echantillonnees.',
     });
     expect(parsed.success).toBe(true);
@@ -62,6 +64,7 @@ describe('schema de sortie IA', () => {
       weaknesses: [],
       drills: [],
       timeline: [{ t: 1, type: 'scene_cut', confidence: 0.5, label: 'a', comment: 'b' }],
+      environment: { description: 'x', landmarks: [] },
       caveats: '',
     });
     expect(parsed.success).toBe(false);
@@ -74,6 +77,7 @@ describe('schema de sortie IA', () => {
       weaknesses: [],
       drills: [],
       timeline: [{ t: 1, type: 'kill', confidence: 1.4, label: 'a', comment: 'b' }],
+      environment: { description: 'x', landmarks: [] },
       caveats: '',
     });
     expect(parsed.success).toBe(false);

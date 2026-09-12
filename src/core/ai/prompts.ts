@@ -15,6 +15,7 @@ Regles absolues :
 - Chaque entree de timeline doit reprendre exactement l'horodatage d'une des images fournies.
 - Le champ confidence reflete ta certitude reelle : 0,9 pour un fait lisible a l'ecran, 0,4 pour une deduction, moins si tu extrapoles.
 - Des images echantillonnees ne montrent pas la partie en continu : dis-le dans caveats plutot que de combler les trous.
+- Tu ne connais pas le catalogue de cartes d'EVA : dans le champ environment, tu decris ce que tu vois (materiaux, couleurs, eclairage, structures) et tu ne proposes jamais un nom de carte officiel.
 - Le conseil doit etre executable en arene physique (placement, rythme de deplacement, gestion de couverture, communication), pas une generalite de jeu video.
 - Tu ecris en francais, en tutoyant le joueur.`;
 
@@ -24,6 +25,10 @@ export interface AnalysisContext {
   playerName: string;
   frameTimes: readonly number[];
   notes: string;
+  /** Nom de l'arene quand le joueur l'a deja renseignee. */
+  mapName?: string;
+  /** Rang du match dans la rediffusion, quand elle en contenait plusieurs. */
+  segment?: { index: number; count: number };
 }
 
 /** Partie variable du prompt : elle vient apres les images, dans le message utilisateur. */
@@ -33,6 +38,10 @@ export function buildAnalysisInstruction(ctx: AnalysisContext): string {
 
   const lines = [
     `Mode de jeu : ${profile.name} — ${profile.description}`,
+    ctx.segment && ctx.segment.count > 1
+      ? `Extrait : match ${ctx.segment.index} sur ${ctx.segment.count} d'une meme rediffusion.`
+      : null,
+    ctx.mapName ? `Arene : ${ctx.mapName} (nom donne par le joueur).` : null,
     `Reapparition : ${profile.respawn ? 'oui' : 'non, une mort est definitive sur la manche'}`,
     ctx.playerName ? `Joueur analyse : ${ctx.playerName}` : null,
     '',

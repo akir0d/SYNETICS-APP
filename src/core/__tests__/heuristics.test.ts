@@ -91,6 +91,30 @@ describe('moteur d analyse local', () => {
     expect(detectExposure(features, DEFAULT_HEURISTICS)).toEqual([]);
   });
 
+  it('ne prend pas une arene aux tons chauds pour une pluie de degats', () => {
+    // Regression : un decor orange ou rouge a un fond naturellement riche en
+    // rouge. Avec une reference calculee sur tout le match, chaque variation
+    // du decor franchissait le seuil et le joueur se voyait attribuer des
+    // dizaines de degats subis imaginaires.
+    const step = 1 / 3;
+    const features = Array.from({ length: 120 }, (_, i) => {
+      const chaud = 0.3 + Math.sin(i / 7) * 0.03;
+      const flash = i === 30 || i === 80;
+      return {
+        t: i * step,
+        luma: 0.45,
+        redBias: flash ? 0.55 : chaud,
+        diff: 0.1,
+        saturation: 0.05,
+      };
+    });
+
+    const events = detectExposure(features, { ...DEFAULT_HEURISTICS, samplingHz: 3 });
+    expect(events).toHaveLength(2);
+    expect(events[0]!.t).toBeCloseTo(30 * step, 3);
+    expect(events[1]!.t).toBeCloseTo(80 * step, 3);
+  });
+
   it('detecte les coupures franches', () => {
     const features = syntheticFeatures(BASE);
     const cuts = detectSceneCuts(features, DEFAULT_HEURISTICS);

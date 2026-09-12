@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+dist-e2e/
+release/
+ios/
+.vite/
+*.local
+.DS_Store
+.env
+.env.local
+*.tsbuildinfo

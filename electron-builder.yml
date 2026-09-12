@@ -1,0 +1,21 @@
+appId: gg.synetics.evaanalyzer
+productName: SYNETICS
+directories:
+  output: release
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+win:
+  target:
+    - nsis
+    - portable
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Game
+mac:
+  target:
+    - dmg
+  category: public.app-category.sports

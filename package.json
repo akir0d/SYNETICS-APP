@@ -1,0 +1,44 @@
+{
+  "name": "synetics-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Analyse IA de matchs EVA (eva.gg) a partir de vos videos - Android & PC",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false",
+    "electron:dev": "SYNETICS_DEV_SERVER=http://localhost:5173 electron .",
+    "electron:start": "npm run build && electron .",
+    "electron:dist": "npm run build && electron-builder",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "test:e2e": "vite build --config tools/e2e/vite.config.ts && electron --no-sandbox tools/e2e/run.cjs",
+    "test:all": "npm run test && npm run test:e2e",
+    "test:e2e:headless": "vite build --config tools/e2e/vite.config.ts && xvfb-run -a electron --no-sandbox tools/e2e/run.cjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  }
+}

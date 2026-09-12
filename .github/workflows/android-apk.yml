@@ -1,0 +1,156 @@
+name: APK Android
+
+# Construit l'APK installable de SYNETICS.
+#
+# Le SDK Android ne peut pas etre telecharge depuis tous les environnements de
+# developpement (le canal de distribution de Google est parfois bloque par une
+# politique reseau) : cette chaine le fait donc ici, ou le SDK est deja present,
+# et publie l'APK en telechargement direct.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publier_release:
+        description: "Publier l'APK dans une release telechargeable"
+        type: boolean
+        default: true
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'src/**'
+      - 'android/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'capacitor.config.ts'
+      - 'vite.config.ts'
+      - '.github/workflows/android-apk.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: Construire l'APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Installer le JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Accepter les licences du SDK Android
+        # Le SDK est deja installe sur le runner ; seules les licences manquent.
+        # On cherche sdkmanager a plusieurs endroits : son chemin a deja change
+        # d'une image de runner a l'autre, et un echec ici bloquerait tout.
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER=""
+          for candidat in \
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" \
+            "$SDK/cmdline-tools/bin/sdkmanager" \
+            "$SDK/tools/bin/sdkmanager" \
+            "$(command -v sdkmanager || true)"
+          do
+            if [ -x "$candidat" ]; then SDKMANAGER="$candidat"; break; fi
+          done
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager introuvable sous $SDK" >&2
+            ls -la "$SDK" || true
+            exit 1
+          fi
+
+          echo "sdkmanager : $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+
+      - name: Installer les dependances
+        # Electron ne sert qu'a la version PC : inutile de telecharger son
+        # binaire de 100 Mo pour construire un APK.
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm ci
+
+      - name: Tests du moteur
+        run: npm test
+
+      - name: Compiler l'application web
+        run: npm run build
+
+      - name: Synchroniser le projet Android
+        run: npx cap sync android
+
+      - name: Construire l'APK
+        working-directory: android
+        run: |
+          ./gradlew --no-daemon assembleDebug \
+            -PsyneticsVersionCode=${{ github.run_number }} \
+            -PsyneticsVersionName="0.1.0.${{ github.run_number }}"
+
+      - name: Nommer l'APK
+        id: apk
+        run: |
+          mkdir -p artefacts
+          NOM="synetics-0.1.0.${{ github.run_number }}-${GITHUB_SHA::7}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "artefacts/$NOM"
+          echo "nom=$NOM" >> "$GITHUB_OUTPUT"
+          echo "chemin=artefacts/$NOM" >> "$GITHUB_OUTPUT"
+          ls -lh artefacts/
+
+      - name: Deposer l'APK en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synetics-apk
+          path: artefacts/*.apk
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Publier la release telechargeable
+        if: github.event_name == 'push' || inputs.publier_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            printf 'APK de debogage construit automatiquement depuis `%s` (commit %s).\n\n' "$GITHUB_REF_NAME" "${GITHUB_SHA::7}"
+            printf 'Installation : autorisez sur le telephone les installations depuis des sources inconnues, puis ouvrez le fichier.\n\n'
+            printf "Cet APK est signe avec la cle de debogage d'Android : il s'installe directement, mais ne peut pas etre publie tel quel sur le Play Store.\n"
+          } > notes.md
+
+          # Une seule prerelease glissante : le lien de telechargement ne change
+          # jamais, seul le fichier qu'il sert est remplace a chaque construction.
+          if ! gh release view apk-latest > /dev/null 2>&1; then
+            gh release create apk-latest \
+              --title "SYNETICS - dernier APK Android" \
+              --notes-file notes.md \
+              --prerelease \
+              --target "$GITHUB_SHA"
+          else
+            gh release edit apk-latest --notes-file notes.md --target "$GITHUB_SHA"
+          fi
+
+          gh release upload apk-latest "${{ steps.apk.outputs.chemin }}" --clobber
+          echo "RELEASE_URL=$(gh release view apk-latest --json url --jq .url)" >> "$GITHUB_ENV"
+
+      - name: Recapitulatif
+        run: |
+          {
+            echo "### APK construit"
+            echo ""
+            echo "- Fichier : \`${{ steps.apk.outputs.nom }}\`"
+            echo "- Taille : $(du -h '${{ steps.apk.outputs.chemin }}' | cut -f1)"
+            echo "- Telechargement : onglet **Artifacts** de cette execution, ou la release \`apk-latest\`."
+          } >> "$GITHUB_STEP_SUMMARY"

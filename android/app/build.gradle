@@ -7,8 +7,11 @@ android {
         applicationId "gg.synetics.evaanalyzer"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Injectables par la chaine d'integration continue, pour que deux APK
+        // successifs s'installent l'un par-dessus l'autre au lieu d'etre
+        // refuses comme etant la meme version.
+        versionCode project.hasProperty('syneticsVersionCode') ? syneticsVersionCode.toInteger() : 1
+        versionName project.hasProperty('syneticsVersionName') ? syneticsVersionName : "0.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

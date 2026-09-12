@@ -99,7 +99,25 @@ npm run electron:dist         # genere les installeurs dans release/
 Les cibles produites sont definies dans `electron-builder.yml` : NSIS et portable pour Windows,
 AppImage et deb pour Linux, dmg pour macOS.
 
-### Version Android (Capacitor)
+### Version Android — recuperer l'APK
+
+Le plus simple : l'APK est construit automatiquement par l'integration continue
+(`.github/workflows/android-apk.yml`) et publie dans la release **`apk-latest`** du depot.
+Le lien de telechargement ne change jamais, seul le fichier qu'il sert est remplace a chaque
+construction.
+
+1. Onglet **Releases** du depot → `SYNETICS - dernier APK Android` → telechargez le `.apk`.
+2. Sur le telephone, autorisez l'installation depuis des sources inconnues, puis ouvrez le
+   fichier.
+
+Pour declencher une construction a la demande : onglet **Actions** → *APK Android* →
+*Run workflow*. L'APK apparait aussi en artefact de l'execution (conserve 90 jours).
+
+Cet APK est signe avec la cle de debogage d'Android : il s'installe directement sur n'importe
+quel appareil, mais ne peut pas etre publie tel quel sur le Play Store. Pour une publication,
+il faut le reconstruire en `assembleRelease` avec votre propre cle de signature.
+
+### Version Android — construire soi-meme (Capacitor)
 
 Pre-requis : **Android Studio** et un JDK 17.
 

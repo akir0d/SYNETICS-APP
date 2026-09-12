@@ -117,7 +117,9 @@ export function MapPanel({ analysis, mapLibrary, environment, onConfirm }: MapPa
         </>
       )}
 
-      {environment && (
+      {/* Une analyse anterieure a la description d'arene porte un champ vide :
+          afficher un bandeau sans contenu ne renseignerait personne. */}
+      {environment && environment.description.trim() !== '' && (
         <div className="banner banner-info" style={{ marginTop: 12, marginBottom: 0 }}>
           <strong>Ce que l'IA voit de l'arene :</strong> {environment.description}
           {environment.landmarks.length > 0 && (

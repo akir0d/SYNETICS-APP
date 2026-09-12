@@ -1,4 +1,5 @@
 import type { KnownMap, MatchAnalysis } from '../types';
+import { normalizeAnalysis } from './migrate';
 
 /**
  * Persistance locale des analyses (IndexedDB). La video n'est jamais stockee :
@@ -69,7 +70,8 @@ export async function saveAnalyses(analyses: readonly MatchAnalysis[]): Promise<
 }
 
 export async function getAnalysis(id: string): Promise<MatchAnalysis | undefined> {
-  return tx<MatchAnalysis | undefined>(STORE, 'readonly', (store) => store.get(id));
+  const raw = await tx<MatchAnalysis | undefined>(STORE, 'readonly', (store) => store.get(id));
+  return raw ? normalizeAnalysis(raw) : undefined;
 }
 
 export async function deleteAnalysis(id: string): Promise<void> {
@@ -78,7 +80,9 @@ export async function deleteAnalysis(id: string): Promise<void> {
 
 export async function listAnalyses(): Promise<MatchAnalysis[]> {
   const all = await tx<MatchAnalysis[]>(STORE, 'readonly', (store) => store.getAll());
-  return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Les analyses ecrites par une version anterieure n'ont pas tous les champs
+  // du modele courant : on les complete a la lecture.
+  return all.map(normalizeAnalysis).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function listMaps(): Promise<KnownMap[]> {

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import jpeg from 'jpeg-js';
-import { luminanceOf, type Crop } from './crop';
+import { luminanceOf } from '../../vision/pixels';
+import type { Crop } from '../../vision/glyphs';
 
 const DOSSIER = join(process.cwd(), 'tools', 'glyphes', 'captures');
 
@@ -15,7 +16,7 @@ export interface Capture {
 export function loadCapture(nom: string): Capture {
   const brut = jpeg.decode(readFileSync(join(DOSSIER, `${nom}.jpg`)), { useTArray: true });
   return {
-    luma: luminanceOf(brut.data, brut.width, brut.height),
+    luma: luminanceOf(brut.data, brut.width * brut.height),
     width: brut.width,
     height: brut.height,
   };

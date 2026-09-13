@@ -262,8 +262,44 @@ export interface ReadNumber {
 }
 
 /** Lit un nombre entier dans une case deja recadree. */
-export function readNumber(crop: Crop, threshold: number): ReadNumber {
-  const boites = segmentGlyphs(crop, threshold);
+/** Part du contraste local a partir de laquelle un pixel compte comme de l'encre. */
+const INK_FRACTION = 0.55;
+
+/**
+ * En deca de ce contraste, la case ne contient pas de texte : la seuiller
+ * reviendrait a decouper du grain de compression en faux chiffres.
+ */
+const MIN_CONTRAST = 40;
+
+/**
+ * Seuil d'encre propre a une case, plutot qu'une valeur unique pour l'image.
+ *
+ * Le jeu teinte la carte du meilleur joueur : ses chiffres restent lisibles
+ * mais bien plus sombres que ceux des autres cartes, et un seuil fixe les
+ * effacait purement et simplement — la carte revenait vide. Le contraste local
+ * ne depend ni de cette teinte ni de la luminosite de l'arene.
+ *
+ * Le fond est pris a la mediane, car dans une case de tableau le texte est
+ * toujours minoritaire. Prendre le minimum ferait plonger le seuil des qu'un
+ * recoin sombre borde une case posee sur un fond clair.
+ */
+export function localInkThreshold(crop: Crop): number | null {
+  if (crop.luma.length === 0) return null;
+  const tri = Float32Array.from(crop.luma).sort();
+  const bas = tri[Math.floor(tri.length / 2)] as number;
+  const haut = tri[Math.min(tri.length - 1, Math.floor(tri.length * 0.995))] as number;
+  if (haut - bas < MIN_CONTRAST) return null;
+  return bas + INK_FRACTION * (haut - bas);
+}
+
+/**
+ * Lit un nombre dans une case. Sans seuil explicite, il est deduit du
+ * contraste de la case elle-meme.
+ */
+export function readNumber(crop: Crop, threshold?: number): ReadNumber {
+  const seuil = threshold ?? localInkThreshold(crop);
+  if (seuil === null) return { text: '', value: null, margin: 0 };
+  const boites = segmentGlyphs(crop, seuil);
   let text = '';
   let margin = Number.POSITIVE_INFINITY;
 

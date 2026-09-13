@@ -19,6 +19,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import ndimage
 
+# Une equipe d'EVA aligne toujours quatre joueurs.
+CARTES_PAR_EQUIPE = 4
+
 
 @dataclass
 class Carte:
@@ -110,66 +113,127 @@ def detecter_blocs(lum: np.ndarray, seuil: float = 150) -> list[BlocEquipe]:
             for c in rangee
             if abs(c[1] - h_ref) <= max(1, h_ref * 0.12) and abs(c[3] - r_ref) <= 0.08
         ]
-        if len(jumelles) < 6 or len(jumelles) % 3 != 0:
+        if len(jumelles) < 6:
             continue
 
         jumelles.sort(key=lambda c: c[0][0])
-        cartes = []
-        for i in range(0, len(jumelles), 3):
-            triplet = jumelles[i : i + 3]
-            colonnes = [(c[0][0], c[0][2]) for c in triplet]
-            centre = (colonnes[0][0] + colonnes[-1][1]) // 2
-            cartes.append(Carte(centre_x=centre, colonnes=colonnes))
+        cartes = _cartes_sur_grille(jumelles)
+        if cartes is None:
+            continue
 
         y_centre = round(sum((c[0][1] + c[0][3]) / 2 for c in jumelles) / len(jumelles))
         blocs.append(BlocEquipe(icones_y=y_centre, icones_h=h_ref, cartes=cartes))
 
-    blocs = [b for b in blocs if _colonnes_regulieres(b)]
-    _completer_grille(blocs)
     return blocs
 
 
-def _colonnes_regulieres(bloc: BlocEquipe) -> bool:
+def _cartes_sur_grille(jumelles) -> list[Carte] | None:
     """
-    Les cartes d'un tableau sont alignees a intervalle constant.
+    Retient les icones posees sur la grille du tableau, et rien d'autre.
 
-    Ce controle ecarte les rangees de pictogrammes fortuites — un HUD en
-    contient d'autres — sans rien exiger de la position absolue.
+    Compter les icones ne suffit pas. Une capture reelle en donne trop — un
+    badge d'equipe, un pictogramme de zone tombent dans le meme gabarit — ou
+    trop peu : la carte du meilleur joueur est teintee par le jeu et ses icones
+    n'atteignent pas le seuil. Dans les deux cas un simple decompte se trompe,
+    et sans bruit : douze icones plus un intrus fait treize, donc la rangee est
+    jetee ; neuf icones font trois cartes credibles, donc les valeurs sont lues
+    une carte a cote.
+
+    L'invariant solide est ailleurs : les icones d'un tableau forment une grille
+    reguliere, trois par carte et un pas constant entre cartes. On s'appuie donc
+    sur les ecarts. Les icones d'une meme carte sont bien plus proches entre
+    elles que deux cartes voisines, ce qui decoupe les groupes sans seuil
+    absolu ; on ne retient que les groupes de trois ; puis on verifie que leurs
+    centres sont equidistants, et on rebouche les trous de la grille. Un intrus
+    isole forme un groupe de un et disparait ; une carte eteinte laisse un trou
+    que le pas permet de retrouver.
     """
-    if len(bloc.cartes) < 2:
-        return False
-    if len(bloc.cartes) == 2:
-        return True
-    ecarts = [
-        bloc.cartes[i + 1].centre_x - bloc.cartes[i].centre_x
-        for i in range(len(bloc.cartes) - 1)
+    if len(jumelles) < 3:
+        return None
+
+    centres = [(c[0][0] + c[0][2]) / 2 for c in jumelles]
+    ecarts = sorted(centres[i + 1] - centres[i] for i in range(len(centres) - 1))
+    if not ecarts:
+        return None
+    pas_icone = ecarts[len(ecarts) // 2]
+    if pas_icone <= 0:
+        return None
+
+    groupes: list[list] = [[jumelles[0]]]
+    for precedent, courant, c in zip(centres, centres[1:], jumelles[1:]):
+        if courant - precedent <= pas_icone * 1.5:
+            groupes[-1].append(c)
+        else:
+            groupes.append([c])
+
+    triplets = [g for g in groupes if len(g) == 3]
+    if len(triplets) < 2:
+        return None
+
+    cartes = [
+        Carte(
+            centre_x=(g[0][0][0] + g[-1][0][2]) // 2,
+            colonnes=[(c[0][0], c[0][2]) for c in g],
+        )
+        for g in triplets
     ]
-    median = sorted(ecarts)[len(ecarts) // 2]
-    return median > 0 and all(abs(e - median) <= median * 0.15 for e in ecarts)
+
+    pas_carte = _pas_regulier([c.centre_x for c in cartes])
+    if pas_carte is None:
+        return None
+    return _reboucher(cartes, pas_carte)
 
 
-def _completer_grille(blocs: list[BlocEquipe]) -> None:
+def _pas_regulier(centres: list[int]) -> int | None:
     """
-    Retablit les cartes manquantes d'un bloc.
+    Pas constant entre cartes, ou None si elles ne sont pas alignees.
 
-    La carte du meilleur joueur est teintee par le jeu : son texte n'atteint pas
-    le meme contraste et ses pictogrammes echappent au seuil. Comme les deux
-    equipes partagent exactement les memes colonnes, on complete le bloc
-    incomplet a partir de l'autre plutot que de perdre un joueur.
+    Une carte eteinte laisse un ecart double : on l'admet, c'est justement le
+    trou qu'on cherche a reboucher. Tout autre ecart trahit un faux positif.
     """
-    if len(blocs) < 2:
-        return
-    complet = max(blocs, key=lambda b: len(b.cartes))
-    for bloc in blocs:
-        if len(bloc.cartes) >= len(complet.cartes):
-            continue
-        connus = {c.centre_x: c for c in bloc.cartes}
-        tolerance = max(8, complet.icones_h)
-        cartes = []
-        for reference in complet.cartes:
-            proche = next(
-                (c for x, c in connus.items() if abs(x - reference.centre_x) <= tolerance),
-                None,
-            )
-            cartes.append(proche or Carte(centre_x=reference.centre_x, colonnes=list(reference.colonnes)))
-        bloc.cartes = cartes
+    if len(centres) < 2:
+        return None
+    ecarts = [centres[i + 1] - centres[i] for i in range(len(centres) - 1)]
+    pas = min(ecarts)
+    if pas <= 0:
+        return None
+    for e in ecarts:
+        multiple = round(e / pas)
+        if multiple < 1 or abs(e - multiple * pas) > pas * 0.15:
+            return None
+    return pas
+
+
+def _reboucher(cartes: list[Carte], pas: int) -> list[Carte]:
+    """
+    Recree les cartes absentes, dans les trous et aux deux bords.
+
+    Les colonnes d'une carte manquante sont celles de sa voisine, translatees :
+    toutes les cartes partagent le meme gabarit.
+    """
+    modele = cartes[0]
+    largeurs = [(c[0] - modele.centre_x, c[1] - modele.centre_x) for c in modele.colonnes]
+
+    def fabriquer(centre_x: int) -> Carte:
+        return Carte(
+            centre_x=centre_x,
+            colonnes=[(centre_x + a, centre_x + b) for a, b in largeurs],
+        )
+
+    complet = [cartes[0]]
+    for precedente, carte in zip(cartes, cartes[1:]):
+        manquantes = round((carte.centre_x - precedente.centre_x) / pas) - 1
+        for i in range(1, manquantes + 1):
+            complet.append(fabriquer(precedente.centre_x + i * pas))
+        complet.append(carte)
+
+    # Un tableau d'EVA compte quatre cartes par equipe. Si la grille en montre
+    # moins, les manquantes sont forcement aux extremites : on les prolonge tant
+    # qu'elles tiennent dans l'image, en partant du bord le plus proche.
+    while len(complet) < CARTES_PAR_EQUIPE:
+        gauche = complet[0].centre_x - pas
+        if gauche - pas // 2 > 0:
+            complet.insert(0, fabriquer(gauche))
+        else:
+            complet.append(fabriquer(complet[-1].centre_x + pas))
+    return complet

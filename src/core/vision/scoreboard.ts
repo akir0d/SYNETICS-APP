@@ -89,17 +89,11 @@ function detectIconRows(luma: Float32Array, width: number, height: number): Icon
         Math.abs(boxHeight(c.box) - hauteurRef) <= Math.max(1, hauteurRef * 0.12) &&
         Math.abs(c.fill - remplissageRef) <= 0.08,
     );
-    if (jumelles.length < 6 || jumelles.length % 3 !== 0) continue;
+    if (jumelles.length < 6) continue;
 
     jumelles.sort((a, b) => a.box.x0 - b.box.x0);
-    const cards: IconRow['cards'] = [];
-    for (let i = 0; i < jumelles.length; i += 3) {
-      const triplet = jumelles.slice(i, i + 3);
-      const columns = triplet.map((c) => [c.box.x0, c.box.x1] as [number, number]);
-      const premier = columns[0] as [number, number];
-      const dernier = columns[columns.length - 1] as [number, number];
-      cards.push({ centerX: Math.round((premier[0] + dernier[1]) / 2), columns });
-    }
+    const cards = cardsOnLattice(jumelles.map((c) => [c.box.x0, c.box.x1] as [number, number]));
+    if (!cards) continue;
 
     lignes.push({
       iconsY: Math.round(median(jumelles.map((c) => boxCenterY(c.box)))),
@@ -108,45 +102,120 @@ function detectIconRows(luma: Float32Array, width: number, height: number): Icon
     });
   }
 
-  return lignes.filter(regularColumns);
+  return lignes;
 }
 
+/** Une equipe d'EVA aligne toujours quatre joueurs. */
+const CARDS_PER_TEAM = 4;
+
 /**
- * Les cartes d'un tableau sont alignees a intervalle constant.
+ * Retient les pictogrammes poses sur la grille du tableau, et rien d'autre.
  *
- * Ce controle ecarte les rangees de pictogrammes fortuites — un HUD en
- * contient d'autres — sans rien exiger de leur position absolue.
+ * Les compter ne suffit pas. Une capture reelle en donne trop — un badge
+ * d'equipe, un pictogramme de zone tombent dans le meme gabarit — ou trop peu :
+ * le jeu teinte la carte du meilleur joueur et ses pictogrammes echappent au
+ * seuil. Dans les deux cas un simple decompte se trompe, et sans bruit : douze
+ * pictogrammes plus un intrus font treize, donc la rangee entiere est jetee ;
+ * neuf font trois cartes credibles, donc les valeurs sont lues une carte a
+ * cote.
+ *
+ * L'invariant solide est ailleurs : les pictogrammes forment une grille
+ * reguliere, trois par carte et un pas constant entre cartes. On s'appuie donc
+ * sur les ecarts. Ceux d'une meme carte sont bien plus courts que l'ecart entre
+ * deux cartes voisines, ce qui decoupe les groupes sans seuil absolu ; on ne
+ * retient que les groupes de trois ; puis on verifie que leurs centres sont
+ * equidistants, et on rebouche les trous. Un intrus isole forme un groupe de un
+ * et disparait ; une carte eteinte laisse un trou que le pas permet de
+ * retrouver.
  */
-function regularColumns(row: IconRow): boolean {
-  if (row.cards.length < 2) return false;
-  if (row.cards.length === 2) return true;
+function cardsOnLattice(colonnes: Array<[number, number]>): IconRow['cards'] | null {
+  if (colonnes.length < 3) return null;
+
+  const centres = colonnes.map(([a, b]) => (a + b) / 2);
   const ecarts: number[] = [];
-  for (let i = 1; i < row.cards.length; i++) {
-    ecarts.push((row.cards[i] as { centerX: number }).centerX - (row.cards[i - 1] as { centerX: number }).centerX);
+  for (let i = 1; i < centres.length; i++) {
+    ecarts.push((centres[i] as number) - (centres[i - 1] as number));
   }
-  const reference = median(ecarts);
-  return reference > 0 && ecarts.every((e) => Math.abs(e - reference) <= reference * 0.15);
+  const pasIcone = median(ecarts);
+  if (!(pasIcone > 0)) return null;
+
+  const groupes: Array<Array<[number, number]>> = [[colonnes[0] as [number, number]]];
+  for (let i = 1; i < colonnes.length; i++) {
+    const saut = (centres[i] as number) - (centres[i - 1] as number);
+    if (saut <= pasIcone * 1.5) {
+      (groupes[groupes.length - 1] as Array<[number, number]>).push(colonnes[i] as [number, number]);
+    } else {
+      groupes.push([colonnes[i] as [number, number]]);
+    }
+  }
+
+  const triplets = groupes.filter((g) => g.length === 3);
+  if (triplets.length < 2) return null;
+
+  const cartes = triplets.map((g) => ({
+    centerX: Math.round(((g[0] as [number, number])[0] + (g[2] as [number, number])[1]) / 2),
+    columns: g,
+  }));
+
+  const pas = regularPitch(cartes.map((c) => c.centerX));
+  if (pas === null) return null;
+  return fillGaps(cartes, pas);
 }
 
 /**
- * Retablit les cartes manquantes d'une rangee.
+ * Pas constant entre cartes, ou `null` si elles ne sont pas alignees.
  *
- * Le jeu teinte la carte du meilleur joueur : son texte n'atteint pas le meme
- * contraste et ses pictogrammes echappent au seuil. Comme les deux equipes
- * partagent exactement les memes colonnes, on complete la rangee incomplete a
- * partir de l'autre plutot que de perdre un joueur.
+ * Une carte eteinte laisse un ecart double : on l'admet, c'est justement le
+ * trou qu'on cherche a reboucher. Tout autre ecart trahit un faux positif.
  */
-function completeGrid(rows: IconRow[]): void {
-  if (rows.length < 2) return;
-  const complete = rows.reduce((a, b) => (b.cards.length > a.cards.length ? b : a));
-  for (const row of rows) {
-    if (row.cards.length >= complete.cards.length) continue;
-    const tolerance = Math.max(8, complete.iconsHeight);
-    row.cards = complete.cards.map((reference) => {
-      const proche = row.cards.find((c) => Math.abs(c.centerX - reference.centerX) <= tolerance);
-      return proche ?? { centerX: reference.centerX, columns: [...reference.columns] };
-    });
+function regularPitch(centres: number[]): number | null {
+  if (centres.length < 2) return null;
+  const ecarts: number[] = [];
+  for (let i = 1; i < centres.length; i++) {
+    ecarts.push((centres[i] as number) - (centres[i - 1] as number));
   }
+  const pas = Math.min(...ecarts);
+  if (!(pas > 0)) return null;
+  for (const e of ecarts) {
+    const multiple = Math.round(e / pas);
+    if (multiple < 1 || Math.abs(e - multiple * pas) > pas * 0.15) return null;
+  }
+  return pas;
+}
+
+/**
+ * Recree les cartes absentes, dans les trous et aux deux bords.
+ *
+ * Les colonnes d'une carte manquante sont celles d'une voisine, translatees :
+ * toutes les cartes partagent le meme gabarit.
+ */
+function fillGaps(cartes: IconRow['cards'], pas: number): IconRow['cards'] {
+  const modele = cartes[0] as IconRow['cards'][number];
+  const largeurs = modele.columns.map(
+    ([a, b]) => [a - modele.centerX, b - modele.centerX] as [number, number],
+  );
+  const fabriquer = (centerX: number) => ({
+    centerX,
+    columns: largeurs.map(([a, b]) => [centerX + a, centerX + b] as [number, number]),
+  });
+
+  const complet: IconRow['cards'] = [modele];
+  for (let i = 1; i < cartes.length; i++) {
+    const precedente = cartes[i - 1] as IconRow['cards'][number];
+    const carte = cartes[i] as IconRow['cards'][number];
+    const manquantes = Math.round((carte.centerX - precedente.centerX) / pas) - 1;
+    for (let k = 1; k <= manquantes; k++) complet.push(fabriquer(precedente.centerX + k * pas));
+    complet.push(carte);
+  }
+
+  // Si la grille montre moins de quatre cartes, les manquantes sont forcement
+  // aux extremites : on prolonge tant qu'elles tiennent dans l'image.
+  while (complet.length < CARDS_PER_TEAM) {
+    const gauche = (complet[0] as IconRow['cards'][number]).centerX - pas;
+    if (gauche - pas / 2 > 0) complet.unshift(fabriquer(gauche));
+    else complet.push(fabriquer((complet[complet.length - 1] as IconRow['cards'][number]).centerX + pas));
+  }
+  return complet;
 }
 
 function subCrop(luma: Float32Array, width: number, y0: number, y1: number, x0: number, x1: number): Crop {
@@ -172,7 +241,6 @@ function subCrop(luma: Float32Array, width: number, y0: number, y1: number, x0: 
 export function readScoreboard(luma: Float32Array, width: number, height: number): ScoreboardReading | null {
   const rows = detectIconRows(luma, width, height);
   if (rows.length < 2) return null;
-  completeGrid(rows);
 
   const teams: TeamBlock[] = [];
   for (const row of rows) {
@@ -193,14 +261,13 @@ export function readScoreboard(luma: Float32Array, width: number, height: number
       const demi = Math.round(ecartCartes * 0.42);
       const score = readNumber(
         subCrop(luma, width, scoreY0, scoreY1, carte.centerX - demi, carte.centerX + demi),
-        INK_THRESHOLD,
       );
 
       const centres = carte.columns.map(([a, b]) => Math.round((a + b) / 2));
       const ecartIcones = centres.length > 1 ? (centres[1] as number) - (centres[0] as number) : Math.round(h * 2);
       const marge = Math.round(ecartIcones * 0.46);
       const valeurs = centres.map((centre) =>
-        readNumber(subCrop(luma, width, kdaY0, kdaY1, centre - marge, centre + marge), INK_THRESHOLD),
+        readNumber(subCrop(luma, width, kdaY0, kdaY1, centre - marge, centre + marge)),
       );
 
       const toutes = [score, ...valeurs];

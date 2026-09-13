@@ -125,6 +125,40 @@ def cases_du_bloc(bloc: BlocEquipe):
             yield ('kda', index, colonne, ky0, ky1, centre - marge, centre + marge)
 
 
-def lire_case(lum: np.ndarray, case_def, seuil: float = 150):
+# Part du contraste local a partir de laquelle un pixel compte comme de l'encre.
+FRACTION_ENCRE = 0.55
+
+# En deca de ce contraste, la case ne contient pas de texte : la seuiller
+# reviendrait a decouper du bruit de compression en faux chiffres.
+CONTRASTE_MINIMAL = 40.0
+
+
+def seuil_local(case: np.ndarray) -> float | None:
+    """
+    Seuil d'encre propre a une case, plutot qu'une valeur unique pour l'image.
+
+    Le jeu teinte la carte du meilleur joueur : ses chiffres restent lisibles
+    mais bien plus sombres que ceux des autres cartes. Un seuil fixe les
+    effacait purement et simplement, et la carte revenait vide. Le contraste
+    local, lui, ne depend ni de la teinte ni de la luminosite de l'arene.
+    """
+    if case.size == 0:
+        return None
+    # Le fond, c'est la mediane : dans une case de tableau le texte est
+    # toujours minoritaire. Prendre le minimum a la place ferait plonger le
+    # seuil des qu'un recoin sombre borde une case posee sur un fond clair, et
+    # le grain de la compression se decouperait alors en faux chiffres.
+    bas = float(np.median(case))
+    haut = float(np.percentile(case, 99.5))
+    if haut - bas < CONTRASTE_MINIMAL:
+        return None
+    return bas + FRACTION_ENCRE * (haut - bas)
+
+
+def lire_case(lum: np.ndarray, case_def, seuil: float | None = None):
     _, _, _, y0, y1, x0, x1 = case_def
+    if seuil is None:
+        seuil = seuil_local(lum[max(0, y0):y1, max(0, x0):x1])
+        if seuil is None:
+            return np.zeros((0, 0)), []
     return _glyphes(lum, y0, y1, x0, x1, seuil)

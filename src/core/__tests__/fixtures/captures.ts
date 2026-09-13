@@ -40,6 +40,7 @@ const CADRES: Record<string, { y0: number; y1: number }> = {
   '4df5ce74': { y0: 88, y1: 1195 },
   'df7af499': { y0: 88, y1: 1195 },
   'league-cast': { y0: 89, y1: 1196 },
+  'carolo-moux-nnx': { y0: 89, y1: 1196 },
 };
 
 export function gameFrame(nom: string): { y0: number; y1: number } {

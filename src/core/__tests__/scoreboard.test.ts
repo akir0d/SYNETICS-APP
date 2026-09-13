@@ -58,6 +58,23 @@ const ATTENDU: Record<string, { titre: string; equipes: Array<Array<[number, num
       ],
     ],
   },
+  'carolo-moux-nnx': {
+    titre: 'Atlantis — Carolo League — tableau en cours de manche',
+    equipes: [
+      [
+        [475, 3, 9, 2],
+        [375, 6, 6, 0],
+        [350, 4, 7, 0],
+        [150, 3, 9, 0],
+      ],
+      [
+        [1200, 13, 4, 2],
+        [650, 4, 4, 5],
+        [525, 7, 5, 2],
+        [450, 6, 3, 0],
+      ],
+    ],
+  },
 };
 
 describe('reperage du tableau des scores', () => {
@@ -113,12 +130,12 @@ describe('lecture des chiffres du tableau', () => {
 
   it('lit sans faute les captures ayant servi a construire les exemplaires', () => {
     // Attention a l'interpretation : les exemplaires embarques proviennent de
-    // ces trois memes captures. Ce test mesure donc l'apprentissage, pas la
+    // ces memes captures. Ce test mesure donc l'apprentissage, pas la
     // generalisation, et sert de garde contre une regression du portage.
     //
     // Le chiffre honnete est ailleurs : la validation croisee de
     // `tools/glyphes/croisee.py`, ou chaque capture est lue avec des
-    // exemplaires tires uniquement des autres, donne 96,9 % de nombres exacts.
+    // exemplaires tires uniquement des autres, donne 97,7 % de nombres exacts.
     console.log(`nombres justes : ${justes}/${total} (${((100 * justes) / total).toFixed(1)} %)`);
     expect(justes).toBe(total);
   });

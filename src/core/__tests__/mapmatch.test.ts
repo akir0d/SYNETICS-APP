@@ -6,7 +6,16 @@ import {
   mergeFingerprints,
   unknownMap,
 } from '../analysis/mapmatch';
-import { FingerprintAccumulator, rgbToHsv, HUE_BINS, LUMA_BINS } from '../video/fingerprint';
+import {
+  FingerprintAccumulator,
+  maskDistance,
+  NAME_MASK_COLS,
+  NAME_MASK_ROWS,
+  regionMask,
+  rgbToHsv,
+  HUE_BINS,
+  LUMA_BINS,
+} from '../video/fingerprint';
 import type { KnownMap, MapFingerprint } from '../types';
 
 /** Fabrique une image unie de la couleur demandee. */
@@ -172,5 +181,101 @@ describe('apprentissage d une arene', () => {
   it('reste normalise apres fusion', () => {
     const merged = mergeFingerprints(reference, nouvelle, 3);
     expect(merged.luma.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 5);
+  });
+});
+
+/** Fabrique une bande de texte factice : des colonnes claires sur fond sombre. */
+function bandeTexte(colonnes: readonly number[], width = 80, height = 20): Uint8ClampedArray {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const clair = colonnes.includes(Math.floor((x / width) * 10)) && y > 4 && y < height - 4;
+      const v = clair ? 235 : 25;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+  }
+  return data;
+}
+
+describe('empreinte du nom de carte', () => {
+  const atlantis = regionMask(bandeTexte([1, 2, 4, 7]), 80, 20);
+  const atlantisAutreManche = regionMask(bandeTexte([1, 2, 4, 7]), 80, 20);
+  const autreCarte = regionMask(bandeTexte([0, 3, 5, 6, 8]), 80, 20);
+
+  it('produit une grille de la taille attendue', () => {
+    expect(atlantis).toHaveLength(NAME_MASK_COLS * NAME_MASK_ROWS);
+    expect(Math.min(...atlantis)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...atlantis)).toBeLessThanOrEqual(1);
+  });
+
+  it('donne la meme trace pour le meme texte', () => {
+    expect(maskDistance(atlantis, atlantisAutreManche)).toBe(0);
+  });
+
+  it('separe nettement deux textes differents', () => {
+    expect(maskDistance(atlantis, autreCarte)).toBeGreaterThan(0.2);
+  });
+
+  it('resiste a un changement de luminosite de la captation', () => {
+    // Meme texte, image globalement plus sombre : l'etirement de contraste
+    // doit annuler la difference.
+    const sombre = bandeTexte([1, 2, 4, 7]);
+    for (let i = 0; i < sombre.length; i += 4) {
+      sombre[i] = Math.round((sombre[i] as number) * 0.5);
+      sombre[i + 1] = Math.round((sombre[i + 1] as number) * 0.5);
+      sombre[i + 2] = Math.round((sombre[i + 2] as number) * 0.5);
+    }
+    expect(maskDistance(atlantis, regionMask(sombre, 80, 20))).toBeLessThan(0.02);
+  });
+
+  it('neutralise une zone unie, ou il n y a rien a lire', () => {
+    const unie = regionMask(bandeTexte([]), 80, 20);
+    expect(unie.every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe('reconnaissance quand le nom de carte est lisible', () => {
+  const paletteA = fingerprintOf(40, 90, 200);
+  const paletteB = fingerprintOf(220, 130, 40);
+  const nomAtlantis = regionMask(bandeTexte([1, 2, 4, 7]), 80, 20);
+  const nomStation = regionMask(bandeTexte([0, 3, 5, 6, 8]), 80, 20);
+
+  it('rapproche deux manches sur la meme carte malgre des palettes opposees', () => {
+    // Meme arene filmee de jour et de nuit, ou avec un rendu different : le
+    // nom ecrit dans le HUD, lui, ne change pas.
+    const jour = { ...paletteA, nameMask: nomAtlantis };
+    const nuit = { ...paletteB, nameMask: nomAtlantis };
+    expect(fingerprintDistance(jour, nuit)).toBeLessThan(MATCH_DISTANCE);
+  });
+
+  it('separe deux cartes malgre des palettes identiques', () => {
+    // Deux arenes a l'ambiance tres proche : sans le nom, elles seraient
+    // confondues ; avec, elles se distinguent.
+    const sansNom = fingerprintDistance(paletteA, paletteA);
+    const avecNom = fingerprintDistance(
+      { ...paletteA, nameMask: nomAtlantis },
+      { ...paletteA, nameMask: nomStation },
+    );
+    expect(sansNom).toBe(0);
+    expect(avecNom).toBeGreaterThan(MATCH_DISTANCE);
+  });
+
+  it('se rabat sur la palette quand une seule des deux signatures a un nom', () => {
+    const avec = { ...paletteA, nameMask: nomAtlantis };
+    expect(fingerprintDistance(avec, paletteA)).toBe(fingerprintDistance(paletteA, paletteA));
+  });
+
+  it('conserve la trace du nom en fusionnant deux signatures', () => {
+    const fusion = mergeFingerprints(
+      { ...paletteA, nameMask: nomAtlantis },
+      { ...paletteA, nameMask: nomAtlantis },
+      1,
+    );
+    expect(fusion.nameMask).toBeDefined();
+    expect(maskDistance(fusion.nameMask!, nomAtlantis)).toBeLessThan(0.001);
   });
 });

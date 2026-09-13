@@ -1,4 +1,4 @@
-import type { MapFingerprint } from '../types';
+import type { HudRegion, MapFingerprint } from '../types';
 import { seekTo } from './sampler';
 
 /**
@@ -150,4 +150,177 @@ export async function buildMapFingerprint(
   }
 
   return accumulator.build();
+}
+
+/** Definition de la grille servant a memoriser la forme du nom de carte. */
+export const NAME_MASK_COLS = 64;
+export const NAME_MASK_ROWS = 16;
+
+/**
+ * Reduit une zone de l'image a une grille decrivant la forme du texte qui s'y
+ * trouve.
+ *
+ * Chaque case ne retient pas la luminance moyenne mais la **part de pixels
+ * clairs** qu'elle contient : autrement dit la couverture d'encre du glyphe.
+ * La moyenne, elle, noyait les jambages fins dans le fond et rendait deux noms
+ * differents trop semblables — le seuil se prononce donc pixel par pixel,
+ * avant tout moyennage.
+ *
+ * Le seuil est tire de la zone elle-meme, ce qui rend la trace insensible a la
+ * luminosite generale de la captation.
+ *
+ * C'est une empreinte, pas une lecture : l'application ne sait pas ce qui est
+ * ecrit, seulement que c'est la meme chose qu'avant.
+ */
+export function regionMask(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+): number[] {
+  const pixels = width * height;
+  const luma = new Float64Array(pixels);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (let p = 0; p < pixels; p++) {
+    const i = p * 4;
+    const y =
+      0.299 * (data[i] as number) + 0.587 * (data[i + 1] as number) + 0.114 * (data[i + 2] as number);
+    luma[p] = y;
+    if (y < min) min = y;
+    if (y > max) max = y;
+  }
+
+  const span = max - min;
+  // Zone unie : il n'y a rien d'ecrit, donc rien a memoriser.
+  if (span < 12) return new Array(NAME_MASK_COLS * NAME_MASK_ROWS).fill(0);
+
+  // Le texte du HUD est clair sur fond sombre : on place le seuil au-dessus du
+  // milieu pour ne retenir que les glyphes, pas les halos de compression.
+  const threshold = min + 0.55 * span;
+
+  const ink = new Float64Array(NAME_MASK_COLS * NAME_MASK_ROWS);
+  const counts = new Float64Array(NAME_MASK_COLS * NAME_MASK_ROWS);
+
+  for (let y = 0; y < height; y++) {
+    const row = Math.min(NAME_MASK_ROWS - 1, Math.floor((y / height) * NAME_MASK_ROWS));
+    for (let x = 0; x < width; x++) {
+      const col = Math.min(NAME_MASK_COLS - 1, Math.floor((x / width) * NAME_MASK_COLS));
+      const cell = row * NAME_MASK_COLS + col;
+      if ((luma[y * width + x] as number) >= threshold) ink[cell] = (ink[cell] as number) + 1;
+      counts[cell] = (counts[cell] as number) + 1;
+    }
+  }
+
+  return Array.from(ink, (v, i) => v / Math.max(1, counts[i] as number));
+}
+
+/** Part de la grille reellement occupee par du texte. */
+export function maskInk(mask: readonly number[]): number {
+  if (mask.length === 0) return 0;
+  let sum = 0;
+  for (const v of mask) sum += v;
+  return sum / mask.length;
+}
+
+/**
+ * En dessous de cette occupation, la zone ne contient pas de texte
+ * exploitable : cadrage a cote, HUD masque, ecran de transition.
+ */
+export const MIN_MASK_INK = 0.01;
+
+/**
+ * Ecart entre deux traces de texte, sur 0..1.
+ *
+ * On mesure un recouvrement (indice de Dice) et non un ecart moyen case par
+ * case. La difference est decisive : sur une grille dont plus de 80 % des
+ * cases sont du fond vide, une moyenne d'ecarts est ecrasee par ces cases
+ * identiques, et deux noms de carte totalement differents se retrouvent a
+ * cinq centiemes l'un de l'autre. Le recouvrement, lui, ne compte que la ou
+ * il y a de l'encre.
+ */
+export function maskDistance(a: readonly number[], b: readonly number[]): number {
+  if (a.length === 0 || a.length !== b.length) return 1;
+
+  let intersection = 0;
+  let total = 0;
+  for (let i = 0; i < a.length; i++) {
+    const va = a[i] as number;
+    const vb = b[i] as number;
+    intersection += Math.min(va, vb);
+    total += va + vb;
+  }
+
+  // Deux zones vides ne se ressemblent pas : elles ne se comparent pas.
+  if (total <= 1e-9) return 1;
+  return Math.max(0, Math.min(1, 1 - (2 * intersection) / total));
+}
+
+export interface MapNameCapture {
+  /** Trace du texte, moyennee sur les images echantillonnees. */
+  mask: number[];
+  /** Vignette JPEG en base64, pour que le joueur verifie le cadrage. */
+  crop: string;
+}
+
+/**
+ * Preleve la zone du HUD ou le jeu ecrit le nom de la carte, sur plusieurs
+ * instants du match, et en tire une trace moyenne plus une vignette.
+ */
+export async function captureMapName(
+  video: HTMLVideoElement,
+  startS: number,
+  endS: number,
+  region: HudRegion,
+  options: { samples?: number; signal?: AbortSignal } = {},
+): Promise<MapNameCapture | null> {
+  const samples = options.samples ?? 6;
+  const sourceW = video.videoWidth;
+  const sourceH = video.videoHeight;
+  if (sourceW === 0 || sourceH === 0) return null;
+
+  const sx = Math.round(region.x * sourceW);
+  const sy = Math.round(region.y * sourceH);
+  const sw = Math.max(8, Math.round(region.width * sourceW));
+  const sh = Math.max(8, Math.round(region.height * sourceH));
+  if (sx + sw > sourceW || sy + sh > sourceH) return null;
+
+  // On ne reechantillonne pas vers le bas : sur une captation en haute
+  // definition, la zone du HUD contient largement de quoi decrire le texte, et
+  // la reduire a une largeur fixe detruisait justement ce qui distingue deux
+  // noms.
+  const cropW = Math.min(480, Math.max(160, sw));
+  const cropH = Math.max(24, Math.round((sh / sw) * cropW));
+  const canvas = document.createElement('canvas');
+  canvas.width = cropW;
+  canvas.height = cropH;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  const accumulator = new Float64Array(NAME_MASK_COLS * NAME_MASK_ROWS);
+  let taken = 0;
+  let crop = '';
+  const span = Math.max(0, endS - startS);
+
+  for (let i = 0; i < samples; i++) {
+    if (options.signal?.aborted) break;
+    const t = startS + (span * (i + 0.5)) / samples;
+    await seekTo(video, t);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cropW, cropH);
+    const image = ctx.getImageData(0, 0, cropW, cropH);
+    const mask = regionMask(image.data, cropW, cropH);
+    for (let c = 0; c < accumulator.length; c++) {
+      accumulator[c] = (accumulator[c] as number) + (mask[c] as number);
+    }
+    taken++;
+    // La vignette montree au joueur vient du milieu du match, la ou le HUD est
+    // le plus surement affiche.
+    if (i === Math.floor(samples / 2)) {
+      const url = canvas.toDataURL('image/jpeg', 0.8);
+      crop = url.slice(url.indexOf(',') + 1);
+    }
+  }
+
+  if (taken === 0) return null;
+  return { mask: Array.from(accumulator, (v) => v / taken), crop };
 }

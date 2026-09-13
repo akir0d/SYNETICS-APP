@@ -132,9 +132,19 @@ export interface AiTimelineNote {
   comment: string;
 }
 
-export interface AiEnvironment {
-  description: string;
-  landmarks: string[];
+/**
+ * Ligne de joueur relevee sur le tableau des scores de fin de manche.
+ *
+ * Elle est lue hors ligne par la reconnaissance de glyphes de l'application,
+ * jamais par un service distant.
+ */
+export interface AiScoreRow {
+  player: string;
+  team: string;
+  score: number;
+  kills: number;
+  deaths: number;
+  assists: number;
 }
 
 export interface AiReport {
@@ -146,12 +156,76 @@ export interface AiReport {
   weaknesses: string[];
   drills: AiDrill[];
   timeline: AiTimelineNote[];
-  /** Ce que l'IA voit de l'arene. Aide a nommer une carte encore inconnue. */
-  environment: AiEnvironment;
   /** Mise en garde de l'IA sur ce qu'elle n'a pas pu juger. */
   caveats: string;
   usage?: { inputTokens: number; outputTokens: number };
 }
+
+/**
+ * Zone de l'image, en fractions de la largeur et de la hauteur (0 a 1).
+ * Exprimee en relatif pour rester valable quelle que soit la definition.
+ */
+export interface HudRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Position par defaut du nom de carte dans le HUD d'EVA : centre en haut,
+ * juste sous le chronometre. Reglable, car une captation recadree ou filmee
+ * a l'ecran decale tout le HUD.
+ */
+export const DEFAULT_MAP_NAME_REGION: HudRegion = { x: 0.38, y: 0.09, width: 0.24, height: 0.07 };
+
+/**
+ * Cartes d'EVA connues a ce jour.
+ *
+ * Cette liste sert a deux choses : proposer au joueur des noms coherents d'un
+ * match a l'autre — sans quoi la meme arene finirait enregistree sous trois
+ * orthographes — et transformer la lecture du HUD par l'IA en un choix dans
+ * une liste fermee plutot qu'en une invention libre.
+ *
+ * Elle ne verrouille rien : un nom hors liste reste accepte, pour le jour ou
+ * EVA en ajoutera une.
+ */
+export const EVA_MAPS = [
+  'Artefact',
+  'Atlantis',
+  'Ceres',
+  'Engine',
+  'Helios Station',
+  'Horizon',
+  'Lunar Outpost',
+  'Outlaw',
+  'Polaris',
+  'Reef Point',
+  'Silva',
+  'The Cliff',
+] as const;
+
+export type EvaMapName = (typeof EVA_MAPS)[number];
+
+/**
+ * Ramene un nom saisi ou lu a l'orthographe du catalogue.
+ * Renvoie le nom d'origine, simplement nettoye, s'il n'y figure pas.
+ */
+export function canonicalMapName(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const normalise = (v: string) =>
+    v
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/gi, '')
+      .toLowerCase();
+  const cible = normalise(trimmed);
+  return EVA_MAPS.find((m) => normalise(m) === cible) ?? trimmed;
+}
+
+/** Issue d'une manche, telle que l'annonce l'ecran de fin. */
+export type MatchOutcome = 'victoire' | 'defaite' | 'inconnue';
 
 export type GameProfileId = 'tdm' | 'domination' | 'bomb' | 'battle_royale' | 'custom';
 
@@ -237,6 +311,14 @@ export interface MapFingerprint {
   zones: number[];
   /** Nombre d'images agregees dans cette signature. */
   frames: number;
+  /**
+   * Empreinte du nom de carte tel qu'il est ecrit dans le HUD : la zone est
+   * binarisee puis reduite a une petite grille. Comme le jeu ecrit toujours le
+   * meme texte, dans la meme police, au meme endroit, deux manches sur la meme
+   * carte donnent une empreinte quasi identique — bien plus discriminante que
+   * la seule palette de couleurs.
+   */
+  nameMask?: number[];
 }
 
 /** Arene enregistree dans la bibliotheque de cartes de l'appareil. */
@@ -294,6 +376,28 @@ export interface MatchAnalysis {
   sessionId: string;
   map: MapIdentification;
   mapFingerprint?: MapFingerprint;
+  /**
+   * Vignette de la zone ou le nom de carte a ete cherche, en JPEG base64.
+   * Elle permet au joueur de verifier d'un coup d'oeil que la zone du HUD est
+   * bien cadree, au lieu de se demander pourquoi rien n'est reconnu.
+   */
+  mapNameCrop?: string;
+  /**
+   * Nom de carte lu a l'ecran par l'application, hors ligne.
+   * Vide tant que rien n'a pu etre lu.
+   */
+  readMapName?: string;
+  /** Mode de jeu lu a l'ecran par l'application. */
+  readGameMode?: string;
+  /** Issue de la manche, du point de vue de votre equipe. */
+  outcome: MatchOutcome;
+  /**
+   * Ligne du joueur relevee sur le tableau des scores du jeu.
+   *
+   * Quand elle existe, elle fait autorite sur le marquage manuel et sur les
+   * heuristiques : c'est le jeu lui-meme qui l'ecrit.
+   */
+  officialStats?: AiScoreRow;
   settings: AnalysisSettingsSnapshot;
   features: FrameFeature[];
   events: MatchEvent[];
@@ -325,6 +429,14 @@ export interface AppSettings {
   minMatchS: number;
   /** Duree minimale d'une pause entre deux matchs, en secondes. */
   minGapS: number;
+  /**
+   * Utiliser les ecrans noirs du jeu comme frontieres de manche.
+   * EVA en insere un apres le decompte de debut et apres le tableau des
+   * scores : c'est un reperage bien plus sur que le seul mouvement.
+   */
+  useBlackScreens: boolean;
+  /** Zone du HUD ou lire le nom de la carte. */
+  mapNameRegion: HudRegion;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -343,4 +455,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSegment: true,
   minMatchS: 90,
   minGapS: 40,
+  useBlackScreens: true,
+  mapNameRegion: { ...DEFAULT_MAP_NAME_REGION },
 };

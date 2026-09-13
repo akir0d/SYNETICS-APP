@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AppSettings, EventType, KnownMap, MatchAnalysis, MatchEvent } from '../../core/types';
+import type {
+  AppSettings,
+  EventType,
+  KnownMap,
+  MatchAnalysis,
+  MatchEvent,
+  MatchOutcome,
+} from '../../core/types';
 import { EVENT_TYPES, GAME_PROFILES } from '../../core/types';
 import { computeIntensity, runLocalAnalysis } from '../../core/analysis/heuristics';
 import { formatDuration } from '../../core/analysis/metrics';
@@ -220,8 +227,8 @@ export function ReportScreen({
       // On remplace les evenements IA precedents : deux passes ne doivent pas
       // empiler deux timelines concurrentes sur la meme video.
       const withoutOldAi = analysis.events.filter((e) => e.source !== 'ai');
-      const updated = recomputeAnalysis(analysis, [...withoutOldAi, ...aiReportToEvents(report)]);
-      onChange({ ...updated, ai: report });
+      onChange(recomputeAnalysis(analysis, [...withoutOldAi, ...aiReportToEvents(report)]));
+
       setToast('Analyse IA terminee.');
     } catch (e) {
       setAiError(describeAiError(e));
@@ -299,6 +306,44 @@ export function ReportScreen({
             style={{ fontSize: 19, fontWeight: 600 }}
           />
         </div>
+        <div className="row" style={{ marginBottom: 8 }}>
+          <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>Issue de la manche :</span>
+          {(['victoire', 'defaite', 'inconnue'] as MatchOutcome[]).map((value) => (
+            <button
+              key={value}
+              className="btn-ghost"
+              style={{
+                padding: '4px 12px',
+                ...(analysis.outcome === value
+                  ? {
+                      borderColor:
+                        value === 'victoire'
+                          ? 'var(--ok)'
+                          : value === 'defaite'
+                            ? 'var(--danger)'
+                            : 'var(--border-strong)',
+                      color:
+                        value === 'victoire'
+                          ? 'var(--ok)'
+                          : value === 'defaite'
+                            ? 'var(--danger)'
+                            : 'var(--text)',
+                    }
+                  : {}),
+              }}
+              onClick={() => onChange({ ...analysis, outcome: value })}
+            >
+              {{ victoire: 'Victoire', defaite: 'Defaite', inconnue: 'Inconnue' }[value]}
+            </button>
+          ))}
+          {analysis.officialStats && (
+            <span className="tag">
+              Tableau des scores : {analysis.officialStats.kills}/{analysis.officialStats.deaths}/
+              {analysis.officialStats.assists} · {analysis.officialStats.score} pts
+            </span>
+          )}
+        </div>
+
         <p className="hint" style={{ marginBottom: 0 }}>
           {GAME_PROFILES[analysis.profile].name} · {analysis.video.name} ·{' '}
           {formatDuration(analysis.video.durationS)}
@@ -405,13 +450,13 @@ export function ReportScreen({
         <div>
           <div className="card">
             <h2>Mesures</h2>
-            <MetricGrid metrics={analysis.metrics} />
+            <MetricGrid metrics={analysis.metrics} officialStats={analysis.officialStats} />
           </div>
 
           <MapPanel
             analysis={analysis}
             mapLibrary={mapLibrary}
-            environment={analysis.ai?.environment}
+            readMapName={analysis.readMapName ?? ''}
             onConfirm={(name, existingId) => onConfirmMap(analysis, name, existingId)}
           />
 

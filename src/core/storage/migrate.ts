@@ -49,7 +49,6 @@ function normalizeAi(ai: Partial<AiReport> | undefined): AiReport | undefined {
     weaknesses: ai.weaknesses ?? [],
     drills: ai.drills ?? [],
     timeline: ai.timeline ?? [],
-    environment: ai.environment ?? { description: '', landmarks: [] },
     caveats: ai.caveats ?? '',
     ...(ai.usage ? { usage: ai.usage } : {}),
   };
@@ -73,6 +72,11 @@ export function normalizeAnalysis(raw: Partial<MatchAnalysis> & { id: string }):
     sessionId: raw.sessionId ?? `session-heritee-${raw.id}`,
     map: raw.map ?? { ...UNKNOWN_MAP },
     ...(raw.mapFingerprint ? { mapFingerprint: raw.mapFingerprint } : {}),
+    ...(raw.mapNameCrop ? { mapNameCrop: raw.mapNameCrop } : {}),
+    ...(raw.readMapName ? { readMapName: raw.readMapName } : {}),
+    ...(raw.readGameMode ? { readGameMode: raw.readGameMode } : {}),
+    outcome: raw.outcome ?? 'inconnue',
+    ...(raw.officialStats ? { officialStats: raw.officialStats } : {}),
     settings: raw.settings ?? {
       samplingHz: 2,
       aiEnabled: false,

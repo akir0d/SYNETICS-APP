@@ -52,6 +52,17 @@ export function LibraryScreen({ analyses, onOpen, onDelete, onNew }: LibraryScre
                     ? `${a.map.mapName}${a.map.confirmed ? '' : ' ?'}`
                     : 'Arene inconnue'}
                 </span>
+                {a.outcome !== 'inconnue' && (
+                  <span
+                    className="tag"
+                    style={{
+                      color: a.outcome === 'victoire' ? 'var(--ok)' : 'var(--danger)',
+                      borderColor: a.outcome === 'victoire' ? 'var(--ok)' : 'var(--danger)',
+                    }}
+                  >
+                    {a.outcome === 'victoire' ? 'Victoire' : 'Defaite'}
+                  </span>
+                )}
                 {a.ai ? <span className="tag">Analyse IA</span> : <span className="tag">Local seul</span>}
                 {a.events.some((e) => e.source === 'manual') && <span className="tag">Annote</span>}
               </div>

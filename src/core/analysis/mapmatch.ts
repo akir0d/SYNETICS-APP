@@ -1,4 +1,5 @@
 import type { KnownMap, MapFingerprint, MapIdentification } from '../types';
+import { maskDistance, maskInk, MIN_MASK_INK } from '../video/fingerprint';
 import { clamp01 } from './stats';
 
 /**
@@ -18,6 +19,22 @@ export const MIN_MARGIN = 0.05;
 
 const WEIGHTS = { hue: 0.45, luma: 0.2, zones: 0.35 };
 
+/**
+ * Poids de la trace du nom de carte quand elle est disponible.
+ *
+ * C'est le signal de loin le plus sur : le jeu ecrit le meme texte, dans la
+ * meme police, au meme endroit. La palette ne sert plus que d'appoint, utile
+ * quand la zone du HUD est mal cadree et que la trace ne vaut rien.
+ *
+ * La valeur n'est pas arbitraire : deux palettes totalement opposees sont a
+ * environ 0,82 l'une de l'autre. Pour que la couleur ne puisse jamais opposer
+ * son veto a un nom identique, sa contribution maximale doit rester sous le
+ * seuil de rapprochement, donc (1 - poids) x 0,82 < 0,22. A 0,85 la couleur
+ * plafonne a 0,12, tandis que deux noms differents (environ 0,50 d'ecart)
+ * pesent 0,42 et restent nettement rejetes.
+ */
+const NAME_WEIGHT = 0.85;
+
 /** Distance L1 normalisee entre deux histogrammes de meme taille. */
 function histogramDistance(a: readonly number[], b: readonly number[]): number {
   if (a.length === 0 || a.length !== b.length) return 1;
@@ -35,13 +52,26 @@ function zoneDistance(a: readonly number[], b: readonly number[]): number {
   return clamp01(sum / a.length / 255);
 }
 
-/** 0 = arenes identiques, 1 = totalement differentes. */
-export function fingerprintDistance(a: MapFingerprint, b: MapFingerprint): number {
+/** Distance fondee sur la seule palette du lieu. */
+function paletteDistance(a: MapFingerprint, b: MapFingerprint): number {
   return clamp01(
     WEIGHTS.hue * histogramDistance(a.hue, b.hue) +
       WEIGHTS.luma * histogramDistance(a.luma, b.luma) +
       WEIGHTS.zones * zoneDistance(a.zones, b.zones),
   );
+}
+
+/** 0 = arenes identiques, 1 = totalement differentes. */
+export function fingerprintDistance(a: MapFingerprint, b: MapFingerprint): number {
+  const palette = paletteDistance(a, b);
+
+  // La trace du nom de carte n'existe que si la zone du HUD a pu etre lue des
+  // deux cotes ; sinon on se rabat entierement sur la palette. Une zone vide
+  // compte comme illisible : mieux vaut la palette qu'une comparaison de rien.
+  if (!a.nameMask || !b.nameMask || a.nameMask.length !== b.nameMask.length) return palette;
+  if (maskInk(a.nameMask) < MIN_MASK_INK || maskInk(b.nameMask) < MIN_MASK_INK) return palette;
+
+  return clamp01(NAME_WEIGHT * maskDistance(a.nameMask, b.nameMask) + (1 - NAME_WEIGHT) * palette);
 }
 
 export interface MapCandidate {
@@ -112,11 +142,17 @@ export function mergeFingerprints(
     return a.map((v, i) => (v * w + (b[i] as number)) / (w + 1));
   };
 
+  const nameMask =
+    reference.nameMask && addition.nameMask && reference.nameMask.length === addition.nameMask.length
+      ? blend(reference.nameMask, addition.nameMask)
+      : reference.nameMask ?? addition.nameMask;
+
   return {
     hue: blend(reference.hue, addition.hue),
     luma: blend(reference.luma, addition.luma),
     zones: blend(reference.zones, addition.zones),
     frames: reference.frames + addition.frames,
+    ...(nameMask ? { nameMask } : {}),
   };
 }
 

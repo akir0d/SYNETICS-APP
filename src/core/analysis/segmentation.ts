@@ -1,5 +1,6 @@
 import type { FrameFeature } from '../types';
 import { clamp01, movingAverage } from './stats';
+import type { BlackRun } from './hud';
 
 /**
  * Decoupage d'une rediffusion en matchs.
@@ -15,8 +16,20 @@ import { clamp01, movingAverage } from './stats';
 export interface Segment {
   /** Rang du match dans la rediffusion, a partir de 1. */
   index: number;
+  /** Debut du jeu proprement dit. */
   startS: number;
+  /** Fin du jeu proprement dit, avant les ecrans de fin. */
   endS: number;
+  /**
+   * Bornes de la fenetre entre deux ecrans noirs.
+   *
+   * Elle deborde le jeu des deux cotes : elle contient aussi l'ecran de
+   * victoire et le tableau des scores, que le moteur exclut du match — ils
+   * sont statiques — mais ou se trouvent les seules informations chiffrees
+   * fiables de la manche.
+   */
+  windowStartS: number;
+  windowEndS: number;
   /** Part du temps reellement actif a l'interieur du segment, 0 a 1. */
   activityRatio: number;
   /** 0 a 1 : nettete du decoupage (densite d'action et franchise des pauses). */
@@ -69,6 +82,18 @@ export interface SegmentationResult {
   density: number[];
   /** Temps morts retenus entre deux matchs. */
   gaps: Array<{ startS: number; endS: number }>;
+  /** Le decoupage s'est-il appuye sur les ecrans noirs du jeu ? */
+  usedBlackScreens: boolean;
+}
+
+export interface SegmentationInput {
+  /**
+   * Fenetres delimitees par les ecrans noirs du jeu. Quand elles sont
+   * fournies, elles font office de frontieres infranchissables : deux manches
+   * separees par un ecran noir ne peuvent plus fusionner, quoi que dise le
+   * mouvement.
+   */
+  windows?: readonly BlackRun[];
 }
 
 interface Span {
@@ -83,11 +108,14 @@ interface Span {
 export function detectMatchSegments(
   features: readonly FrameFeature[],
   intensity: readonly number[],
-  options: Partial<SegmentationOptions> = {},
+  options: Partial<SegmentationOptions> & SegmentationInput = {},
 ): SegmentationResult {
   const opts: SegmentationOptions = { ...DEFAULT_SEGMENTATION, ...options };
+  const windows = options.windows;
 
-  if (features.length === 0) return { segments: [], density: [], gaps: [] };
+  if (features.length === 0) {
+    return { segments: [], density: [], gaps: [], usedBlackScreens: false };
+  }
 
   const active = intensity.map((v, i) =>
     v >= opts.idleIntensity && (features[i] as FrameFeature).diff >= opts.minMotion ? 1 : 0,
@@ -99,37 +127,77 @@ export function detectMatchSegments(
   const window = Math.max(1, Math.round(windowS * opts.samplingHz));
   const density = movingAverage(active, window);
 
-  let spans = spansByHysteresis(density, opts.enterDensity, opts.exitDensity);
-  spans = mergeCloseSpans(spans, features, opts.minGapS);
-  spans = spans.map((span) => trimToActivity(span, active));
-  spans = spans.filter((span) => durationOf(span, features) >= opts.minMatchS);
-  spans = spans.flatMap((span) => splitOverlongSpan(span, density, features, opts));
-  spans = spans.filter((span) => durationOf(span, features) >= opts.minMatchS);
+  // Sans ecran noir exploitable, on retombe sur le decoupage par le mouvement
+  // seul : une captation produite autrement doit rester analysable.
+  const lastT = timeAt(features, features.length - 1);
+  const usedBlackScreens = Boolean(windows && windows.length > 0);
+  const ranges: Array<{ range: Span; window: BlackRun }> = usedBlackScreens
+    ? (windows as readonly BlackRun[])
+        .map((w) => ({ range: indexRange(features, w.startS, w.endS), window: w }))
+        .filter((r) => r.range.to > r.range.from)
+    : [{ range: { from: 0, to: features.length - 1 }, window: { startS: 0, endS: lastT } }];
 
-  const segments: Segment[] = spans.map((span, i) => {
+  const found: Array<{ span: Span; window: BlackRun }> = [];
+  for (const { range, window: bounds } of ranges) {
+    let inRange = spansByHysteresis(density, opts.enterDensity, opts.exitDensity, range);
+    inRange = mergeCloseSpans(inRange, features, opts.minGapS);
+    inRange = inRange.map((span) => trimToActivity(span, active));
+    inRange = inRange.filter((span) => durationOf(span, features) >= opts.minMatchS);
+    inRange = inRange.flatMap((span) => splitOverlongSpan(span, density, features, opts));
+    for (const span of inRange) {
+      if (durationOf(span, features) >= opts.minMatchS) found.push({ span, window: bounds });
+    }
+  }
+
+  const segments: Segment[] = found.map(({ span, window: bounds }, i) => {
     const activityRatio = meanOf(active, span);
+    const startS = timeAt(features, span.from);
+    const endS = timeAt(features, span.to);
     return {
       index: i + 1,
-      startS: timeAt(features, span.from),
-      endS: timeAt(features, span.to),
+      startS,
+      endS,
+      // Sans ecran noir, la fenetre se confond avec le match : il n'y a pas
+      // d'ecran de fin identifiable a aller chercher.
+      windowStartS: usedBlackScreens ? Math.min(bounds.startS, startS) : startS,
+      windowEndS: usedBlackScreens ? Math.max(bounds.endS, endS) : endS,
       activityRatio,
       // Un match franc est dense en action ; un decoupage douteux l'est moins.
       confidence: clamp01(0.25 + 0.75 * meanOf(density, span)) * clamp01(activityRatio / 0.5),
     };
   });
 
-  return { segments, density, gaps: gapsBetween(segments, timeAt(features, features.length - 1)) };
+  return {
+    segments,
+    density,
+    gaps: gapsBetween(segments, timeAt(features, features.length - 1)),
+    usedBlackScreens,
+  };
+}
+
+/** Bornes d'indices correspondant a un intervalle de temps. */
+function indexRange(features: readonly FrameFeature[], startS: number, endS: number): Span {
+  let from = 0;
+  while (from < features.length - 1 && (features[from] as FrameFeature).t < startS) from++;
+  let to = features.length - 1;
+  while (to > 0 && (features[to] as FrameFeature).t > endS) to--;
+  return { from, to };
 }
 
 /**
  * Un seuil unique ferait clignoter l'etat autour de sa valeur : on entre donc
  * en match plus haut qu'on n'en sort.
  */
-function spansByHysteresis(density: readonly number[], enter: number, exit: number): Span[] {
+function spansByHysteresis(
+  density: readonly number[],
+  enter: number,
+  exit: number,
+  range: Span,
+): Span[] {
   const spans: Span[] = [];
   let from: number | null = null;
 
-  for (let i = 0; i < density.length; i++) {
+  for (let i = range.from; i <= range.to; i++) {
     const v = density[i] as number;
     if (from === null && v >= enter) from = i;
     else if (from !== null && v < exit) {
@@ -137,7 +205,7 @@ function spansByHysteresis(density: readonly number[], enter: number, exit: numb
       from = null;
     }
   }
-  if (from !== null) spans.push({ from, to: density.length - 1 });
+  if (from !== null) spans.push({ from, to: range.to });
   return spans;
 }
 
@@ -253,5 +321,13 @@ export function sliceFeatures(
 
 /** Segment unique couvrant tout le fichier, quand le decoupage est desactive. */
 export function wholeVideoSegment(durationS: number): Segment {
-  return { index: 1, startS: 0, endS: durationS, activityRatio: 1, confidence: 1 };
+  return {
+    index: 1,
+    startS: 0,
+    endS: durationS,
+    windowStartS: 0,
+    windowEndS: durationS,
+    activityRatio: 1,
+    confidence: 1,
+  };
 }

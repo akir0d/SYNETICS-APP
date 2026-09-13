@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import type { AiEnvironment, KnownMap, MatchAnalysis } from '../../core/types';
+import type { KnownMap, MatchAnalysis } from '../../core/types';
 
 interface MapPanelProps {
   analysis: MatchAnalysis;
   mapLibrary: readonly KnownMap[];
-  environment: AiEnvironment | undefined;
+  /** Nom de carte lu a l'ecran par l'application. Chaine vide si rien n'a ete lu. */
+  readMapName: string;
   onConfirm: (name: string, existingId: string | null) => void;
 }
 
@@ -15,9 +16,14 @@ interface MapPanelProps {
  * que le joueur donne. Le panneau rend ce fonctionnement explicite plutot que
  * de laisser croire a une reconnaissance magique.
  */
-export function MapPanel({ analysis, mapLibrary, environment, onConfirm }: MapPanelProps) {
+export function MapPanel({
+  analysis,
+  mapLibrary,
+  readMapName,
+  onConfirm,
+}: MapPanelProps) {
   const { map } = analysis;
-  const [name, setName] = useState(map.mapName);
+  const [name, setName] = useState(map.mapName || readMapName);
   const [editing, setEditing] = useState(!map.mapName);
 
   const recognised = map.mapId !== null && !map.confirmed;
@@ -78,6 +84,13 @@ export function MapPanel({ analysis, mapLibrary, environment, onConfirm }: MapPa
         </div>
       )}
 
+      {readMapName && !map.confirmed && (
+        <div className="banner banner-ok" style={{ marginBottom: 12 }}>
+          Nom lu a l'ecran : <strong>{readMapName}</strong>. Confirmez-le pour que les prochains
+          matchs sur cette carte soient reconnus par leur seule empreinte.
+        </div>
+      )}
+
       {editing && (
         <>
           <div className="field">
@@ -117,22 +130,28 @@ export function MapPanel({ analysis, mapLibrary, environment, onConfirm }: MapPa
         </>
       )}
 
-      {/* Une analyse anterieure a la description d'arene porte un champ vide :
-          afficher un bandeau sans contenu ne renseignerait personne. */}
-      {environment && environment.description.trim() !== '' && (
-        <div className="banner banner-info" style={{ marginTop: 12, marginBottom: 0 }}>
-          <strong>Ce que l'IA voit de l'arene :</strong> {environment.description}
-          {environment.landmarks.length > 0 && (
-            <ul className="ai-list" style={{ marginTop: 6, marginBottom: 0 }}>
-              {environment.landmarks.map((l, i) => (
-                <li key={i}>{l}</li>
-              ))}
-            </ul>
-          )}
+      {analysis.mapNameCrop && (
+        <div style={{ marginTop: 12 }}>
+          <p className="hint" style={{ marginBottom: 6 }}>
+            Zone du HUD lue pour reconnaitre la carte. Si le nom n'y apparait pas, ajustez la zone
+            dans les Reglages puis relancez l'analyse.
+          </p>
+          <img
+            src={`data:image/jpeg;base64,${analysis.mapNameCrop}`}
+            alt="Zone du HUD ou le nom de carte est recherche"
+            style={{
+              display: 'block',
+              width: '100%',
+              maxWidth: 260,
+              borderRadius: 6,
+              border: '1px solid var(--border-strong)',
+              imageRendering: 'pixelated',
+            }}
+          />
         </div>
       )}
 
-      {!environment && !analysis.mapFingerprint && (
+      {!analysis.mapFingerprint && (
         <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
           Cette analyse a ete produite avant la reconnaissance d'arene : son nom ne servira pas a
           identifier les prochains matchs.

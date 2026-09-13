@@ -34,7 +34,6 @@ describe('schema de sortie IA', () => {
     expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
       'caveats',
       'drills',
-      'environment',
       'strengths',
       'summary',
       'timeline',
@@ -51,7 +50,6 @@ describe('schema de sortie IA', () => {
       timeline: [
         { t: 42.5, type: 'death', confidence: 0.8, label: 'Mort au centre', comment: 'Angle ouvert' },
       ],
-      environment: { description: 'Hangar sombre', landmarks: ['Passerelle'] },
       caveats: 'Images echantillonnees.',
     });
     expect(parsed.success).toBe(true);
@@ -64,7 +62,6 @@ describe('schema de sortie IA', () => {
       weaknesses: [],
       drills: [],
       timeline: [{ t: 1, type: 'scene_cut', confidence: 0.5, label: 'a', comment: 'b' }],
-      environment: { description: 'x', landmarks: [] },
       caveats: '',
     });
     expect(parsed.success).toBe(false);
@@ -77,7 +74,6 @@ describe('schema de sortie IA', () => {
       weaknesses: [],
       drills: [],
       timeline: [{ t: 1, type: 'kill', confidence: 1.4, label: 'a', comment: 'b' }],
-      environment: { description: 'x', landmarks: [] },
       caveats: '',
     });
     expect(parsed.success).toBe(false);
@@ -88,6 +84,9 @@ describe('prompt d analyse', () => {
   it('reste fige, pour que le cache de prefixe serve d une analyse a l autre', () => {
     expect(COACH_SYSTEM_PROMPT).not.toMatch(/\d{4}-\d{2}-\d{2}/);
     expect(COACH_SYSTEM_PROMPT).toContain('eva.gg');
+    // La lecture de l'ecran est faite hors ligne : le prompt ne doit plus
+    // demander au modele de dechiffrer un tableau des scores.
+    expect(COACH_SYSTEM_PROMPT).not.toMatch(/tableau des scores/i);
   });
 
   it('transmet le mode de jeu, les mesures et les horodatages des images', () => {

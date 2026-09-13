@@ -16,7 +16,8 @@ import {
   type Segment,
 } from './analysis/segmentation';
 import { identifyMap, unknownMap } from './analysis/mapmatch';
-import { buildMapFingerprint } from './video/fingerprint';
+import { detectBlackRuns, windowsBetweenBlackRuns } from './analysis/hud';
+import { buildMapFingerprint, captureMapName } from './video/fingerprint';
 import {
   extractKeyframes,
   loadVideo,
@@ -147,12 +148,23 @@ export async function analyzeVideoFile(opts: PipelineOptions): Promise<PipelineR
 
     const fingerprintOptions: Parameters<typeof buildMapFingerprint>[3] = {};
     if (signal) fingerprintOptions.signal = signal;
-    const fingerprint = await buildMapFingerprint(
+    const palette = await buildMapFingerprint(
       loaded.element,
       segment.startS,
       segment.endS,
       fingerprintOptions,
     );
+
+    // Le nom de carte est ecrit dans le HUD pendant toute la manche : sa trace
+    // est de loin le signal le plus sur pour reconnaitre une arene.
+    const nameCapture = await captureMapName(
+      loaded.element,
+      segment.startS,
+      segment.endS,
+      settings.mapNameRegion,
+      fingerprintOptions,
+    );
+    const fingerprint = nameCapture ? { ...palette, nameMask: nameCapture.mask } : palette;
     const identification = library.length > 0 ? identifyMap(fingerprint, library) : unknownMap();
 
     onProgress?.({
@@ -162,23 +174,25 @@ export async function analyzeVideoFile(opts: PipelineOptions): Promise<PipelineR
     });
 
     const segmentIntensity = computeIntensity(segmentFeatures, settings.samplingHz);
-    const relativeTimes = selectKeyframeTimes(
-      segmentFeatures,
-      segmentIntensity,
-      settings.aiFrameBudget,
-    );
+    // Une part du budget est reservee aux ecrans de fin : c'est la seule
+    // source chiffree fiable de la manche (carte, mode, issue, K/D/A). Les
+    // sacrifier pour une image d'action de plus serait un mauvais echange.
+    const endScreenTimes = endScreenSamples(segment);
+    const playBudget = Math.max(4, settings.aiFrameBudget - endScreenTimes.length);
+    const relativeTimes = selectKeyframeTimes(segmentFeatures, segmentIntensity, playBudget);
+
     const keyframeOptions: Parameters<typeof extractKeyframes>[2] = {};
     if (signal) keyframeOptions.signal = signal;
-    const extracted = await extractKeyframes(
-      loaded.element,
-      relativeTimes.map((t) => t + segment.startS),
-      keyframeOptions,
-    );
+    const absoluteTimes = [
+      ...relativeTimes.map((t) => t + segment.startS),
+      ...endScreenTimes,
+    ];
+    const extracted = await extractKeyframes(loaded.element, absoluteTimes, keyframeOptions);
     // Les images sont prelevees dans le fichier source, mais l'analyse raisonne
     // en temps de match : on repasse donc en horodatage relatif.
-    const segmentKeyframes = extracted.map((frame, i) => ({
+    const segmentKeyframes = extracted.map((frame) => ({
       ...frame,
-      t: relativeTimes[i] ?? frame.t - segment.startS,
+      t: frame.t - segment.startS,
     }));
 
     const analysis: MatchAnalysis = {
@@ -200,6 +214,8 @@ export async function analyzeVideoFile(opts: PipelineOptions): Promise<PipelineR
         distance: identification.distance,
       },
       mapFingerprint: fingerprint,
+      ...(nameCapture ? { mapNameCrop: nameCapture.crop } : {}),
+      outcome: 'inconnue' as const,
       settings: {
         samplingHz: settings.samplingHz,
         aiEnabled: settings.aiEnabled,
@@ -251,13 +267,41 @@ function resolveSegments(
 ): Segment[] {
   if (!settings.autoSegment) return [wholeVideoSegment(durationS)];
 
-  const { segments } = detectMatchSegments(features, intensity, {
+  // EVA insere un ecran noir apres le decompte de debut et apres le tableau
+  // des scores : quand ils sont la, ils valent mieux que n'importe quelle
+  // estimation par le mouvement, puisqu'ils viennent du jeu.
+  const windows = settings.useBlackScreens
+    ? windowsBetweenBlackRuns(detectBlackRuns(features), durationS)
+    : [];
+
+  const options = {
     samplingHz: settings.samplingHz,
     minMatchS: settings.minMatchS,
     minGapS: settings.minGapS,
-  });
+  };
 
+  if (windows.length > 1) {
+    const { segments } = detectMatchSegments(features, intensity, { ...options, windows });
+    if (segments.length > 0) return segments;
+  }
+
+  // Pas d'ecran noir exploitable — captation recadree, montage, fondu doux :
+  // on retombe sur le decoupage par le mouvement.
+  const { segments } = detectMatchSegments(features, intensity, options);
   return segments.length > 0 ? segments : [wholeVideoSegment(durationS)];
+}
+
+/**
+ * Instants a prelever apres la fin du jeu : ecran de victoire, puis tableau
+ * des scores. Ils sont statiques, donc exclus du match, mais c'est la que le
+ * jeu ecrit la carte, le mode, l'issue et les K/D/A.
+ */
+function endScreenSamples(segment: Segment): number[] {
+  const span = segment.windowEndS - segment.endS;
+  if (span < 2) return [];
+  const count = span >= 12 ? 4 : span >= 6 ? 3 : 2;
+  // On evite le tout dernier instant, souvent deja en fondu vers le noir.
+  return Array.from({ length: count }, (_, i) => segment.endS + (span * (i + 1)) / (count + 1));
 }
 
 /**
@@ -278,6 +322,7 @@ export function recomputeAnalysis(analysis: MatchAnalysis, events: MatchEvent[])
     durationS: analysis.video.durationS,
     samplingHz: analysis.settings.samplingHz,
     profile: analysis.profile,
+    officialStats: analysis.officialStats,
   });
 
   return {

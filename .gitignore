@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-electron/
 dist-e2e/
+dist-ocr/
 release/
 ios/
 .vite/
@@ -10,3 +11,5 @@ ios/
 .env
 .env.local
 *.tsbuildinfo
+__pycache__/
+*.pyc

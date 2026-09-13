@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { AppSettings, GameProfileId, KnownMap } from '../../core/types';
-import { AI_MODELS, GAME_PROFILES } from '../../core/types';
+import type { AppSettings, GameProfileId, HudRegion, KnownMap } from '../../core/types';
+import { AI_MODELS, DEFAULT_MAP_NAME_REGION, GAME_PROFILES } from '../../core/types';
 import { formatDuration } from '../../core/analysis/metrics';
 import { detectPlatform } from '../../platform';
 
@@ -24,6 +24,12 @@ export function SettingsScreen({ settings, maps, onChange, onDeleteMap }: Settin
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     onChange({ ...settings, [key]: value });
   };
+
+  const updateRegion = (key: keyof HudRegion, value: number) => {
+    update('mapNameRegion', { ...settings.mapNameRegion, [key]: value / 100 });
+  };
+
+  const region = settings.mapNameRegion;
 
   return (
     <>
@@ -190,6 +196,26 @@ export function SettingsScreen({ settings, maps, onChange, onDeleteMap }: Settin
         </div>
 
         <div className="field">
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.useBlackScreens}
+              onChange={(e) => update('useBlackScreens', e.target.checked)}
+              disabled={!settings.autoSegment}
+              style={{ width: 'auto', marginRight: 8 }}
+            />
+            Se caler sur les ecrans noirs du jeu
+          </label>
+          <p className="hint" style={{ margin: 0 }}>
+            EVA insere un ecran noir apres le decompte de debut et apres le tableau des scores.
+            Quand ils sont presents, ils servent de frontieres franches : deux manches separees par
+            un ecran noir ne peuvent plus etre fusionnees, quoi que dise le mouvement. Si votre
+            captation n'en contient pas (montage, fondu doux, recadrage), l'application retombe
+            d'elle-meme sur la detection par le mouvement.
+          </p>
+        </div>
+
+        <div className="field">
           <label htmlFor="minMatch">
             Duree minimale d'un match : <b>{formatDuration(settings.minMatchS)}</b>
           </label>
@@ -229,6 +255,53 @@ export function SettingsScreen({ settings, maps, onChange, onDeleteMap }: Settin
             manches s'enchainent vite, montez si un seul match se retrouve coupe en deux.
           </p>
         </div>
+      </div>
+
+      <div className="card">
+        <h2>Zone du nom de carte</h2>
+
+        <p className="hint">
+          Le jeu ecrit le nom de la carte en haut au centre, sous le chronometre. L'application y
+          preleve une empreinte du texte : c'est ce qui lui permet de reconnaitre une arene deja
+          nommee, sans rien comprendre a ce qui est ecrit. Ces valeurs sont en pourcentage de
+          l'image, elles restent donc valables quelle que soit la definition.
+        </p>
+        <p className="hint">
+          Les valeurs par defaut correspondent au HUD d'EVA en plein cadre. Ne les touchez que si
+          la vignette affichee dans le rapport d'un match ne montre pas le nom de la carte — par
+          exemple sur une captation recadree ou filmee a l'ecran.
+        </p>
+
+        {(
+          [
+            ['x', 'Bord gauche', 0, 90],
+            ['y', 'Bord haut', 0, 90],
+            ['width', 'Largeur', 5, 100],
+            ['height', 'Hauteur', 2, 50],
+          ] as Array<[keyof HudRegion, string, number, number]>
+        ).map(([key, label, min, max]) => (
+          <div className="field" key={key}>
+            <label htmlFor={`region-${key}`}>
+              {label} : <b>{Math.round(region[key] * 100)} %</b>
+            </label>
+            <input
+              id={`region-${key}`}
+              type="range"
+              min={min}
+              max={max}
+              step={1}
+              value={Math.round(region[key] * 100)}
+              onChange={(e) => updateRegion(key, Number(e.target.value))}
+            />
+          </div>
+        ))}
+
+        <button
+          className="btn-ghost"
+          onClick={() => update('mapNameRegion', { ...DEFAULT_MAP_NAME_REGION })}
+        >
+          Revenir a la zone par defaut
+        </button>
       </div>
 
       <div className="card">
@@ -293,9 +366,16 @@ export function SettingsScreen({ settings, maps, onChange, onDeleteMap }: Settin
             rediffusion avant de lui faire confiance les yeux fermes.
           </li>
           <li>
-            La reconnaissance d'arene compare des <b>signatures de couleur et de lumiere</b>, pas
-            la geometrie du lieu. Deux arenes a l'ambiance tres proche peuvent etre confondues :
-            l'application prefere alors afficher un doute plutot que trancher au hasard.
+            La reconnaissance d'arene s'appuie d'abord sur l'<b>empreinte du nom ecrit dans le
+            HUD</b>, completee par la palette de couleurs du lieu. Elle ne <i>lit</i> pas ce nom :
+            seule l'analyse IA sait le dechiffrer et vous le proposer. Hors IA, vous nommez une
+            arene une fois et elle est reconnue ensuite.
+          </li>
+          <li>
+            Les eliminations et morts affichees viennent du <b>tableau des scores du jeu</b> des
+            que l'IA a pu le lire — a condition d'avoir renseigne votre pseudo ci-dessus, sans quoi
+            l'application ne sait pas quelle ligne est la votre. Sinon elles viennent de votre
+            marquage manuel.
           </li>
         </ul>
       </div>

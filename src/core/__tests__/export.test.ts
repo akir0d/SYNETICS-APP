@@ -18,6 +18,7 @@ const ANALYSIS: MatchAnalysis = {
     mimeType: 'video/mp4',
   },
   sourceOffsetS: 620,
+  outcome: 'victoire',
   segmentIndex: 3,
   segmentCount: 8,
   sessionId: 'session-1',
@@ -108,10 +109,6 @@ describe('export Markdown', () => {
         weaknesses: ['Angles decouverts'],
         drills: [{ title: 'Pre-visee', description: 'Tenir la ligne', focus: 'visee' }],
         timeline: [],
-        environment: {
-          description: 'Hangar industriel, structures metalliques, eclairage bleu froid.',
-          landmarks: ['Passerelle centrale', 'Conteneurs empiles'],
-        },
         caveats: 'Images echantillonnees.',
       },
     });

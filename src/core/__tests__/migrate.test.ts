@@ -65,11 +65,11 @@ describe('analyses enregistrees par une version anterieure', () => {
     expect(migree.map.mapName).toBe('');
     expect(migree.map.mapId).toBeNull();
     expect(migree.map.confirmed).toBe(false);
+    expect(migree.outcome).toBe('inconnue');
     expect(migree.segmentIndex).toBe(1);
     expect(migree.segmentCount).toBe(1);
     expect(migree.sourceOffsetS).toBe(0);
     expect(migree.sessionId).toContain('ancienne-1');
-    expect(migree.ai?.environment).toEqual({ description: '', landmarks: [] });
   });
 
   it('considere que le fichier ne contenait qu un match', () => {

@@ -1,4 +1,5 @@
 import type {
+  AiScoreRow,
   Engagement,
   FrameFeature,
   GameProfileId,
@@ -16,6 +17,12 @@ export interface MetricsInput {
   durationS: number;
   samplingHz: number;
   profile: GameProfileId;
+  /**
+   * Ligne du joueur lue sur le tableau des scores du jeu. Elle prime sur le
+   * marquage manuel : aucune annotation a posteriori ne vaut le chiffre que le
+   * jeu a lui-meme affiche.
+   */
+  officialStats?: AiScoreRow | undefined;
 }
 
 /**
@@ -41,8 +48,9 @@ export function computeMetrics(input: MetricsInput): MatchMetrics {
   const meanEngagementS = engagementCount > 0 ? activeSeconds / engagementCount : 0;
   const tempoPerMin = durationS > 0 ? engagementCount / (durationS / 60) : 0;
 
-  const kills = countType(events, 'kill');
-  const deaths = countType(events, 'death');
+  const official = input.officialStats;
+  const kills = official ? official.kills : countType(events, 'kill');
+  const deaths = official ? official.deaths : countType(events, 'death');
   const objectives = countType(events, 'objective');
   const exposureEvents = countType(events, 'damage_taken');
 

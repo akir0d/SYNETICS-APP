@@ -87,7 +87,6 @@ export async function analyzeMatchWithClaude(req: ClaudeAnalysisRequest): Promis
     weaknesses: parsed.weaknesses,
     drills: parsed.drills,
     timeline: parsed.timeline,
-    environment: parsed.environment,
     caveats: parsed.caveats,
     usage: {
       inputTokens: response.usage.input_tokens,

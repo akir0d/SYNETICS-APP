@@ -38,8 +38,13 @@ export interface TeamBlock {
 
 export interface ScoreboardReading {
   /**
-   * Les deux equipes, de haut en bas. La rangee du haut est celle qui a
-   * gagne la manche : le jeu place toujours le vainqueur au-dessus.
+   * Les deux equipes, de haut en bas.
+   *
+   * L'ordre suit le camp — Alliance au-dessus, Rebels en dessous — et non le
+   * resultat. Une capture de Carolo League le montre sans ambiguite : Alliance
+   * est en haut avec 24 %, Rebels en dessous avec 100 %, et c'est Rebels qui
+   * remporte la manche. Le vainqueur se lit au pourcentage, jamais a la
+   * position de la rangee.
    */
   teams: TeamBlock[];
 }

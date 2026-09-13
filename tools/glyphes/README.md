@@ -15,26 +15,66 @@ formes, ce qui est a la fois exact, instantane et entierement hors ligne.
 | `structure.py` | Reperage du tableau des scores a partir de ses pictogrammes K/D/A |
 | `lecture.py` | Decoupage d'une case en glyphes, au pas de la police |
 | `construire.py` | Produit `src/core/vision/glyphes.json`, embarque dans l'application |
-| `croisee.py` | Validation croisee : chaque capture lue avec les exemplaires des autres |
+| `croisee.py` | Validation croisee des chiffres : chaque capture lue avec les exemplaires des autres |
+| `pseudos.py` | Verite terrain des pseudos, et decoupe de la bande de noms |
+| `noms.py` | Reconnaissance d'un pseudo par choix dans une liste fermee |
+| `croisee_noms.py` | Validation croisee des pseudos, equipe par equipe |
 
 ## Usage
 
 ```bash
-python3 tools/glyphes/construire.py   # regenere le fichier de glyphes
-python3 tools/glyphes/croisee.py      # mesure la justesse honnetement
+python3 tools/glyphes/construire.py     # regenere le fichier de glyphes
+python3 tools/glyphes/croisee.py        # justesse des chiffres
+python3 tools/glyphes/croisee_noms.py   # justesse des pseudos
 ```
 
 Dependances : `pillow`, `numpy`, `scipy`.
 
 ## Resultat mesure
 
-Validation croisee sur trois rediffusions (une d'entrainement, deux de league),
-chaque capture etant lue avec des exemplaires tires uniquement des autres :
+### Les chiffres : ca marche
+
+Validation croisee sur quatre rediffusions (une d'entrainement, trois de
+league), chaque capture etant lue avec des exemplaires tires uniquement des
+autres :
 
 ```
-NOMBRES    : 93/96 exacts (96,9 %)
-CARACTERES : 154/157 justes (98,1 %)
+NOMBRES    : 125/128 exacts (97,7 %)
+CARACTERES : 204/207 justes (98,6 %)
 ```
+
+### Les pseudos : ca ne marche que pour ce qui a deja ete vu
+
+Meme protocole, applique aux noms de joueurs. Le tableau doit etre explique par
+une equipe connue : quatre cartes, quatre joueurs de la meme equipe, dans
+l'ordre qui colle le mieux.
+
+```
+EQUIPE reconnue      : 4/8 (50 %)
+JOUEURS bien places  : 16/32 (50 %)
+  equipe deja vue    : 16/16 (100 %)
+  equipe inedite     : 0/16 (0 %)
+```
+
+La moyenne ne veut rien dire ici : le resultat est binaire. Une equipe dont une
+autre capture montre le rendu est reconnue sans une seule faute ; une equipe
+inedite ne l'est jamais. Deux raisons se cumulent contre les lettres la ou les
+chiffres passent : elles sont trois fois plus nombreuses — vingt-sept formes
+contre dix — et elles sont ecrites plus petit, seize pixels de haut contre
+vingt-trois. Il y a donc beaucoup plus a distinguer avec beaucoup moins de
+matiere.
+
+Ce n'est pas une question de reglage mais de quantite d'exemplaires, et
+augmenter la definition n'y changera rien : ces captures ont deja l'image de
+jeu en 1100 pixels de haut, soit ce que donne une rediffusion en 1080p.
+
+La consequence est une decision de conception, pas un correctif : l'application
+ne devinera pas les noms d'une equipe qu'elle n'a jamais vue. Elle montre les
+huit noms decoupes en regard de l'effectif saisi, l'utilisateur confirme une
+fois, et ces exemplaires-la rendent ensuite la reconnaissance sure. Le
+regroupement des deux camps, lui, ne demande aucune lecture : les quatre
+joueurs d'une equipe partagent le debut de leur pseudo, le tag etant colle
+devant — SYNxAKIROD pour akirod de Synetics.
 
 ## Deux choix qui ne sont pas evidents
 

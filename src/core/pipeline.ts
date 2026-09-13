@@ -18,6 +18,7 @@ import {
 import { identifyMap, unknownMap } from './analysis/mapmatch';
 import { detectBlackRuns, windowsBetweenBlackRuns } from './analysis/hud';
 import { buildMapFingerprint, captureMapName } from './video/fingerprint';
+import { findScoreboard, summarize } from './video/scoreboard';
 import {
   extractKeyframes,
   loadVideo,
@@ -178,6 +179,13 @@ export async function analyzeVideoFile(opts: PipelineOptions): Promise<PipelineR
     // source chiffree fiable de la manche (carte, mode, issue, K/D/A). Les
     // sacrifier pour une image d'action de plus serait un mauvais echange.
     const endScreenTimes = endScreenSamples(segment);
+
+    // Le tableau des scores est la seule source chiffree que le jeu ecrive
+    // lui-meme. On le cherche dans la fenetre de fin, ou il n'apparait que
+    // quelques secondes ; le lecteur ne rend rien sur un ecran qui n'en est
+    // pas un, donc rater le bon instant ne coute qu'une lecture vide.
+    const capture = await findScoreboard(loaded.element, endScreenTimes, signal ? { signal } : {});
+    const scoreboard = capture ? summarize(capture) : null;
     const playBudget = Math.max(4, settings.aiFrameBudget - endScreenTimes.length);
     const relativeTimes = selectKeyframeTimes(segmentFeatures, segmentIntensity, playBudget);
 
@@ -216,6 +224,7 @@ export async function analyzeVideoFile(opts: PipelineOptions): Promise<PipelineR
       mapFingerprint: fingerprint,
       ...(nameCapture ? { mapNameCrop: nameCapture.crop } : {}),
       outcome: 'inconnue' as const,
+      ...(scoreboard ? { scoreboard } : {}),
       settings: {
         samplingHz: settings.samplingHz,
         aiEnabled: settings.aiEnabled,

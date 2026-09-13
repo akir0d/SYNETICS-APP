@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppSettings, KnownMap, MapFingerprint, MatchAnalysis } from './core/types';
+import type { AppSettings, KnownMap, MapFingerprint, MatchAnalysis, TeamSide } from './core/types';
 import { DEFAULT_SETTINGS } from './core/types';
 import { loadSettings, saveSettings } from './core/storage/settings';
 import {
@@ -12,6 +12,7 @@ import {
   saveMap,
 } from './core/storage/db';
 import { mergeFingerprints } from './core/analysis/mapmatch';
+import { applySideToSession } from './core/match';
 import type { Keyframe } from './core/video/sampler';
 import type { PipelineResult } from './core/pipeline';
 import { LibraryScreen } from './ui/screens/LibraryScreen';
@@ -78,6 +79,31 @@ export default function App() {
       );
     },
     [mergeIntoList],
+  );
+
+  /**
+   * Enregistre le camp de votre equipe pour toute une rediffusion.
+   *
+   * Les equipes ne changent pas de cote au sein d'un meme fichier : la
+   * question ne se pose donc qu'une fois, et la reponse determine l'issue de
+   * chacune de ses manches.
+   */
+  const setSessionSide = useCallback(
+    (sessionId: string, side: TeamSide, opponentTeamId?: string) => {
+      setAnalyses((prev) => {
+        const suivant = applySideToSession(prev, sessionId, side, opponentTeamId);
+        for (const a of suivant) {
+          const avant = prev.find((p) => p.id === a.id);
+          if (avant !== a) {
+            saveAnalysis(a).catch(() =>
+              setStorageError("Echec de l'enregistrement local de cette analyse."),
+            );
+          }
+        }
+        return suivant;
+      });
+    },
+    [],
   );
 
   const releaseSession = useCallback(() => {
@@ -239,9 +265,12 @@ export default function App() {
             )}
             <LibraryScreen
               analyses={analyses}
+              teams={settings.teams}
+              myTeamId={settings.myTeamId}
               onOpen={openAnalysis}
               onDelete={removeAnalysis}
               onNew={() => setView('import')}
+              onSetSide={setSessionSide}
             />
           </>
         )}

@@ -225,7 +225,54 @@ export function canonicalMapName(value: string): string {
 }
 
 /** Issue d'une manche, telle que l'annonce l'ecran de fin. */
-export type MatchOutcome = 'victoire' | 'defaite' | 'inconnue';
+export type MatchOutcome = 'victoire' | 'defaite' | 'egalite' | 'inconnue';
+
+/** Libelles des issues, pour ne pas les reecrire a chaque ecran. */
+export const OUTCOME_LABELS: Record<MatchOutcome, string> = {
+  victoire: 'Victoire',
+  defaite: 'Defaite',
+  egalite: 'Egalite',
+  inconnue: 'Inconnue',
+};
+
+/** Camp d'une equipe sur le tableau des scores : rangee du haut ou du bas. */
+export type TeamSide = 'haut' | 'bas';
+
+/**
+ * Une equipe et son effectif.
+ *
+ * Chez EVA le tag de l'equipe est colle devant le pseudo, separe par un x :
+ * akirod de Synetics s'appelle SYNxAKIROD sur le tableau. Les quatre joueurs
+ * d'un camp partagent donc le debut de leur pseudo, ce qui suffit a separer
+ * les deux equipes d'une manche sans rien lire ni rien saisir.
+ */
+export interface Team {
+  id: string;
+  /** Tag colle devant les pseudos, par exemple SYN. */
+  tag: string;
+  /** Nom complet, par exemple Synetics. Sert a l'affichage. */
+  name: string;
+  players: string[];
+}
+
+/**
+ * Ce que le tableau des scores de fin de manche a livre.
+ *
+ * Les deux equipes sont rangees de haut en bas, dans l'ordre ou le jeu les
+ * affiche — cet ordre suit le camp, jamais le resultat.
+ */
+export interface ScoreboardSummary {
+  /** Instant du fichier source ou le tableau a ete lu. */
+  atS: number;
+  percents: Array<number | null>;
+  totals: Array<number | null>;
+  winner: TeamSide | 'egalite' | null;
+  /** `false` quand progression et cumul des scores se contredisent. */
+  agreed: boolean;
+  teams: Array<
+    Array<{ score: number | null; kills: number | null; deaths: number | null; assists: number | null }>
+  >;
+}
 
 export type GameProfileId = 'tdm' | 'domination' | 'bomb' | 'battle_royale' | 'custom';
 
@@ -391,6 +438,20 @@ export interface MatchAnalysis {
   readGameMode?: string;
   /** Issue de la manche, du point de vue de votre equipe. */
   outcome: MatchOutcome;
+  /** Ce que le tableau des scores de fin de manche a livre. */
+  scoreboard?: ScoreboardSummary;
+  /**
+   * Camp de votre equipe sur ce tableau.
+   *
+   * L'application ne sait pas le deviner : nommer les joueurs d'une equipe
+   * qu'elle n'a jamais vue depasse ce que la lecture des lettres permet a
+   * cette taille de texte. C'est donc une indication, donnee une fois par
+   * rediffusion puisque les camps n'y changent pas, et c'est elle qui
+   * transforme « le haut a gagne » en victoire ou en defaite.
+   */
+  mySide?: TeamSide;
+  /** Equipe adverse, choisie parmi celles saisies. */
+  opponentTeamId?: string;
   /**
    * Ligne du joueur relevee sur le tableau des scores du jeu.
    *
@@ -437,6 +498,10 @@ export interface AppSettings {
   useBlackScreens: boolean;
   /** Zone du HUD ou lire le nom de la carte. */
   mapNameRegion: HudRegion;
+  /** Les equipes connues : la votre et celles que vous affrontez. */
+  teams: Team[];
+  /** Identifiant de votre equipe parmi les precedentes. */
+  myTeamId: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -457,4 +522,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   minGapS: 40,
   useBlackScreens: true,
   mapNameRegion: { ...DEFAULT_MAP_NAME_REGION },
+  teams: [],
+  myTeamId: '',
 };

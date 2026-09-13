@@ -7,7 +7,7 @@ import type {
   MatchEvent,
   MatchOutcome,
 } from '../../core/types';
-import { EVENT_TYPES, GAME_PROFILES } from '../../core/types';
+import { EVENT_TYPES, GAME_PROFILES, OUTCOME_LABELS } from '../../core/types';
 import { computeIntensity, runLocalAnalysis } from '../../core/analysis/heuristics';
 import { formatDuration } from '../../core/analysis/metrics';
 import { recomputeAnalysis } from '../../core/pipeline';
@@ -308,7 +308,7 @@ export function ReportScreen({
         </div>
         <div className="row" style={{ marginBottom: 8 }}>
           <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>Issue de la manche :</span>
-          {(['victoire', 'defaite', 'inconnue'] as MatchOutcome[]).map((value) => (
+          {(['victoire', 'defaite', 'egalite', 'inconnue'] as MatchOutcome[]).map((value) => (
             <button
               key={value}
               className="btn-ghost"
@@ -333,7 +333,7 @@ export function ReportScreen({
               }}
               onClick={() => onChange({ ...analysis, outcome: value })}
             >
-              {{ victoire: 'Victoire', defaite: 'Defaite', inconnue: 'Inconnue' }[value]}
+              {OUTCOME_LABELS[value]}
             </button>
           ))}
           {analysis.officialStats && (

@@ -76,6 +76,9 @@ export function normalizeAnalysis(raw: Partial<MatchAnalysis> & { id: string }):
     ...(raw.readMapName ? { readMapName: raw.readMapName } : {}),
     ...(raw.readGameMode ? { readGameMode: raw.readGameMode } : {}),
     outcome: raw.outcome ?? 'inconnue',
+    ...(raw.scoreboard ? { scoreboard: raw.scoreboard } : {}),
+    ...(raw.mySide ? { mySide: raw.mySide } : {}),
+    ...(raw.opponentTeamId ? { opponentTeamId: raw.opponentTeamId } : {}),
     ...(raw.officialStats ? { officialStats: raw.officialStats } : {}),
     settings: raw.settings ?? {
       samplingHz: 2,

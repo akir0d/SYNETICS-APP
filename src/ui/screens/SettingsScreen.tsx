@@ -3,6 +3,7 @@ import type { AppSettings, GameProfileId, HudRegion, KnownMap } from '../../core
 import { AI_MODELS, DEFAULT_MAP_NAME_REGION, GAME_PROFILES } from '../../core/types';
 import { formatDuration } from '../../core/analysis/metrics';
 import { detectPlatform } from '../../platform';
+import { TeamEditor } from '../components/TeamEditor';
 
 interface SettingsScreenProps {
   settings: AppSettings;
@@ -173,6 +174,20 @@ export function SettingsScreen({ settings, maps, onChange, onDeleteMap }: Settin
             onChange={(e) => update('playerName', e.target.value)}
           />
         </div>
+      </div>
+
+      <div className="card">
+        <h2>Equipes</h2>
+        <p className="hint">
+          Le tag est colle devant les pseudos sur le tableau des scores — akirod de Synetics y
+          apparait en SYNxAKIROD. C'est ce debut commun qui permet de reconnaitre les quatre
+          joueurs d'un meme camp.
+        </p>
+        <TeamEditor
+          teams={settings.teams}
+          myTeamId={settings.myTeamId}
+          onChange={(teams, myTeamId) => onChange({ ...settings, teams, myTeamId })}
+        />
       </div>
 
       <div className="card">

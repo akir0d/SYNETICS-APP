@@ -1,5 +1,14 @@
 import { readNumber, type Crop } from './glyphs';
-import { boxCenterY, boxHeight, boxWidth, brightComponents, fillRatio, median } from './pixels';
+import {
+  boxCenterY,
+  boxHeight,
+  boxWidth,
+  brightComponents,
+  fillRatio,
+  median,
+  quantileIn,
+  type Box,
+} from './pixels';
 
 /**
  * Lecture du tableau des scores de fin de manche.
@@ -34,6 +43,67 @@ export interface TeamBlock {
   iconsY: number;
   iconsHeight: number;
   cards: PlayerCard[];
+  /**
+   * Progression de l'equipe, de 0 a 100, ou `null` si le bandeau n'a pas ete
+   * lu. C'est elle qui designe le vainqueur.
+   */
+  percent: number | null;
+}
+
+/** Somme des scores des quatre joueurs, ou `null` si l'un manque. */
+export function teamScore(team: TeamBlock): number | null {
+  let total = 0;
+  for (const carte of team.cards) {
+    if (carte.score === null) return null;
+    total += carte.score;
+  }
+  return total;
+}
+
+export type Winner = 'haut' | 'bas' | 'egalite';
+
+export interface Verdict {
+  winner: Winner;
+  /**
+   * `true` quand le pourcentage et le cumul des scores designent le meme camp,
+   * ou quand un seul des deux a pu etre lu. `false` quand ils se contredisent :
+   * il faut alors demander plutot que trancher.
+   */
+  agreed: boolean;
+}
+
+/**
+ * Designe le camp vainqueur d'une manche.
+ *
+ * La regle du jeu porte sur le pourcentage : une manche s'arrete des qu'une
+ * equipe atteint cent, et sinon au temps ecoule, le plus avance l'emportant.
+ * La position de la rangee ne dit rien — l'ordre suit le camp, pas le
+ * resultat.
+ *
+ * Le cumul des scores sert de second avis. Il n'est pas la regle, seulement un
+ * indice bien correle, et son role est de detecter une lecture douteuse : deux
+ * signaux d'accord valent bien mieux qu'un seul, et deux signaux qui se
+ * contredisent valent mieux qu'une certitude fausse.
+ */
+export function decideWinner(reading: ScoreboardReading): Verdict | null {
+  const [haut, bas] = reading.teams;
+  if (!haut || !bas) return null;
+
+  const parPourcent = compare(haut.percent, bas.percent);
+  const parScore = compare(teamScore(haut), teamScore(bas));
+  if (parPourcent === null && parScore === null) return null;
+  if (parPourcent === null) return { winner: parScore as Winner, agreed: true };
+  if (parScore === null) return { winner: parPourcent, agreed: true };
+  // Une egalite de score sur une manche gagnee au pourcentage n'est pas une
+  // contradiction : le cumul n'est qu'un indice, il ne tranche pas a lui seul.
+  const contredit = parScore !== 'egalite' && parScore !== parPourcent;
+  return { winner: parPourcent, agreed: !contredit };
+}
+
+function compare(haut: number | null, bas: number | null): Winner | null {
+  if (haut === null || bas === null) return null;
+  if (haut === bas) return 'egalite';
+  return haut > bas ? 'haut' : 'bas';
 }
 
 export interface ScoreboardReading {
@@ -223,6 +293,108 @@ function fillGaps(cartes: IconRow['cards'], pas: number): IconRow['cards'] {
   return complet;
 }
 
+/**
+ * Taille d'un chiffre du bandeau de progression, en hauteurs de pictogramme.
+ * Ces chiffres sont bien plus gros que ceux des cartes.
+ */
+const PERCENT_MIN_H = 2.4;
+const PERCENT_MAX_H = 3.6;
+const PERCENT_MIN_W = 1.4;
+const PERCENT_MAX_W = 3.2;
+
+/** Part du contraste de chrominance au-dela de laquelle un pixel est colore. */
+const PERCENT_INK = 0.55;
+
+/**
+ * Lit la progression des deux equipes dans la marge gauche.
+ *
+ * Le bandeau n'est pas cale sur les rangees de pictogrammes : c'est un element
+ * a part, les deux valeurs empilees a gauche du tableau. On le cherche donc
+ * dans toute la bande qui va du haut de la premiere equipe au bas de la
+ * seconde, et l'ordre vertical des deux valeurs suit celui des equipes.
+ *
+ * La lecture se fait sur la chrominance et non sur la clarte : ces chiffres
+ * portent la couleur de leur equipe, et selon le decor derriere eux ils sont
+ * tantot plus clairs, tantot plus sombres que leur fond.
+ *
+ * Le signe pour cent forme le dernier bloc de chaque ligne et n'est pas lu.
+ */
+function readPercents(
+  chroma: Float32Array,
+  width: number,
+  rows: IconRow[],
+): Array<number | null> {
+  const premier = rows[0];
+  const dernier = rows[rows.length - 1];
+  if (!premier || !dernier) return rows.map(() => null);
+
+  const h = premier.iconsHeight;
+  const zone: Box = {
+    x0: 0,
+    y0: Math.max(0, premier.iconsY - Math.round(h * 5.0)),
+    x1: Math.max(1, Math.min(...rows.map((r) => (r.cards[0] as { centerX: number }).centerX)) - Math.round(h * 3.6)),
+    y1: dernier.iconsY + Math.round(h * 1.5),
+  };
+  if (zone.x1 <= zone.x0 || zone.y1 <= zone.y0) return rows.map(() => null);
+
+  const fond = quantileIn(chroma, width, zone, 0.5);
+  const vif = quantileIn(chroma, width, zone, 0.995);
+  const seuil = fond + PERCENT_INK * (vif - fond);
+
+  const chiffres = brightComponents(
+    sousCanal(chroma, width, zone),
+    zone.x1 - zone.x0,
+    zone.y1 - zone.y0,
+    seuil,
+  ).filter((b) => {
+    const bh = boxHeight(b);
+    const bw = boxWidth(b);
+    return (
+      bh >= h * PERCENT_MIN_H && bh <= h * PERCENT_MAX_H && bw >= h * PERCENT_MIN_W && bw <= h * PERCENT_MAX_W
+    );
+  });
+
+  const lignes: Box[][] = [];
+  for (const b of chiffres.sort((a, c) => boxCenterY(a) - boxCenterY(c))) {
+    const derniere = lignes[lignes.length - 1];
+    const reference = derniere?.[0];
+    if (derniere && reference && Math.abs(boxCenterY(b) - boxCenterY(reference)) < h) derniere.push(b);
+    else lignes.push([b]);
+  }
+
+  const lues = lignes
+    .filter((l) => l.length >= 2 && l.length <= 4)
+    .map((l) => {
+      // Le dernier bloc est le signe pour cent : on ne le lit pas.
+      const boites = l.sort((a, c) => a.x0 - c.x0).slice(0, -1);
+      const crop = cropOf(chroma, width, zone);
+      let texte = '';
+      for (const b of boites) texte += readNumber(subCropOf(crop, b.y0, b.y1, b.x0, b.x1), seuil).text;
+      return /^\d{1,3}$/.test(texte) ? Number.parseInt(texte, 10) : null;
+    });
+
+  if (lues.length !== rows.length) return rows.map(() => null);
+  return lues;
+}
+
+function sousCanal(channel: Float32Array, width: number, box: Box): Float32Array {
+  return cropOf(channel, width, box).luma;
+}
+
+function cropOf(channel: Float32Array, width: number, box: Box): Crop {
+  const w = box.x1 - box.x0;
+  const h = box.y1 - box.y0;
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) out[y * w + x] = channel[(box.y0 + y) * width + (box.x0 + x)] as number;
+  }
+  return { luma: out, width: w, height: h };
+}
+
+function subCropOf(crop: Crop, y0: number, y1: number, x0: number, x1: number): Crop {
+  return subCrop(crop.luma, crop.width, y0, y1, x0, x1);
+}
+
 function subCrop(luma: Float32Array, width: number, y0: number, y1: number, x0: number, x1: number): Crop {
   const cx0 = Math.max(0, x0);
   const cy0 = Math.max(0, y0);
@@ -243,9 +415,15 @@ function subCrop(luma: Float32Array, width: number, y0: number, y1: number, x0: 
  * Rend `null` quand la structure n'est pas reconnue : mieux vaut ne rien
  * annoncer qu'annoncer des chiffres tires d'un ecran qui n'est pas un tableau.
  */
-export function readScoreboard(luma: Float32Array, width: number, height: number): ScoreboardReading | null {
+export function readScoreboard(
+  luma: Float32Array,
+  width: number,
+  height: number,
+  chroma?: Float32Array,
+): ScoreboardReading | null {
   const rows = detectIconRows(luma, width, height);
   if (rows.length < 2) return null;
+  const pourcentages = chroma ? readPercents(chroma, width, rows) : rows.map(() => null);
 
   const teams: TeamBlock[] = [];
   for (const row of rows) {
@@ -286,7 +464,12 @@ export function readScoreboard(luma: Float32Array, width: number, height: number
       };
     });
 
-    teams.push({ iconsY: row.iconsY, iconsHeight: h, cards });
+    teams.push({
+      iconsY: row.iconsY,
+      iconsHeight: h,
+      cards,
+      percent: pourcentages[teams.length] ?? null,
+    });
   }
 
   return { teams };

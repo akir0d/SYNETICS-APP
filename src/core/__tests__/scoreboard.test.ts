@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readScoreboard } from '../vision/scoreboard';
+import { decideWinner, readScoreboard, teamScore } from '../vision/scoreboard';
 import { loadCapture } from './fixtures/captures';
 
 /**
@@ -93,6 +93,49 @@ describe('reperage du tableau des scores', () => {
     // qui n'est pas un tableau des scores.
     const capture = loadCapture('lobby-10min');
     expect(readScoreboard(capture.luma, capture.width, capture.height)).toBeNull();
+  });
+});
+
+/**
+ * Progression des deux equipes et camp vainqueur, releves a l'oeil.
+ *
+ * Le camp est donne de haut en bas : ces captures montrent que la rangee du
+ * haut n'est pas celle qui gagne — la Carolo League met Alliance en haut a
+ * 24 % et Rebels en dessous a 100 %.
+ */
+const VERDICTS: Record<string, { percents: [number, number]; winner: 'haut' | 'bas' }> = {
+  cf3a69f0: { percents: [100, 33], winner: 'haut' },
+  '4df5ce74': { percents: [100, 91], winner: 'haut' },
+  df7af499: { percents: [100, 6], winner: 'haut' },
+  'carolo-moux-nnx': { percents: [24, 100], winner: 'bas' },
+};
+
+describe('progression et verdict', () => {
+  for (const [nom, { percents, winner }] of Object.entries(VERDICTS)) {
+    it(`lit la progression et designe le vainqueur — ${ATTENDU[nom]!.titre}`, () => {
+      const capture = loadCapture(nom);
+      const lu = readScoreboard(capture.luma, capture.width, capture.height, capture.chroma)!;
+      expect(lu.teams.map((e) => e.percent)).toEqual(percents);
+
+      const verdict = decideWinner(lu);
+      expect(verdict).not.toBeNull();
+      expect(verdict!.winner).toBe(winner);
+      // Le cumul des scores doit confirmer le pourcentage sur ces quatre
+      // manches : c'est ce second avis qui permet de signaler un doute
+      // plutot que de trancher au hasard quand la lecture derape.
+      expect(verdict!.agreed).toBe(true);
+    });
+  }
+
+  it('ne designe personne sans progression ni scores lisibles', () => {
+    const capture = loadCapture('lobby-10min');
+    expect(readScoreboard(capture.luma, capture.width, capture.height, capture.chroma)).toBeNull();
+  });
+
+  it('cumule les scores de chaque equipe', () => {
+    const capture = loadCapture('cf3a69f0');
+    const lu = readScoreboard(capture.luma, capture.width, capture.height, capture.chroma)!;
+    expect(lu.teams.map(teamScore)).toEqual([2200, 1250]);
   });
 });
 

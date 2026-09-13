@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import jpeg from 'jpeg-js';
-import { luminanceOf } from '../../vision/pixels';
+import { chromaOf, luminanceOf } from '../../vision/pixels';
 import type { Crop } from '../../vision/glyphs';
 
 const DOSSIER = join(process.cwd(), 'tools', 'glyphes', 'captures');
 
 export interface Capture {
   luma: Float32Array;
+  chroma: Float32Array;
   width: number;
   height: number;
 }
@@ -15,8 +16,10 @@ export interface Capture {
 /** Charge une capture de rediffusion versionnee avec le projet. */
 export function loadCapture(nom: string): Capture {
   const brut = jpeg.decode(readFileSync(join(DOSSIER, `${nom}.jpg`)), { useTArray: true });
+  const pixels = brut.width * brut.height;
   return {
-    luma: luminanceOf(brut.data, brut.width * brut.height),
+    luma: luminanceOf(brut.data, pixels),
+    chroma: chromaOf(brut.data, pixels),
     width: brut.width,
     height: brut.height,
   };

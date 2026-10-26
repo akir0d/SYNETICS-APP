@@ -1,4 +1,5 @@
 import type { KnownMap, MatchAnalysis } from '../types';
+import type { CalloutMap } from '../callouts/quiz';
 import { normalizeAnalysis } from './migrate';
 
 /**
@@ -8,9 +9,10 @@ import { normalizeAnalysis } from './migrate';
  */
 
 const DB_NAME = 'synetics';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'analyses';
 const MAPS_STORE = 'maps';
+const CALLOUTS_STORE = 'callouts';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -28,6 +30,10 @@ function openDb(): Promise<IDBDatabase> {
       // conservees telles quelles ; elles s'affichent sans carte identifiee.
       if (!db.objectStoreNames.contains(MAPS_STORE)) {
         db.createObjectStore(MAPS_STORE, { keyPath: 'id' });
+      }
+      // Version 3 : plans annotes pour l'entrainement aux callouts.
+      if (!db.objectStoreNames.contains(CALLOUTS_STORE)) {
+        db.createObjectStore(CALLOUTS_STORE, { keyPath: 'id' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -96,4 +102,17 @@ export async function saveMap(map: KnownMap): Promise<void> {
 
 export async function deleteMap(id: string): Promise<void> {
   await tx(MAPS_STORE, 'readwrite', (store) => store.delete(id));
+}
+
+export async function listCalloutMaps(): Promise<CalloutMap[]> {
+  const all = await tx<CalloutMap[]>(CALLOUTS_STORE, 'readonly', (store) => store.getAll());
+  return all.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+}
+
+export async function saveCalloutMap(map: CalloutMap): Promise<void> {
+  await tx(CALLOUTS_STORE, 'readwrite', (store) => store.put(map));
+}
+
+export async function deleteCalloutMap(id: string): Promise<void> {
+  await tx(CALLOUTS_STORE, 'readwrite', (store) => store.delete(id));
 }

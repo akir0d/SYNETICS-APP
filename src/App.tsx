@@ -19,12 +19,14 @@ import { LibraryScreen } from './ui/screens/LibraryScreen';
 import { ImportScreen } from './ui/screens/ImportScreen';
 import { ReportScreen } from './ui/screens/ReportScreen';
 import { SettingsScreen } from './ui/screens/SettingsScreen';
+import { CalloutsScreen } from './ui/screens/CalloutsScreen';
 
-type View = 'library' | 'import' | 'report' | 'settings';
+type View = 'library' | 'import' | 'report' | 'callouts' | 'settings';
 
 const NAV: Array<{ id: View; label: string }> = [
   { id: 'library', label: 'Bibliotheque' },
   { id: 'import', label: 'Nouvelle analyse' },
+  { id: 'callouts', label: 'Callouts' },
   { id: 'settings', label: 'Reglages' },
 ];
 
@@ -301,6 +303,8 @@ export default function App() {
             </button>
           </div>
         )}
+
+        {view === 'callouts' && <CalloutsScreen mapNames={maps.map((m) => m.name)} />}
 
         {view === 'settings' && (
           <SettingsScreen

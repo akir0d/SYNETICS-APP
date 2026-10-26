@@ -75,6 +75,29 @@ envoyees a Claude, qui renvoie une analyse **structuree** : synthese, points for
 progres, exercices concrets, et une timeline des moments marquants rattachee aux horodatages de la
 video.
 
+### 6. Entrainement aux callouts
+
+Un onglet **Callouts** sert a apprendre les noms des endroits de chaque carte, ceux que l'on
+annonce a la voix en partie.
+
+1. **Nouvelle carte** : chargez un plan (capture d'ecran, schema dessine par l'equipe).
+2. Touchez le plan pour poser un endroit et tapez son nom ; touchez un repere pour le renommer,
+   le deplacer ou le supprimer. Tout est enregistre au fil de l'eau.
+3. **S'entrainer**, en deux modes :
+   - *Trouver* : un nom est annonce, touchez son emplacement. Le toucher est attribue a l'endroit
+     le plus proche : une grande salle isolee tolere l'approximation, deux recoins voisins
+     exigent de la precision.
+   - *Nommer* : un endroit clignote, choisissez son nom parmi quatre. Les leurres sont les
+     voisins de la bonne reponse, ceux que l'on confond reellement.
+
+Chaque reponse alimente un suivi par endroit : les endroits rates reviennent plus souvent, un
+endroit est *acquis* apres trois bonnes reponses d'affilee. En fin de serie, « Rejouer les
+erreurs » relance uniquement ce qui a ete manque.
+
+Comme pour les arenes, aucun plan n'est embarque. Une carte annotee s'**exporte** en un fichier
+JSON (plan compris) que vos coequipiers **importent** tel quel ; le suivi d'apprentissage, lui,
+reste personnel.
+
 ---
 
 ## Honnetete sur ce que l'application ne fait pas
@@ -225,6 +248,7 @@ src/
 │  ├─ video/fingerprint  Signature visuelle d'une arene
 │  ├─ analysis/          Statistiques robustes, heuristiques, decoupage, mesures, cartes
 │  ├─ ai/                Schema de sortie, prompts, client Claude
+│  ├─ callouts/          Quiz des noms d'endroits : tirage, leurres, suivi, partage
 │  └─ storage/           Persistance locale (IndexedDB, reglages)
 ├─ ui/                   Composants et ecrans React
 └─ platform/             Adaptation navigateur / Electron / Android

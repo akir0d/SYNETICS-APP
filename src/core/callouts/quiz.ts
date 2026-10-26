@@ -39,17 +39,19 @@ export interface CalloutMap {
   /** Rapport largeur / hauteur de l'image, pour convertir les distances. */
   aspect: number;
   callouts: Callout[];
+  /** Plan annote (avec les noms), affiche pour reviser. Facultatif. */
+  reference?: string;
+  /**
+   * Version du catalogue pour une carte livree avec l'application. Absent
+   * pour une carte creee par le joueur. Une carte du catalogue ne se modifie
+   * pas : elle est remise a jour avec l'application.
+   */
+  builtin?: number;
   createdAt: string;
   updatedAt: string;
 }
 
 export type QuizMode = 'trouver' | 'nommer';
-
-export interface QuizQuestion {
-  calloutId: string;
-  /** Mode « nommer » : propositions, la bonne incluse, dans un ordre melange. */
-  choices: string[];
-}
 
 export const EMPTY_STATS: CalloutStats = { seen: 0, correct: 0, streak: 0, lastSeen: '' };
 
@@ -127,18 +129,6 @@ function shuffle<T>(items: readonly T[], random: () => number): T[] {
 }
 
 /**
- * Tirage pondere sans remise : chaque endroit apparait au plus une fois par
- * serie, les plus fragiles en premier le plus souvent.
- */
-function weightedOrder(callouts: readonly Callout[], random: () => number): Callout[] {
-  // Methode d'Efraimidis-Spirakis : cle = u^(1/poids), tri decroissant.
-  return callouts
-    .map((c) => ({ c, key: Math.pow(Math.max(random(), 1e-9), 1 / priority(c.stats)) }))
-    .sort((a, b) => b.key - a.key)
-    .map((e) => e.c);
-}
-
-/**
  * Propositions du mode « nommer ». Les leurres sont pris parmi les voisins
  * les plus proches de la bonne reponse : distinguer deux pieces eloignees est
  * trivial, ce sont les endroits contigus que l'on confond en partie.
@@ -166,23 +156,6 @@ export function buildChoices(
   return shuffle([...noms], random);
 }
 
-/**
- * Prepare une serie de questions. `length` est plafonne au nombre d'endroits :
- * on ne repose pas deux fois le meme dans une serie.
- */
-export function buildQuiz(
-  map: Pick<CalloutMap, 'aspect' | 'callouts'>,
-  mode: QuizMode,
-  length: number,
-  random: () => number = Math.random,
-): QuizQuestion[] {
-  const ordre = weightedOrder(map.callouts, random).slice(0, Math.max(0, length));
-  return ordre.map((c) => ({
-    calloutId: c.id,
-    choices: mode === 'nommer' ? buildChoices(map, c, 4, random) : [],
-  }));
-}
-
 /** Met a jour le suivi d'un endroit apres une reponse. */
 export function recordAnswer(stats: CalloutStats, correct: boolean, now: string): CalloutStats {
   return {
@@ -207,6 +180,7 @@ const ImportSchema = z.object({
   name: z.string().min(1),
   image: z.string().startsWith('data:image/'),
   aspect: z.number().positive(),
+  reference: z.string().startsWith('data:image/').optional(),
   callouts: z.array(
     z.object({
       name: z.string().min(1),
@@ -225,6 +199,7 @@ export function exportCalloutMap(map: CalloutMap): string {
       name: map.name,
       image: map.image,
       aspect: map.aspect,
+      reference: map.reference,
       callouts: map.callouts.map(({ name, x, y }) => ({ name, x, y })),
     },
     null,
@@ -252,6 +227,7 @@ export function importCalloutMap(text: string, now: string): CalloutMap {
     name: d.name,
     image: d.image,
     aspect: d.aspect,
+    reference: d.reference,
     callouts: d.callouts.map((c) => ({ id: newId('call'), ...c, stats: { ...EMPTY_STATS } })),
     createdAt: now,
     updatedAt: now,

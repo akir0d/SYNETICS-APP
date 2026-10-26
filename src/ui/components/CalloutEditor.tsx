@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CalloutMap } from '../../core/callouts/quiz';
 import { EMPTY_STATS, MIN_CALLOUTS, newId } from '../../core/callouts/quiz';
 import { CalloutBoard } from './CalloutBoard';
+import { loadImage } from '../loadImage';
 
 interface CalloutEditorProps {
   map: CalloutMap;
@@ -20,6 +21,8 @@ export function CalloutEditor({ map, mapNames, onChange, onTrain, onBack }: Call
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const referenceInput = useRef<HTMLInputElement>(null);
+  const [referenceError, setReferenceError] = useState<string | null>(null);
 
   const selected = map.callouts.find((c) => c.id === selectedId) ?? null;
 
@@ -74,7 +77,7 @@ export function CalloutEditor({ map, mapNames, onChange, onTrain, onBack }: Call
         </button>
         <div className="spacer" />
         <button className="btn" onClick={onTrain} disabled={map.callouts.length < MIN_CALLOUTS}>
-          S'entrainer
+          Jouer
         </button>
       </div>
 
@@ -95,10 +98,40 @@ export function CalloutEditor({ map, mapNames, onChange, onTrain, onBack }: Call
               ))}
             </datalist>
           </div>
+          <div className="row" style={{ marginBottom: 12 }}>
+            <button className="btn-ghost" onClick={() => referenceInput.current?.click()}>
+              {map.reference ? 'Changer le plan annote' : 'Ajouter le plan annote'}
+            </button>
+            {map.reference && (
+              <button className="btn-ghost btn-danger" onClick={() => update({ reference: undefined })}>
+                Retirer
+              </button>
+            )}
+            <input
+              ref={referenceInput}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (!f) return;
+                loadImage(f)
+                  .then(({ image }) => {
+                    setReferenceError(null);
+                    update({ reference: image });
+                  })
+                  .catch((err: unknown) =>
+                    setReferenceError(err instanceof Error ? err.message : 'Image illisible.'),
+                  );
+              }}
+            />
+          </div>
+          {referenceError && <div className="banner banner-error">{referenceError}</div>}
           <p className="hint">
             {moving
               ? `Touchez le nouvel emplacement de « ${selected?.name} ».`
-              : 'Touchez le plan pour poser un endroit, touchez un repere pour le modifier.'}
+              : 'Touchez le plan pour poser un call, touchez un repere pour le modifier. Le plan annote (facultatif) sert a reviser.'}
           </p>
           <CalloutBoard
             map={map}
@@ -151,10 +184,10 @@ export function CalloutEditor({ map, mapNames, onChange, onTrain, onBack }: Call
           ) : (
             <>
               <h2>
-                {map.callouts.length} endroit{map.callouts.length > 1 ? 's' : ''}
+                {map.callouts.length} call{map.callouts.length > 1 ? 's' : ''}
               </h2>
               {sorted.length === 0 ? (
-                <p className="hint">Aucun endroit pose pour l'instant.</p>
+                <p className="hint">Aucun call pose pour l'instant.</p>
               ) : (
                 <div className="callout-list">
                   {sorted.map((c) => (

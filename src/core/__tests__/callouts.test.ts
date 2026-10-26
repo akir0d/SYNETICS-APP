@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_STATS,
   buildChoices,
-  buildQuiz,
   exportCalloutMap,
   importCalloutMap,
   nearestCallout,
@@ -69,22 +68,15 @@ describe('suivi d apprentissage', () => {
   });
 });
 
-describe('serie de questions', () => {
+describe('propositions du mode nommer', () => {
   const points = Array.from({ length: 8 }, (_, i) => endroit(`p${i}`, i / 8, 0.5));
 
-  it('ne pose jamais deux fois le meme endroit', () => {
-    const q = buildQuiz(carte(points), 'trouver', 20, graine(1));
-    expect(q).toHaveLength(8);
-    expect(new Set(q.map((x) => x.calloutId)).size).toBe(8);
-  });
-
-  it('propose quatre noms distincts dont le bon en mode nommer', () => {
-    const q = buildQuiz(carte(points), 'nommer', 5, graine(2));
-    for (const question of q) {
-      const bon = points.find((p) => p.id === question.calloutId)!.name;
-      expect(question.choices).toHaveLength(4);
-      expect(new Set(question.choices).size).toBe(4);
-      expect(question.choices).toContain(bon);
+  it('propose quatre noms distincts dont le bon', () => {
+    for (const p of points) {
+      const choix = buildChoices(carte(points), p, 4, graine(2));
+      expect(choix).toHaveLength(4);
+      expect(new Set(choix).size).toBe(4);
+      expect(choix).toContain(p.name);
     }
   });
 
@@ -97,19 +89,6 @@ describe('serie de questions', () => {
   it('se contente de moins de propositions sur une petite carte', () => {
     const m = carte([endroit('a', 0, 0), endroit('b', 1, 1)]);
     expect(buildChoices(m, m.callouts[0]!, 4).sort()).toEqual(['A', 'B']);
-  });
-
-  it('fait tomber plus souvent les endroits rates', () => {
-    const rate = { seen: 5, correct: 0, streak: 0, lastSeen: 'x' };
-    const acquis = { seen: 5, correct: 5, streak: 5, lastSeen: 'x' };
-    const m = carte([endroit('faible', 0, 0, rate), ...points.slice(1).map((p) => ({ ...p, stats: acquis }))]);
-    const random = graine(4);
-    let premier = 0;
-    for (let i = 0; i < 200; i++) {
-      if (buildQuiz(m, 'trouver', 1, random)[0]!.calloutId === 'faible') premier++;
-    }
-    // Uniforme : 1 chance sur 8. Pondere : nettement plus.
-    expect(premier).toBeGreaterThan(60);
   });
 });
 

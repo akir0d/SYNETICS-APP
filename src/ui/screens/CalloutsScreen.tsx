@@ -7,51 +7,28 @@ import {
   isMastered,
   newId,
 } from '../../core/callouts/quiz';
+import { START_LIVES, buildPool } from '../../core/callouts/game';
+import { BUILTIN_MAPS, syncBuiltin } from '../../core/callouts/catalog';
 import { deleteCalloutMap, listCalloutMaps, saveCalloutMap } from '../../core/storage/db';
 import { saveTextFile } from '../../platform';
+import { CalloutBoard } from '../components/CalloutBoard';
 import { CalloutEditor } from '../components/CalloutEditor';
-import { CalloutQuiz } from '../components/CalloutQuiz';
+import { CalloutGame } from '../components/CalloutGame';
+import { loadImage } from '../loadImage';
 
 interface CalloutsScreenProps {
   /** Noms des arenes deja connues, proposes pour nommer un plan. */
   mapNames: readonly string[];
 }
 
-type Mode = { kind: 'list' } | { kind: 'edit'; id: string } | { kind: 'quiz'; id: string };
+/** Perimetre d'une partie : une carte, ou toutes. */
+const ALL = 'all';
 
-/** Plus grand cote conserve pour l'image d'un plan. */
-const MAX_IMAGE_SIDE = 1600;
-
-/**
- * Reduit l'image importee : une capture de telephone pese plusieurs Mo, et
- * le plan est stocke en entier dans la carte pour rester partageable.
- */
-async function loadImage(file: File): Promise<{ image: string; aspect: number }> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("Image illisible."));
-      img.src = url;
-    });
-    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.max(1, Math.round(img.naturalWidth * scale));
-    const h = Math.max(1, Math.round(img.naturalHeight * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas indisponible.');
-    // Fond sombre : un plan PNG transparent deviendrait noir en JPEG.
-    ctx.fillStyle = '#0a0e17';
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return { image: canvas.toDataURL('image/jpeg', 0.85), aspect: w / h };
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+type Mode =
+  | { kind: 'list' }
+  | { kind: 'edit'; id: string }
+  | { kind: 'review'; id: string }
+  | { kind: 'play'; scope: string };
 
 function slug(name: string): string {
   return (
@@ -65,8 +42,56 @@ function slug(name: string): string {
 }
 
 /**
- * Entrainement aux callouts : la liste des plans annotes, leur edition et le
- * quiz. L'ecran gere lui-meme sa persistance, independante des analyses.
+ * Revision d'une carte : le plan annote quand il existe, sinon le plan nu
+ * avec tous les noms affiches.
+ */
+function CalloutReview({ map, onPlay, onBack }: { map: CalloutMap; onPlay: () => void; onBack: () => void }) {
+  const [annotated, setAnnotated] = useState(!!map.reference);
+  return (
+    <>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <button className="btn-ghost" onClick={onBack}>
+          ← Cartes
+        </button>
+        <div className="spacer" />
+        <button className="btn" onClick={onPlay} disabled={map.callouts.length < MIN_CALLOUTS}>
+          Jouer
+        </button>
+      </div>
+      <div className="card">
+        <div className="row" style={{ marginBottom: 10 }}>
+          <h1 style={{ margin: 0 }}>{map.name}</h1>
+          <div className="spacer" />
+          {map.reference && (
+            <button className="btn-ghost" onClick={() => setAnnotated((a) => !a)}>
+              {annotated ? 'Voir les reperes' : 'Voir le plan annote'}
+            </button>
+          )}
+        </div>
+        {!(annotated && map.reference) && (
+          <p className="hint">En vert, les calls acquis (trois bonnes reponses d'affilee).</p>
+        )}
+        {annotated && map.reference ? (
+          <CalloutBoard map={{ ...map, image: map.reference }} markers={[]} />
+        ) : (
+          <CalloutBoard
+            map={map}
+            markers={map.callouts.map((c) => ({
+              callout: c,
+              tone: isMastered(c.stats) ? 'mastered' : 'neutral',
+              label: true,
+            }))}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Entrainement aux callouts : la liste des cartes, leur edition, leur
+ * revision et le trainer. L'ecran gere lui-meme sa persistance, independante
+ * des analyses.
  */
 export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
   const [maps, setMaps] = useState<CalloutMap[]>([]);
@@ -77,15 +102,19 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
 
   useEffect(() => {
     listCalloutMaps()
-      .then(setMaps)
+      .then(async (stored) => {
+        // Les cartes livrees avec l'application sont installees ou mises a
+        // jour ici, sans toucher a la progression du joueur.
+        const updates = syncBuiltin(stored, BUILTIN_MAPS, new Date().toISOString());
+        await Promise.all(updates.map(saveCalloutMap));
+        const ids = new Set(updates.map((m) => m.id));
+        setMaps(sortMaps([...stored.filter((m) => !ids.has(m.id)), ...updates]));
+      })
       .catch(() => setMessage({ ok: false, text: 'Stockage local inaccessible.' }));
   }, []);
 
   const persist = (map: CalloutMap) => {
-    setMaps((prev) => {
-      const others = prev.filter((m) => m.id !== map.id);
-      return [...others, map].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-    });
+    setMaps((prev) => sortMaps([...prev.filter((m) => m.id !== map.id), map]));
     saveCalloutMap(map).catch(() =>
       setMessage({ ok: false, text: "Echec de l'enregistrement de la carte." }),
     );
@@ -116,7 +145,7 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
     try {
       const map = importCalloutMap(await file.text(), new Date().toISOString());
       persist(map);
-      setMessage({ ok: true, text: `« ${map.name} » importee : ${map.callouts.length} endroits.` });
+      setMessage({ ok: true, text: `« ${map.name} » importee : ${map.callouts.length} calls.` });
     } catch (e) {
       setMessage({ ok: false, text: e instanceof Error ? e.message : 'Import impossible.' });
     }
@@ -141,7 +170,23 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
     deleteCalloutMap(map.id).catch(() => setMessage({ ok: false, text: 'Suppression impossible.' }));
   };
 
-  const active = mode.kind !== 'list' ? maps.find((m) => m.id === mode.id) : undefined;
+  if (mode.kind === 'play') {
+    const scoped = mode.scope === ALL ? maps : maps.filter((m) => m.id === mode.scope);
+    if (scoped.length > 0) {
+      return (
+        <CalloutGame
+          key={mode.scope}
+          maps={scoped}
+          scope={mode.scope}
+          title={mode.scope === ALL ? 'Toutes les cartes' : scoped[0]?.name ?? ''}
+          onChange={persist}
+          onBack={() => setMode({ kind: 'list' })}
+        />
+      );
+    }
+  }
+
+  const active = mode.kind === 'edit' || mode.kind === 'review' ? maps.find((m) => m.id === mode.id) : undefined;
 
   if (mode.kind === 'edit' && active) {
     return (
@@ -149,15 +194,24 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
         map={active}
         mapNames={mapNames}
         onChange={persist}
-        onTrain={() => setMode({ kind: 'quiz', id: active.id })}
+        onTrain={() => setMode({ kind: 'play', scope: active.id })}
         onBack={() => setMode({ kind: 'list' })}
       />
     );
   }
 
-  if (mode.kind === 'quiz' && active) {
-    return <CalloutQuiz map={active} onChange={persist} onBack={() => setMode({ kind: 'list' })} />;
+  if (mode.kind === 'review' && active) {
+    return (
+      <CalloutReview
+        map={active}
+        onPlay={() => setMode({ kind: 'play', scope: active.id })}
+        onBack={() => setMode({ kind: 'list' })}
+      />
+    );
   }
+
+  const totalCalls = buildPool(maps).length;
+  const jouables = maps.filter((m) => m.callouts.length >= MIN_CALLOUTS);
 
   return (
     <>
@@ -167,14 +221,13 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
         <button className="btn-ghost" onClick={() => jsonInput.current?.click()}>
           Importer
         </button>
-        <button className="btn" onClick={() => imageInput.current?.click()}>
+        <button className="btn-ghost" onClick={() => imageInput.current?.click()}>
           Nouvelle carte
         </button>
       </div>
       <p className="hint">
-        Apprenez les noms des endroits de chaque carte. Chargez un plan (capture, schema de
-        l'equipe), posez-y les noms, puis entrainez-vous. Exportez une carte pour la partager avec
-        vos coequipiers.
+        Apprenez les calls de chaque carte : 20 questions ou mode infini, avec {START_LIVES} vies. Jouez carte
+        par carte ou toutes melangees.
       </p>
 
       <input
@@ -206,6 +259,20 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
         </div>
       )}
 
+      {jouables.length > 1 && (
+        <div className="card game-all">
+          <div>
+            <h3 style={{ margin: 0 }}>Toutes les cartes</h3>
+            <div className="sub">
+              {totalCalls} calls sur {maps.length} cartes, melanges
+            </div>
+          </div>
+          <button className="btn" onClick={() => setMode({ kind: 'play', scope: ALL })}>
+            Jouer
+          </button>
+        </div>
+      )}
+
       {maps.length === 0 ? (
         <div className="card empty">
           <p>Aucune carte pour l'instant.</p>
@@ -221,9 +288,22 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
             return (
               <div className="match-card" key={m.id}>
                 <img className="callmap-thumb" src={m.image} alt="" />
-                <h3>{m.name || '(sans nom)'}</h3>
+                <div className="row" style={{ flexWrap: 'nowrap', gap: 6 }}>
+                  <h3 style={{ flex: 1, minWidth: 0 }}>{m.name || '(sans nom)'}</h3>
+                  {!m.builtin && (
+                    <>
+                      <button className="btn-icon" onClick={() => void exportMap(m)} title="Exporter" aria-label="Exporter">
+                        ⇪
+                      </button>
+                      <button className="btn-icon btn-danger" onClick={() => remove(m)} title="Supprimer" aria-label="Supprimer">
+                        ✕
+                      </button>
+                    </>
+                  )}
+                </div>
                 <div className="sub">
-                  {m.callouts.length} endroit{m.callouts.length > 1 ? 's' : ''} · {acquis} acquis
+                  {m.callouts.length} call{m.callouts.length > 1 ? 's' : ''} · {acquis} acquis
+                  {m.builtin ? ' · officielle' : ''}
                 </div>
                 <div className="progress">
                   <div style={{ width: `${pct}%` }} />
@@ -232,21 +312,19 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
                   <button
                     className="btn"
                     disabled={m.callouts.length < MIN_CALLOUTS}
-                    title={m.callouts.length < MIN_CALLOUTS ? 'Posez au moins deux endroits' : ''}
-                    onClick={() => setMode({ kind: 'quiz', id: m.id })}
+                    title={m.callouts.length < MIN_CALLOUTS ? 'Posez au moins deux calls' : ''}
+                    onClick={() => setMode({ kind: 'play', scope: m.id })}
                   >
-                    S'entrainer
+                    Jouer
                   </button>
-                  <button className="btn-ghost" onClick={() => setMode({ kind: 'edit', id: m.id })}>
-                    Modifier
+                  <button className="btn-ghost" onClick={() => setMode({ kind: 'review', id: m.id })}>
+                    Reviser
                   </button>
-                  <div className="spacer" />
-                  <button className="btn-ghost" onClick={() => void exportMap(m)} title="Exporter">
-                    ⇪
-                  </button>
-                  <button className="btn-ghost btn-danger" onClick={() => remove(m)} title="Supprimer">
-                    ✕
-                  </button>
+                  {!m.builtin && (
+                    <button className="btn-ghost" onClick={() => setMode({ kind: 'edit', id: m.id })}>
+                      Modifier
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -254,5 +332,12 @@ export function CalloutsScreen({ mapNames }: CalloutsScreenProps) {
         </div>
       )}
     </>
+  );
+}
+
+/** Cartes officielles d'abord, puis celles du joueur, chacune par nom. */
+function sortMaps(maps: CalloutMap[]): CalloutMap[] {
+  return maps.sort(
+    (a, b) => Number(!!b.builtin) - Number(!!a.builtin) || a.name.localeCompare(b.name, 'fr'),
   );
 }

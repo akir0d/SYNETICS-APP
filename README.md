@@ -75,28 +75,38 @@ envoyees a Claude, qui renvoie une analyse **structuree** : synthese, points for
 progres, exercices concrets, et une timeline des moments marquants rattachee aux horodatages de la
 video.
 
-### 6. Entrainement aux callouts
+### 6. Trainer de callouts
 
 Un onglet **Callouts** sert a apprendre les noms des endroits de chaque carte, ceux que l'on
 annonce a la voix en partie.
 
-1. **Nouvelle carte** : chargez un plan (capture d'ecran, schema dessine par l'equipe).
-2. Touchez le plan pour poser un endroit et tapez son nom ; touchez un repere pour le renommer,
-   le deplacer ou le supprimer. Tout est enregistre au fil de l'eau.
-3. **S'entrainer**, en deux modes :
-   - *Trouver* : un nom est annonce, touchez son emplacement. Le toucher est attribue a l'endroit
-     le plus proche : une grande salle isolee tolere l'approximation, deux recoins voisins
-     exigent de la precision.
-   - *Nommer* : un endroit clignote, choisissez son nom parmi quatre. Les leurres sont les
-     voisins de la bonne reponse, ceux que l'on confond reellement.
+**Les parties.** On joue sur une carte, ou sur **toutes les cartes melangees**, dans l'un de
+trois modes :
 
-Chaque reponse alimente un suivi par endroit : les endroits rates reviennent plus souvent, un
-endroit est *acquis* apres trois bonnes reponses d'affilee. En fin de serie, « Rejouer les
-erreurs » relance uniquement ce qui a ete manque.
+- *Trouver* : un call est annonce, touchez son emplacement. Le toucher est attribue a l'endroit
+  le plus proche : une grande salle isolee tolere l'approximation, deux recoins voisins exigent
+  de la precision.
+- *Nommer* : un endroit clignote, choisissez son call parmi quatre. Les leurres sont les voisins
+  de la bonne reponse, ceux que l'on confond reellement.
+- *Mixte* : les deux, au hasard.
 
-Comme pour les arenes, aucun plan n'est embarque. Une carte annotee s'**exporte** en un fichier
-JSON (plan compris) que vos coequipiers **importent** tel quel ; le suivi d'apprentissage, lui,
-reste personnel.
+Deux formats : **20 questions**, ou **infini** jusqu'a la derniere vie. On part avec 3 vies, une
+erreur en coute une. Une bonne reponse rapporte 100 points, plus 20 par bonne reponse deja
+enchainee (plafonne a +200) : la regularite paie. Le record est garde par carte, par mode et par
+format. En fin de partie, « Reviser les erreurs » relance uniquement les calls rates.
+
+Chaque reponse alimente un suivi par call : ceux que l'on rate reviennent plus souvent, un call
+est *acquis* apres trois bonnes reponses d'affilee. « Reviser » affiche la carte avec tous ses
+noms, ou le plan annote quand il existe.
+
+**Les cartes.** Les cartes officielles sont livrees avec l'application
+(`src/core/callouts/catalog.ts`, images dans `src/assets/maps/`) : un plan nu pour jouer et un
+plan annote pour reviser. Une mise a jour d'une carte conserve la progression du joueur.
+
+On peut aussi creer ses propres cartes : chargez un plan, touchez-le pour poser chaque call, et
+ajoutez si vous le souhaitez le plan annote. Une carte perso s'**exporte** en un fichier JSON
+(plans compris) que vos coequipiers **importent** tel quel ; le suivi d'apprentissage reste
+personnel.
 
 ---
 
@@ -248,7 +258,7 @@ src/
 │  ├─ video/fingerprint  Signature visuelle d'une arene
 │  ├─ analysis/          Statistiques robustes, heuristiques, decoupage, mesures, cartes
 │  ├─ ai/                Schema de sortie, prompts, client Claude
-│  ├─ callouts/          Quiz des noms d'endroits : tirage, leurres, suivi, partage
+│  ├─ callouts/          Trainer de callouts : parties, tirage, catalogue, partage
 │  └─ storage/           Persistance locale (IndexedDB, reglages)
 ├─ ui/                   Composants et ecrans React
 └─ platform/             Adaptation navigateur / Electron / Android

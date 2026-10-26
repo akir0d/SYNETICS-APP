@@ -118,6 +118,18 @@ h3 { font-size: 15px; margin: 0 0 8px; }
 .btn-ghost:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--accent); }
 .btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.btn-icon {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  cursor: pointer;
+}
+.btn-icon:hover { border-color: var(--accent-dim); color: var(--accent); }
+
 .btn-danger { border-color: #5c2626; color: var(--danger); }
 .btn-danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
 
@@ -349,6 +361,7 @@ video.player {
 }
 .cmap-marker.tone-neutral { background: #cbd5e1; }
 .cmap-marker.tone-selected { background: var(--warn); width: 20px; height: 20px; margin: -10px 0 0 -10px; }
+.cmap-marker.tone-mastered { background: var(--ok); }
 .cmap-marker.tone-ok { background: var(--ok); }
 .cmap-marker.tone-bad { background: var(--danger); }
 .cmap-marker.tone-target {
@@ -391,6 +404,7 @@ video.player {
 .callout-item small { color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 .quiz-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.quiz-modes > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 .quiz-mode {
   display: flex;
   flex-direction: column;
@@ -428,6 +442,27 @@ video.player {
 .quiz-choice:disabled { cursor: default; opacity: 0.6; }
 .quiz-choice.is-ok { border-color: var(--ok); color: var(--ok); opacity: 1; }
 .quiz-choice.is-bad { border-color: var(--danger); color: var(--danger); opacity: 1; }
+
+
+.game-all { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.game-all .sub { font-size: 12px; color: var(--text-dim); }
+
+.game-hud { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.game-hud .btn-ghost { padding: 5px 11px; }
+.game-lives { display: inline-flex; gap: 3px; font-size: 20px; line-height: 1; }
+.game-lives i { font-style: normal; color: var(--border-strong); transition: color 0.2s; }
+.game-lives i.on { color: var(--danger); }
+.game-score { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.game-streak {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.game-map { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.game-final { font-size: 42px; font-weight: 750; color: var(--accent); font-variant-numeric: tabular-nums; margin-bottom: 10px; }
 
 .quiz-feedback {
   display: flex;

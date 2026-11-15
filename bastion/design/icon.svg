@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <!-- Icone de Dernier Bastion. Grille d'icone adaptative Android : 108 unites,
+       tout l'essentiel tient dans le cercle central de rayon 33.
+       #bg = fond, #fg = premier plan. Regenerer : node tools/icons.cjs -->
+  <defs>
+    <radialGradient id="sky" cx="50%" cy="36%" r="72%">
+      <stop offset="0" stop-color="#4c7a3e"/>
+      <stop offset="1" stop-color="#1a3020"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffd66b" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#ffd66b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g id="bg"><rect width="108" height="108" fill="url(#sky)"/></g>
+  <g id="fg">
+    <circle cx="54" cy="42" r="27" fill="url(#halo)"/>
+    <circle cx="54" cy="42" r="15.5" fill="#ffd66b"/>
+    <circle cx="49" cy="38" r="3" fill="#f2bf4c"/>
+    <circle cx="60" cy="46" r="2.2" fill="#f2bf4c"/>
+    <ellipse cx="54" cy="85" rx="33" ry="4.5" fill="#0f1f14" opacity=".45"/>
+    <g stroke="#5e3a20" stroke-width="1.8" stroke-linejoin="round">
+      <polygon points="27,85 27,58 32,51 37,58 37,85" fill="#b98247"/>
+      <polygon points="38,85 38,54 43,47 48,54 48,85" fill="#c79152"/>
+      <polygon points="49,85 49,52 54,45 59,52 59,85" fill="#b98247"/>
+      <polygon points="60,85 60,54 65,47 70,54 70,85" fill="#c79152"/>
+      <polygon points="71,85 71,58 76,51 81,58 81,85" fill="#b98247"/>
+    </g>
+    <g fill="#e2b072" opacity=".75">
+      <rect x="29" y="59" width="2" height="24" rx="1"/>
+      <rect x="40" y="55" width="2" height="28" rx="1"/>
+      <rect x="51" y="53" width="2" height="30" rx="1"/>
+      <rect x="62" y="55" width="2" height="28" rx="1"/>
+      <rect x="73" y="59" width="2" height="24" rx="1"/>
+    </g>
+    <rect x="24" y="64" width="60" height="6" rx="2" fill="#8c5a30" stroke="#5e3a20" stroke-width="1.8"/>
+    <g stroke="#2f6b26" stroke-width="1.6" stroke-linejoin="round">
+      <path d="M54 86 C54 81 54 78 54 75" fill="none" stroke-linecap="round"/>
+      <path d="M54 77 C49 77 45 74 44 69 C49 69 53 72 54 77 Z" fill="#8fd35a"/>
+      <path d="M54 76 C59 76 63 72 64 67 C59 67 55 70 54 76 Z" fill="#7cc84a"/>
+    </g>
+  </g>
+</svg>

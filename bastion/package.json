@@ -1,0 +1,21 @@
+{
+  "name": "dernier-bastion",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Dernier Bastion - scene de test 3D (direction artistique)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource/baloo-2": "^5.0.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

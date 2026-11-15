@@ -124,3 +124,39 @@ export class Tracers {
     }
   }
 }
+
+/** Objets qui volent en cloche d'un point a un autre (recoltes, pieces, livraisons). */
+interface Flight { obj: THREE.Object3D; from: THREE.Vector3; to: () => THREE.Vector3; t: number; dur: number; arc: number; spin: number; done: () => void }
+
+export class Flyers {
+  private readonly items: Flight[] = [];
+
+  constructor(private readonly scene: THREE.Scene) {}
+
+  launch(obj: THREE.Object3D, from: THREE.Vector3, to: () => THREE.Vector3, done: () => void, dur = 0.28, arc = 1.4): void {
+    obj.position.copy(from);
+    this.scene.add(obj);
+    this.items.push({ obj, from: from.clone(), to, t: 0, dur, arc, spin: (Math.random() - 0.5) * 10, done });
+  }
+
+  get count(): number {
+    return this.items.length;
+  }
+
+  update(dt: number): void {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const f = this.items[i]!;
+      f.t += dt;
+      const k = Math.min(1, f.t / f.dur);
+      const e = k * (2 - k);
+      f.obj.position.lerpVectors(f.from, f.to(), e);
+      f.obj.position.y += Math.sin(k * Math.PI) * f.arc;
+      f.obj.rotation.y += f.spin * dt;
+      if (k >= 1) {
+        this.scene.remove(f.obj);
+        this.items.splice(i, 1);
+        f.done();
+      }
+    }
+  }
+}

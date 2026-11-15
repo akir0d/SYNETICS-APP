@@ -91,3 +91,36 @@ export function sfxToggle(night: boolean): void {
   const notes = night ? [523, 440, 349, 262] : [262, 349, 440, 523];
   notes.forEach((f, i) => tone(f, 0.35, 'sine', 0.2, i * 0.09));
 }
+
+export function sfxChop(): void {
+  burst(0.09, 0.45, 700, 1.2);
+  tone(180, 0.08, 'triangle', 0.3, 0, 120);
+}
+
+export function sfxClang(): void {
+  tone(1250, 0.16, 'square', 0.08, 0, 1100);
+  tone(1870, 0.12, 'triangle', 0.12);
+  burst(0.05, 0.2, 3000, 2);
+}
+
+export function sfxSell(): void {
+  tone(880, 0.07, 'triangle', 0.25);
+  tone(1320, 0.12, 'triangle', 0.25, 0.06);
+}
+
+export function sfxObjective(): void {
+  [659, 880, 1175].forEach((f, i) => tone(f, 0.18, 'sine', 0.25, i * 0.07));
+}
+
+export function sfxNope(): void {
+  tone(220, 0.12, 'sawtooth', 0.08, 0, 160);
+}
+
+export function sfxVictory(): void {
+  [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, 0.3, 'triangle', 0.3, i * 0.11));
+}
+
+export function sfxCoin(): void {
+  tone(1568 + Math.random() * 200, 0.06, 'square', 0.05);
+  tone(2093, 0.1, 'triangle', 0.08, 0.04);
+}

@@ -1,36 +1,42 @@
-// Le survivant : modele, marche, pile de bois sur le dos, lampe torche.
+// Le survivant : modele, marche, pile sur le dos, outils, lampe torche.
 
 import * as THREE from 'three';
-import { C, box, damp, group, rbox, shadow, sphere, cyl } from './kit';
-import { logMesh, type Circle, type Segment } from './world';
+import { Stack } from './carry';
+import { C, box, cone, cyl, damp, group, rbox, shadow, sphere } from './kit';
+import { collide, type Circle, type Segment } from './physics';
 
-export const MAX_STACK = 12;
+export type Tool = 'none' | 'axe' | 'hammer' | 'gun';
 
 export class Player {
   readonly root = new THREE.Group();
   readonly body = new THREE.Group();
   readonly flashlight = new THREE.SpotLight(0xfff4d6, 0, 20, 0.5, 0.45, 1.3);
+  readonly stack = new Stack(8);
   private readonly legL: THREE.Object3D;
   private readonly legR: THREE.Object3D;
   private readonly armL: THREE.Object3D;
   private readonly armR: THREE.Object3D;
-  private readonly stackRoot = new THREE.Group();
-  readonly stack: THREE.Object3D[] = [];
+  private readonly tools: Record<Exclude<Tool, 'none'>, THREE.Object3D>;
   private walkPhase = 0;
-  private stackLean = 0;
+  /** 0..1 pendant un coup de hache ou de marteau. */
+  swing = 0;
+  tool: Tool = 'none';
   speed = 0;
-  heading = 0;
+  speedMul = 1;
+  heading = Math.PI;
   aiming: THREE.Vector3 | null = null;
+  hp = 100;
+  maxHp = 100;
+  hurtFlash = 0;
 
   constructor() {
     const b = this.body;
-    // Jambes et bras pivotent depuis la hanche et l'epaule.
-    this.legL = limb(box(0.24, 0.6, 0.26, C.jeans, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
-    this.legR = limb(box(0.24, 0.6, 0.26, C.jeans, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
+    this.legL = group(box(0.24, 0.6, 0.26, C.jeans, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
+    this.legR = group(box(0.24, 0.6, 0.26, C.jeans, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
     this.legL.position.set(-0.17, 0.7, 0);
     this.legR.position.set(0.17, 0.7, 0);
-    this.armL = limb(rbox(0.2, 0.55, 0.22, C.jacket, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
-    this.armR = limb(rbox(0.2, 0.55, 0.22, C.jacket, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
+    this.armL = group(rbox(0.2, 0.55, 0.22, C.jacket, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
+    this.armR = group(rbox(0.2, 0.55, 0.22, C.jacket, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
     this.armL.position.set(-0.42, 1.28, 0);
     this.armR.position.set(0.42, 1.28, 0);
 
@@ -45,30 +51,36 @@ export class Player {
     brim.scale.z = 0.7;
     const eyes = group(sphere(0.04, 0x2a1a10, -0.1, 1.62, 0.27, 6), sphere(0.04, 0x2a1a10, 0.1, 1.62, 0.27, 6));
     const pack = rbox(0.5, 0.56, 0.24, 0x8a5a32, 0.1, 0, 1.05, -0.32);
-    const roll = cyl(0.12, 0.12, 0.52, 0x4f7a3a, 8, 0, 1.38, -0.32);
-    roll.rotation.z = Math.PI / 2;
-    b.add(torso, zip, head, hair, cap, brim, eyes, pack, roll, this.legL, this.legR, this.armL, this.armR);
+    b.add(torso, zip, head, hair, cap, brim, eyes, pack, this.legL, this.legR, this.armL, this.armR);
 
-    // Fusil de chasse, visible la nuit seulement.
-    const gun = group(
-      box(0.08, 0.1, 0.7, 0x3a3a3a, 0, 0, 0.3),
-      box(0.1, 0.14, 0.32, 0x7a4a2a, 0, -0.03, -0.12),
+    // Outils tenus dans la main droite, un seul visible a la fois.
+    const axe = group(
+      cyl(0.04, 0.04, 0.8, C.woodLight, 6, 0, 0, 0.3),
+      rbox(0.06, 0.28, 0.2, 0x9aa3ab, 0.02, 0, 0.1, 0.62),
     );
-    gun.name = 'gun';
-    gun.position.set(0, -0.5, 0.1);
-    gun.visible = false;
-    this.armR.add(gun);
+    (axe.children[0] as THREE.Mesh).rotation.x = Math.PI / 2;
+    const hammer = group(
+      cyl(0.035, 0.035, 0.6, C.woodDark, 6, 0, 0, 0.22),
+      rbox(0.12, 0.12, 0.26, 0x6f777e, 0.02, 0, 0, 0.5),
+    );
+    (hammer.children[0] as THREE.Mesh).rotation.x = Math.PI / 2;
+    (hammer.children[1] as THREE.Mesh).rotation.x = Math.PI / 2;
+    const gun = group(box(0.08, 0.1, 0.7, 0x3a3a3a, 0, 0, 0.3), box(0.1, 0.14, 0.32, 0x7a4a2a, 0, -0.03, -0.12), cone(0.03, 0.06, 0x222222, 5, 0, 0, 0.66));
+    this.tools = { axe, hammer, gun };
+    for (const t of [axe, hammer, gun]) {
+      t.position.set(0, -0.58, 0.05);
+      t.visible = false;
+      this.armR.add(t);
+    }
 
-    this.stackRoot.position.set(0, 1.45, -0.42);
-    b.add(this.stackRoot);
+    this.stack.root.position.set(0, 1.38, -0.46);
+    b.add(this.stack.root);
 
     this.flashlight.position.set(0.3, 1.3, 0.3);
     this.flashlight.target.position.set(0, 0, 6);
-    this.flashlight.castShadow = false;
     b.add(this.flashlight, this.flashlight.target);
 
     this.root.add(shadow(b));
-    // Ombre de contact douce sous les pieds : le perso « tient » au sol.
     const blobShadow = new THREE.Mesh(
       new THREE.CircleGeometry(0.55, 16),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18, depthWrite: false }),
@@ -82,115 +94,66 @@ export class Player {
     return this.root.position;
   }
 
-  set armed(on: boolean) {
-    const gun = this.armR.getObjectByName('gun');
-    if (gun) gun.visible = on;
+  setTool(t: Tool): void {
+    if (t === this.tool) return;
+    this.tool = t;
+    for (const [k, o] of Object.entries(this.tools)) o.visible = k === t;
   }
 
-  /** Ajoute un rondin au sommet de la pile ; renvoie sa position monde de destination. */
-  pushLog(): THREE.Object3D | null {
-    if (this.stack.length >= MAX_STACK) return null;
-    const log = logMesh();
-    shadow(log);
-    log.scale.setScalar(0.62);
-    log.position.set(0, this.stack.length * 0.25, 0);
-    this.stackRoot.add(log);
-    this.stack.push(log);
-    return log;
+  /** Lance un coup d'outil ; renvoie false s'il y en a deja un en cours. */
+  strike(): boolean {
+    if (this.swing > 0) return false;
+    this.swing = 1;
+    return true;
   }
 
-  popLog(): THREE.Vector3 | null {
-    const log = this.stack.pop();
-    if (!log) return null;
-    const p = new THREE.Vector3();
-    log.getWorldPosition(p);
-    this.stackRoot.remove(log);
-    return p;
+  faceTowards(x: number, z: number, dt: number): void {
+    const want = Math.atan2(x - this.root.position.x, z - this.root.position.z);
+    let diff = want - this.heading;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    this.heading += diff * (1 - Math.exp(-16 * dt));
   }
 
   update(dt: number, move: THREE.Vector2, walls: Segment[], solids: Circle[], bounds: number, time: number): void {
     const len = Math.min(1, move.length());
-    const target = len * 6.2;
-    this.speed = damp(this.speed, target, 12, dt);
+    const maxSpeed = 6.2 * this.speedMul;
+    this.speed = damp(this.speed, len * maxSpeed, 12, dt);
     if (len > 0.05) {
       const want = Math.atan2(move.x, move.y);
       let diff = want - this.heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      this.heading += diff * (1 - Math.exp(-14 * dt));
+      if (!this.aiming) this.heading += diff * (1 - Math.exp(-14 * dt));
       const p = this.root.position;
-      p.x += (move.x / Math.max(len, 1e-6)) * this.speed * dt * Math.min(1, len * 1.3);
-      p.z += (move.y / Math.max(len, 1e-6)) * this.speed * dt * Math.min(1, len * 1.3);
+      const k = this.speed * dt * Math.min(1, len * 1.3) / Math.max(len, 1e-6);
+      p.x += move.x * k;
+      p.z += move.y * k;
     }
-    if (this.aiming) {
-      // En tir, le haut du corps se tourne vers la cible.
-      const want = Math.atan2(this.aiming.x - this.root.position.x, this.aiming.z - this.root.position.z);
-      let diff = want - this.heading;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      this.heading += diff * (1 - Math.exp(-20 * dt));
-    }
-    this.collide(walls, solids, bounds);
+    if (this.aiming) this.faceTowards(this.aiming.x, this.aiming.z, dt);
+    collide(this.root.position, 0.45, walls, solids, bounds);
     this.body.rotation.y = this.heading;
 
-    // Animation de marche : amplitude proportionnelle a la vitesse.
-    const k = this.speed / 6.2;
+    const k = this.speed / maxSpeed;
     this.walkPhase += dt * (4 + this.speed * 1.6);
     const sw = Math.sin(this.walkPhase) * 0.75 * k;
     this.legL.rotation.x = sw;
     this.legR.rotation.x = -sw;
-    const carrying = this.stack.length > 0;
-    const aimingNow = this.aiming !== null;
-    // Charge sur le dos : les mains tiennent les bretelles, le balancement diminue.
-    const swing = carrying ? 0.3 : 0.8;
-    this.armL.rotation.x = -sw * swing - (carrying ? 0.25 : 0);
-    this.armR.rotation.x = aimingNow ? -1.45 : sw * swing - (carrying ? 0.25 : 0);
-    this.armL.rotation.z = carrying ? 0.12 : 0;
-    this.armR.rotation.z = carrying && !aimingNow ? -0.12 : 0;
+    const carrying = this.stack.count > 0;
+    const swingArm = carrying ? 0.3 : 0.8;
+    this.armL.rotation.x = -sw * swingArm - (carrying ? 0.25 : 0);
+    if (this.swing > 0) {
+      // Coup d'outil : on arme vers l'arriere puis on abat vers l'avant.
+      this.swing = Math.max(0, this.swing - dt * 3.2);
+      const t = 1 - this.swing;
+      this.armR.rotation.x = t < 0.45 ? -2.6 * (t / 0.45) : -2.6 + ((t - 0.45) / 0.55) * 2.9;
+    } else if (this.aiming) {
+      this.armR.rotation.x = -1.45;
+    } else {
+      this.armR.rotation.x = sw * swingArm - (carrying ? 0.25 : 0);
+    }
     this.body.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.08 * k + Math.sin(time * 2.2) * 0.012;
     this.body.rotation.z = Math.sin(this.walkPhase) * 0.04 * k;
+    this.stack.update(dt, k, this.walkPhase);
 
-    // La pile oscille avec un peu de retard : c'est ce qui la rend vivante.
-    this.stackLean = damp(this.stackLean, -k * 0.18, 6, dt);
-    this.stack.forEach((log, i) => {
-      const f = i / MAX_STACK;
-      log.rotation.x = this.stackLean * f * 1.6 + Math.sin(this.walkPhase * 0.5 + i * 0.4) * 0.03 * k;
-      log.position.z = this.stackLean * f * i * 0.25;
-    });
+    this.hurtFlash = Math.max(0, this.hurtFlash - dt * 4);
   }
-
-  private collide(walls: Segment[], solids: Circle[], bounds: number): void {
-    const p = this.root.position;
-    const R = 0.45;
-    for (const s of solids) {
-      const dx = p.x - s.x;
-      const dz = p.z - s.z;
-      const d = Math.hypot(dx, dz);
-      const min = s.r + R;
-      if (d < min && d > 1e-5) {
-        p.x = s.x + (dx / d) * min;
-        p.z = s.z + (dz / d) * min;
-      }
-    }
-    for (const w of walls) {
-      const vx = w.x2 - w.x1;
-      const vz = w.z2 - w.z1;
-      const l2 = vx * vx + vz * vz;
-      const t = Math.max(0, Math.min(1, ((p.x - w.x1) * vx + (p.z - w.z1) * vz) / l2));
-      const cx = w.x1 + vx * t;
-      const cz = w.z1 + vz * t;
-      const dx = p.x - cx;
-      const dz = p.z - cz;
-      const d = Math.hypot(dx, dz);
-      const min = R + 0.12;
-      if (d < min && d > 1e-5) {
-        p.x = cx + (dx / d) * min;
-        p.z = cz + (dz / d) * min;
-      }
-    }
-    p.x = Math.max(-bounds, Math.min(bounds, p.x));
-    p.z = Math.max(-bounds, Math.min(bounds, p.z));
-  }
-}
-
-function limb(...parts: THREE.Object3D[]): THREE.Group {
-  return group(...parts);
 }

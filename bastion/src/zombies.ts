@@ -2,12 +2,14 @@
 
 import * as THREE from 'three';
 import { C, box, glow, group, rbox, shadow, sphere, uniqueMat } from './kit';
-import { CAMP, type Segment } from './world';
+import { CAMP, insideCamp } from './layout';
+import { collide, type Circle, type Segment } from './physics';
 
 const WHITE = new THREE.Color(0xffffff);
 const SHIRTS = [0x7a6a8f, 0x8f5a4a, 0x5a7a8f, 0x8a8a5a, 0x6a8f6a];
+const POOL = 16;
 
-interface Z {
+export interface Zombie {
   root: THREE.Group;
   body: THREE.Group;
   armL: THREE.Object3D;
@@ -15,11 +17,11 @@ interface Z {
   legL: THREE.Object3D;
   legR: THREE.Object3D;
   mats: THREE.MeshLambertMaterial[];
+  bases: THREE.Color[];
   eyes: THREE.Sprite[];
   hp: number;
   speed: number;
   phase: number;
-  /** 0 = sous terre, 1 = debout. */
   rise: number;
   state: 'hidden' | 'rising' | 'walking' | 'dying';
   timer: number;
@@ -30,16 +32,19 @@ interface Z {
 export interface Hit { pos: THREE.Vector3; killed: boolean; colors: number[] }
 
 export class Horde {
-  private readonly zs: Z[] = [];
+  private readonly zs: Zombie[] = [];
   active = false;
+  toSpawn = 0;
+  hpPerZombie = 3;
+  private spawnClock = 0;
+  kills = 0;
 
-  constructor(private readonly scene: THREE.Scene, count: number) {
-    for (let i = 0; i < count; i++) this.zs.push(this.make(i));
+  constructor(private readonly scene: THREE.Scene) {
+    for (let i = 0; i < POOL; i++) this.zs.push(this.make(i));
   }
 
-  private make(i: number): Z {
+  private make(i: number): Zombie {
     const shirt = SHIRTS[i % SHIRTS.length]!;
-    // Leger emissif : la silhouette reste lisible meme hors de la lampe torche.
     const skinM = uniqueMat(0x9fc274, 0x1c2a12);
     const shirtM = uniqueMat(shirt, 0x15121a);
     const pantsM = uniqueMat(0x4a4440, 0x0e0c0c);
@@ -55,7 +60,6 @@ export class Horde {
     const torso = rbox(0.62, 0.66, 0.4, shirtM, 0.14, 0, 0.98, 0);
     const rip = box(0.3, 0.16, 0.02, skinM, 0.12, 0.8, 0.205);
     const head = sphere(0.29, skinM, 0, 1.56, 0.04, 10);
-    head.scale.set(1, 0.95, 1.05);
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffb347 });
     const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 4), eyeMat);
     const eyeR = eyeL.clone();
@@ -71,85 +75,101 @@ export class Horde {
     root.visible = false;
     this.scene.add(root);
     return {
-      root, body, armL, armR, legL, legR, mats, eyes: [gL, gR],
+      root, body, armL, armR, legL, legR, mats, bases: mats.map((m) => m.emissive.clone()), eyes: [gL, gR],
       hp: 3, speed: 1.3 + Math.random() * 0.9, phase: Math.random() * 6, rise: 0,
-      state: 'hidden', timer: 0.5 + i * 0.6, flash: 0, knock: new THREE.Vector3(),
+      state: 'hidden', timer: 0, flash: 0, knock: new THREE.Vector3(),
     };
   }
 
-  setActive(on: boolean): void {
-    this.active = on;
+  startNight(n: number): void {
+    this.active = true;
+    this.toSpawn = 6 + 4 * (n - 1);
+    this.hpPerZombie = 2 + n;
+    this.spawnClock = 2;
+  }
+
+  endNight(): void {
+    this.active = false;
+    this.toSpawn = 0;
     for (const z of this.zs) {
-      if (on && z.state === 'hidden') z.timer = 0.6 + Math.random() * 3;
-      if (!on && z.state !== 'hidden') {
+      if (z.state === 'walking' || z.state === 'rising') {
         z.state = 'dying';
         z.timer = 0;
       }
     }
   }
 
-  private spawn(z: Z): void {
-    // Ils sortent de terre hors du camp, surtout cote route.
-    const a = Math.PI / 2 + (Math.random() - 0.5) * 2.6;
-    const d = 18 + Math.random() * 10;
-    z.root.position.set(Math.cos(a) * d * 1.2, 0, Math.sin(a) * d);
-    z.hp = 3;
+  get alive(): number {
+    return this.zs.filter((z) => z.state === 'walking' || z.state === 'rising').length;
+  }
+
+  get remaining(): number {
+    return this.alive + this.toSpawn;
+  }
+
+  private spawn(z: Zombie, northOpen: boolean): void {
+    // Ils sortent de terre hors du camp : surtout cote route, et de la foret si la porte nord est ouverte.
+    const roll = Math.random();
+    if (northOpen && roll < 0.3) z.root.position.set((Math.random() - 0.5) * 24, 0, -24 - Math.random() * 6);
+    else if (roll < 0.8) z.root.position.set((Math.random() - 0.5) * 50, 0, 23 + Math.random() * 5);
+    else z.root.position.set((Math.random() < 0.5 ? -1 : 1) * (22 + Math.random() * 6), 0, (Math.random() - 0.5) * 20);
+    z.hp = this.hpPerZombie;
     z.rise = 0;
     z.state = 'rising';
     z.root.visible = true;
     z.root.scale.setScalar(1);
     z.body.rotation.set(0, 0, 0);
+    z.speed = 1.3 + Math.random() * 0.9;
   }
 
-  /** Zombie le plus proche, a portee de tir. */
-  nearest(p: THREE.Vector3, range: number): THREE.Vector3 | null {
-    let best: Z | null = null;
+  nearest(p: THREE.Vector3, range: number): Zombie | null {
+    let best: Zombie | null = null;
     let bd = range;
     for (const z of this.zs) {
       if (z.state !== 'walking') continue;
       const d = z.root.position.distanceTo(p);
-      if (d < bd) {
-        bd = d;
-        best = z;
-      }
+      if (d < bd) { bd = d; best = z; }
     }
-    return best ? best.root.position : null;
+    return best;
   }
 
-  shoot(target: THREE.Vector3, from: THREE.Vector3): Hit | null {
-    const z = this.zs.find((x) => x.root.position === target);
-    if (!z || z.state !== 'walking') return null;
-    z.hp -= 1;
+  damage(z: Zombie, dmg: number, from: THREE.Vector3): Hit | null {
+    if (z.state !== 'walking') return null;
+    z.hp -= dmg;
     z.flash = 1;
-    const dir = target.clone().sub(from).setY(0).normalize();
+    const dir = z.root.position.clone().sub(from).setY(0).normalize();
     z.knock.addScaledVector(dir, 3.5);
-    const pos = target.clone().setY(1.1);
+    const pos = z.root.position.clone().setY(1.1);
     const colors = [C.zombieSkin, z.mats[1]!.color.getHex(), 0x3a2e2a];
     if (z.hp <= 0) {
       z.state = 'dying';
       z.timer = 0;
+      this.kills++;
       return { pos, killed: true, colors };
     }
     return { pos, killed: false, colors };
   }
 
-  update(dt: number, player: THREE.Vector3, walls: Segment[], nightK: number): number {
+  update(dt: number, player: THREE.Vector3, walls: Segment[], solids: Circle[], nightK: number, northOpen: boolean): number {
     let contact = 0;
+    if (this.active && this.toSpawn > 0) {
+      this.spawnClock -= dt;
+      if (this.spawnClock <= 0) {
+        const free = this.zs.find((z) => z.state === 'hidden');
+        if (free) {
+          this.spawn(free, northOpen);
+          this.toSpawn--;
+        }
+        this.spawnClock = 1.4;
+      }
+    }
     for (const z of this.zs) {
       for (const e of z.eyes) (e.material as THREE.SpriteMaterial).opacity = 0.9 * nightK;
       if (z.flash > 0) {
         z.flash = Math.max(0, z.flash - dt * 7);
-        for (const m of z.mats) {
-          const base = m.userData.base as THREE.Color | undefined ?? (m.userData.base = m.emissive.clone());
-          m.emissive.copy(base).lerp(WHITE, z.flash * 0.9);
-        }
+        z.mats.forEach((m, i) => m.emissive.copy(z.bases[i]!).lerp(WHITE, z.flash * 0.9));
       }
-      if (z.state === 'hidden') {
-        if (!this.active) continue;
-        z.timer -= dt;
-        if (z.timer <= 0) this.spawn(z);
-        continue;
-      }
+      if (z.state === 'hidden') continue;
       if (z.state === 'rising') {
         z.rise = Math.min(1, z.rise + dt * 0.9);
         z.root.position.y = -1.8 * (1 - z.rise);
@@ -165,14 +185,12 @@ export class Horde {
         if (t > 1.6) {
           z.state = 'hidden';
           z.root.visible = false;
-          z.timer = this.active ? 2 + Math.random() * 4 : 0;
         }
         continue;
       }
 
-      // Marche titubante vers le joueur, en passant par l'entree du camp.
       const pos = z.root.position;
-      const target = this.waypoint(pos, player);
+      const target = waypoint(pos, player, northOpen);
       const dir = new THREE.Vector3(target.x - pos.x, 0, target.z - pos.z);
       const dist = dir.length();
       dir.normalize();
@@ -183,7 +201,7 @@ export class Horde {
       pos.addScaledVector(z.knock, dt);
       z.knock.multiplyScalar(Math.exp(-8 * dt));
       this.separate(z);
-      collide(pos, walls);
+      collide(pos, 0.4, walls, solids, 46);
       const want = Math.atan2(dir.x, dir.z);
       let diff = want - z.body.rotation.y;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
@@ -197,18 +215,7 @@ export class Horde {
     return contact;
   }
 
-  private waypoint(pos: THREE.Vector3, player: THREE.Vector3): THREE.Vector3 {
-    const inside = (p: THREE.Vector3) => p.x > CAMP.minX && p.x < CAMP.maxX && p.z > CAMP.minZ && p.z < CAMP.maxZ;
-    const zIn = inside(pos);
-    const pIn = inside(player);
-    if (zIn === pIn) return player;
-    const gateOut = new THREE.Vector3(0, 0, CAMP.maxZ + 1.6);
-    const gateIn = new THREE.Vector3(0, 0, CAMP.maxZ - 1.6);
-    if (!zIn) return Math.abs(pos.x) < CAMP.gate - 0.6 && pos.z > CAMP.maxZ - 0.5 ? gateIn : gateOut;
-    return Math.abs(pos.x) < CAMP.gate - 0.6 && pos.z > CAMP.maxZ - 2 ? gateOut : gateIn;
-  }
-
-  private separate(z: Z): void {
+  private separate(z: Zombie): void {
     for (const o of this.zs) {
       if (o === z || o.state !== 'walking') continue;
       const dx = z.root.position.x - o.root.position.x;
@@ -223,20 +230,26 @@ export class Horde {
   }
 }
 
-function collide(p: THREE.Vector3, walls: Segment[]): void {
-  for (const w of walls) {
-    const vx = w.x2 - w.x1;
-    const vz = w.z2 - w.z1;
-    const l2 = vx * vx + vz * vz;
-    const t = Math.max(0, Math.min(1, ((p.x - w.x1) * vx + (p.z - w.z1) * vz) / l2));
-    const cx = w.x1 + vx * t;
-    const cz = w.z1 + vz * t;
-    const dx = p.x - cx;
-    const dz = p.z - cz;
-    const d = Math.hypot(dx, dz);
-    if (d < 0.5 && d > 1e-5) {
-      p.x = cx + (dx / d) * 0.5;
-      p.z = cz + (dz / d) * 0.5;
-    }
+/**
+ * Prochain point de passage pour aller de `pos` a `dest` : on traverse la cloture
+ * uniquement par une porte (sud, ou nord une fois construite).
+ */
+export function waypoint(pos: THREE.Vector3, dest: THREE.Vector3, northOpen: boolean): THREE.Vector3 {
+  const a = insideCamp(pos.x, pos.z);
+  const b = insideCamp(dest.x, dest.z);
+  if (a === b) return dest;
+  const gates = [{ z: CAMP.maxZ, s: 1 }];
+  if (northOpen) gates.push({ z: CAMP.minZ, s: -1 });
+  // Porte la plus courte pour l'ensemble du trajet.
+  let best = gates[0]!;
+  let bd = Infinity;
+  for (const g of gates) {
+    const d = Math.hypot(pos.x, pos.z - g.z) + Math.hypot(dest.x, dest.z - g.z);
+    if (d < bd) { bd = d; best = g; }
   }
+  const outside = new THREE.Vector3(0, 0, best.z + best.s * 1.8);
+  const inside = new THREE.Vector3(0, 0, best.z - best.s * 1.8);
+  const inGate = Math.abs(pos.x) < CAMP.gate - 0.5 && Math.abs(pos.z - best.z) < 1.9;
+  if (inGate) return a ? outside : inside;
+  return a ? inside : outside;
 }

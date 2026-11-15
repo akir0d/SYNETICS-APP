@@ -8,16 +8,25 @@
   </head>
   <body>
     <div id="app"></div>
-    <div class="labels"></div>
-    <header class="top">
-      <div class="title">Dernier Bastion <span>scène de test</span></div>
-      <div class="wood"><span>🪵</span><b>0/12</b></div>
+    <div class="labels"><div class="hpbar hidden"><i></i></div></div>
+    <header class="hud">
+      <div class="clock"><span class="ci">☀️</span><span class="ct">Jour 1</span><div class="cbar"><i></i></div></div>
+      <div class="purse">
+        <div class="money"><span class="coin"></span><b>0</b></div>
+        <div class="bag"><span>🎒</span><b>0/8</b></div>
+      </div>
     </header>
-    <button class="sound" aria-label="Son">🔊</button>
-    <button class="daynight" aria-label="Jour ou nuit">🌙</button>
-    <div class="hint">Glisse le doigt pour marcher<br /><small>Ramasse le bois 🪵 et construis la serre</small></div>
+    <div class="objective"><span class="oi">🥕</span><span class="ot">Récolte des carottes</span></div>
+    <button class="menu-btn" aria-label="Menu">⚙️</button>
+    <div class="menu">
+      <button class="m-sound">🔊 Son activé</button>
+      <button class="m-reset">Recommencer le camp</button>
+    </div>
+    <section class="sheet"><div class="sheet-body"></div></section>
+    <div class="hint">Glisse le doigt pour marcher</div>
     <div class="joy"><div class="joy-knob"></div></div>
     <div class="toast"></div>
+    <div class="modal"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

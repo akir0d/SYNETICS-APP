@@ -56,6 +56,34 @@ export class Bed {
     for (const w of this.walls) w.off = false;
   }
 
+  /** Vrai si un personnage de rayon `margin` chevauche le bac. */
+  overlaps(px: number, pz: number, margin: number): boolean {
+    return Math.abs(px - this.x) < BED_W / 2 + margin && Math.abs(pz - this.z) < BED_D / 2 + margin;
+  }
+
+  /**
+   * Fait sortir un personnage du bac. Le bac apparait la ou l'on a paye, donc
+   * sous les pieds du joueur : ses bords l'enfermeraient. On sort par le cote
+   * le plus proche qui ne tombe ni dans un autre obstacle (`free`) ni hors du camp.
+   */
+  eject(p: THREE.Vector3, margin: number, free: (x: number, z: number) => boolean): void {
+    if (!this.overlaps(p.x, p.z, margin)) return;
+    const hw = BED_W / 2 + margin + 0.05;
+    const hd = BED_D / 2 + margin + 0.05;
+    const exits = [
+      { x: this.x - hw, z: p.z },
+      { x: this.x + hw, z: p.z },
+      { x: p.x, z: this.z - hd },
+      { x: p.x, z: this.z + hd },
+    ];
+    // A distance egale, on prefere le cote tourne vers le centre du camp, plus degage.
+    const cost = (e: { x: number; z: number }) => Math.hypot(e.x - p.x, e.z - p.z) + 0.05 * Math.hypot(e.x, e.z);
+    exits.sort((a, b) => cost(a) - cost(b));
+    const out = exits.find((e) => free(e.x, e.z)) ?? exits[0]!;
+    p.x = out.x;
+    p.z = out.z;
+  }
+
   /** Distance d'un point au bord du bac. */
   distance(px: number, pz: number): number {
     const dx = Math.max(Math.abs(px - this.x) - BED_W / 2, 0);

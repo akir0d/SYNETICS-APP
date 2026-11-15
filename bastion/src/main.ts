@@ -9,7 +9,7 @@ import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type Drop, type HelperCtx } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
 import { damp, easeOutBack, glow } from './kit';
-import { L } from './layout';
+import { CAMP, L } from './layout';
 import { Player } from './player';
 import {
   DAY_LEN, PADS, UPGRADES, freshSave, loadSave, nightLen, wipeSave, writeSave,
@@ -227,17 +227,61 @@ const popping: { g: THREE.Group; t: number }[] = [];
 let barrierFall = 0;
 
 /** Applique l'effet d'une construction ; `instant` au chargement d'une partie. */
+/**
+ * Un batiment apparait la ou l'on vient de payer, donc sur le joueur. On le fait
+ * sortir de ses cercles de collision, vers l'interieur du camp si la sortie
+ * directe le collerait a la cloture (il resterait coince entre les deux).
+ */
+function clearSpot(p: THREE.Vector3, R: number, solids: { x: number; z: number; r: number }[]): void {
+  const inCamp = (x: number, z: number) =>
+    x > CAMP.minX + R + 0.2 && x < CAMP.maxX - R - 0.2 && z > CAMP.minZ + R + 0.2 && z < CAMP.maxZ - R - 0.2;
+  for (let pass = 0; pass < 3; pass++) {
+    for (const s of solids) {
+      const dx = p.x - s.x;
+      const dz = p.z - s.z;
+      const d = Math.hypot(dx, dz);
+      const min = s.r + R + 0.05;
+      if (d >= min) continue;
+      let ux = d > 1e-3 ? dx / d : 0;
+      let uz = d > 1e-3 ? dz / d : 1;
+      if (!inCamp(s.x + ux * min, s.z + uz * min)) {
+        const l = Math.hypot(s.x, s.z) || 1;
+        ux = -s.x / l;
+        uz = -s.z / l;
+      }
+      p.x = s.x + ux * min;
+      p.z = s.z + uz * min;
+    }
+  }
+}
+
+/** Debloque un bac et fait sortir ceux qui se tiennent a sa place. */
+function unlockBed(bed: Bed): void {
+  bed.unlock();
+  const margin = 0.6;
+  const free = (x: number, z: number) =>
+    x > CAMP.minX + margin && x < CAMP.maxX - margin && z > CAMP.minZ + margin && z < CAMP.maxZ - margin &&
+    !beds.some((b) => b !== bed && b.unlocked && b.overlaps(x, z, margin));
+  bed.eject(player.position, margin, free);
+  for (const h of helpers) bed.eject(h.human.root.position, margin, free);
+}
+
 function applyBuild(id: string, instant: boolean): void {
   const pop = (b: Building) => {
     b.group.visible = true;
     if (instant) b.group.scale.setScalar(1);
     else popping.push({ g: b.group, t: 0 });
   };
-  for (const s of SOLIDS[id] ?? []) world.solids.push({ ...s });
+  const added = SOLIDS[id] ?? [];
+  for (const s of added) world.solids.push({ ...s });
+  if (added.length) {
+    clearSpot(player.position, 0.45, added);
+    for (const h of helpers) clearSpot(h.human.root.position, 0.4, added);
+  }
   switch (id) {
-    case 'bed2': beds[1]!.unlock(); break;
-    case 'bed3': beds[2]!.unlock(); break;
-    case 'bed4': beds[3]!.unlock(); break;
+    case 'bed2': unlockBed(beds[1]!); break;
+    case 'bed3': unlockBed(beds[2]!); break;
+    case 'bed4': unlockBed(beds[3]!); break;
     case 'gate':
       world.northBarrier.wall.off = true;
       if (instant) world.northBarrier.group.visible = false;

@@ -46,7 +46,7 @@ export function buildWorld(scene: THREE.Scene): World {
 
   ground(scene, r);
   road(scene, r);
-  stall(scene, w);
+  stall(scene);
   campfire(scene, w, L.campfire.x, L.campfire.z);
   seats(scene, w);
   workLight(scene, w);
@@ -210,21 +210,20 @@ function road(scene: THREE.Scene, r: () => number): void {
  * L'etal, encastre dans la palissade sud : une porte posee sur deux futs.
  * Rien au-dessus du comptoir : la camera voit tout ce qu'on y pose.
  */
-function stall(scene: THREE.Scene, w: World): void {
+function stall(scene: THREE.Scene): void {
   const { x, z, w: W } = L.stall;
   const g = new THREE.Group();
-  for (const sx of [-1, 1]) g.add(at(drum(sx < 0 ? 0x3f6a8a : 0x8a3f30), sx * (W / 2 - 0.5), 0, 0.05));
+  // Un long plateau sur trois futs : il porte les bacs (stations.ts, Bins).
+  for (const sx of [-1, 0, 1]) g.add(at(drum([0x3f6a8a, 0x6f7a4a, 0x8a3f30][sx + 1]!), sx * (W / 2 - 0.5), 0, 0.05));
   g.add(rbox(W - 0.1, 0.1, 1.0, 0xc8a878, 0.03, 0, 1.0, 0));
   g.add(box(W - 0.2, 0.05, 0.12, 0x8a6a48, 0, 1.06, 0.45));
   // Devant, cote route : une tole de facade.
   const front = sheet(W - 0.3, 0.85, 0x5f8a85);
   front.position.set(0, 0.05, 0.42);
   g.add(front);
-  // Enseigne peinte sur le cote et caisses de reserve.
-  g.add(at(paintedBoard('coin'), -W / 2 - 0.55, 0, 0.35, 0.15));
-  g.add(at(crate(0.55), -W / 2 - 0.62, 0, -0.35), at(crate(0.45, C.woodLight), -W / 2 - 0.6, 0.55, -0.32, 0.4));
+  // Enseigne peinte, cote route, au bout du comptoir.
+  g.add(at(paintedBoard('coin'), W / 2 + 0.5, 0, 0.95, -0.15));
   scene.add(shadow(at(g, x, 0, z)));
-  w.solids.push({ x: x - W / 2 - 0.6, z: z - 0.3, r: 0.45 });
 }
 
 function campfire(scene: THREE.Scene, w: World, x: number, z: number): void {

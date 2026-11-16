@@ -6,11 +6,14 @@ export const ROAD_Z = 19;
 export const L = {
   spawn: { x: 0, z: 3.4 },
   campfire: { x: 0, z: 0.5 },
-  /** Etal encastre dans la cloture sud : les clients font la queue dehors. */
-  stall: { x: 6.2, z: 11, w: 3.6 },
+  /** Etal encastre dans la palissade sud : un bac par produit, deux files dehors. */
+  stall: { x: 6.2, z: 11, w: 5.6 },
   shelf: { x: 6.2, z: 9.0 },
-  cash: { x: 9.1, z: 9.4 },
-  queue: [{ x: 6.2, z: 12.7 }, { x: 6.2, z: 13.9 }, { x: 6.2, z: 15.1 }, { x: 6.2, z: 16.3 }],
+  cash: { x: 9.0, z: 8.3 },
+  lanes: [
+    [{ x: 5.0, z: 12.7 }, { x: 5.0, z: 13.9 }, { x: 5.0, z: 15.1 }, { x: 5.0, z: 16.3 }],
+    [{ x: 7.5, z: 12.7 }, { x: 7.5, z: 13.9 }, { x: 7.5, z: 15.1 }, { x: 7.5, z: 16.3 }],
+  ],
   beds: [
     { x: -9.6, z: -6.6 }, { x: -9.6, z: -3.1 }, { x: -6.0, z: -6.6 }, { x: -6.0, z: -3.1 },
   ],

@@ -20,7 +20,7 @@ import {
 import { Bed, ChopTree, ScrapSource, plantForest } from './resources';
 import { Restorer } from './restore';
 import { bedRuin, benchRuin, gateJunk, kitchenRuin, sawmillRuin, shelterRuin, towerRuin } from './ruins';
-import { CoinDrops, Converter, Market } from './stations';
+import { BIN_CAP, CoinDrops, Converter, Market } from './stations';
 import { buildWorld } from './world';
 import { Horde, type Zombie } from './zombies';
 
@@ -564,15 +564,16 @@ function earn(n: number): void {
 
 const playerChest = () => player.position.clone().setY(1.3);
 
-let shelfPending = 0;
+/** Objets en vol vers chaque bac de l'etal. */
+const shelfPending = new Map<ItemType, number>();
 const convPending = new Map<Converter, number>([[saw, 0], [cook, 0]]);
 
 function putOnShelf(t: ItemType, from: THREE.Vector3): void {
-  shelfPending++;
-  const target = market.shelf.slotWorld(market.shelf.count + shelfPending - 1);
+  shelfPending.set(t, (shelfPending.get(t) ?? 0) + 1);
+  const target = market.bins.binWorld(t);
   flyers.launch(itemMesh(t), from, () => target, () => {
-    shelfPending--;
-    market.shelf.add(t);
+    shelfPending.set(t, Math.max(0, (shelfPending.get(t) ?? 1) - 1));
+    market.bins.add(t);
   }, 0.26, 1.0);
 }
 
@@ -586,7 +587,7 @@ function putInConverter(c: Converter, t: ItemType, from: THREE.Vector3): void {
   }, 0.26, 1.0);
 }
 
-const shelfRoom = () => market.shelf.cap - market.shelf.count - shelfPending;
+const shelfRoom = (t: ItemType) => ITEMS[t].price > 0 ? BIN_CAP - market.bins.countOf(t) - (shelfPending.get(t) ?? 0) : 0;
 const convRoom = (c: Converter) => c.input.cap - c.input.count - (convPending.get(c) ?? 0);
 
 let actClock = 0;
@@ -683,13 +684,13 @@ function interact(dt: number): void {
   }
 
   // Deposer a l'etal tout ce qui se vend.
-  if (dropClock <= 0 && near(L.shelf.x, L.shelf.z, 1.45) && shelfRoom() > 0) {
-    const item = player.stack.take((t) => ITEMS[t].price > 0);
+  if (dropClock <= 0 && near(L.shelf.x, L.shelf.z, 1.6)) {
+    const item = player.stack.take((t) => shelfRoom(t) > 0);
     if (item) {
       dropClock = 0.08;
       putOnShelf(item.type, item.pos);
       save.stats.shelved++;
-      sfx.sfxDrop(market.shelf.count);
+      sfx.sfxDrop(market.bins.total);
     }
   }
   // Reparer la palissade : chaque rondin depose devant un troncon abime le consolide.
@@ -811,8 +812,8 @@ function dropFor(t: ItemType): Drop | null {
   if (conv && conv.built && convRoom(conv) > 0) {
     return { at: () => ({ x: conv.input.x, z: conv.input.z }), accept: (x) => conv.accepts.includes(x) && convRoom(conv) > 0, put: (x, from) => putInConverter(conv, x, from) };
   }
-  if (ITEMS[t].price > 0 && shelfRoom() > 0) {
-    return { at: () => L.shelf, accept: (x) => ITEMS[x].price > 0 && shelfRoom() > 0, put: (x, from) => putOnShelf(x, from) };
+  if (shelfRoom(t) > 0) {
+    return { at: () => L.shelf, accept: (x) => shelfRoom(x) > 0, put: (x, from) => putOnShelf(x, from) };
   }
   return null;
 }
@@ -1282,6 +1283,12 @@ function frame(): void {
   sun.target.position.copy(camTarget);
 
   for (const pad of pads) if (pad.shown && !isBuilt(pad.def.id)) placeLabel(pad.label, pad.def.x, 0.3, pad.def.z - 1.4);
+  // Bacs de l'etal : ce qu'il y a dedans et combien, des qu'on est dans le coin.
+  const nearStall = Math.hypot(L.stall.x - player.position.x, L.stall.z - player.position.z) < 13;
+  for (const bin of market.bins.bins) {
+    if (!nearStall) { bin.label.classList.add('off'); continue; }
+    placeLabel(bin.label, L.stall.x + bin.x, 0.55, L.stall.z + 0.5);
+  }
   // Troncons abimes : combien de rondins pour les remettre d'aplomb (seulement a proximite).
   for (const s of palisade.sections) {
     const need = s.enabled ? logsNeeded(s) : 0;

@@ -121,6 +121,110 @@ export class Converter {
 
 // ---------------------------------------------------------------- etal et clients
 
+/** L'ordre des bacs sur le comptoir, de gauche a droite. */
+export const BIN_TYPES: ItemType[] = ['carrot', 'tomato', 'soup', 'log', 'plank', 'scrap'];
+/** Contenance d'un bac : on peut deposer enormement avant qu'il deborde. */
+export const BIN_CAP = 99;
+/** Objets visibles dans un bac (le reste est compte, pas dessine). */
+const SHOWN = 8;
+
+interface Bin { type: ItemType; count: number; x: number; items: THREE.Object3D[]; label: HTMLElement; pop: number; root: THREE.Group }
+
+/**
+ * Le comptoir de vente : un bac par produit, avec son etiquette « quoi / combien ».
+ * Les clients piochent dans le bac de ce qu'ils veulent.
+ */
+export class Bins {
+  readonly root = new THREE.Group();
+  readonly bins: Bin[] = [];
+
+  constructor(scene: THREE.Scene, labels: HTMLElement) {
+    const W = L.stall.w - 0.3;
+    const step = W / BIN_TYPES.length;
+    this.root.position.set(L.stall.x, 1.05, L.stall.z - 0.02);
+    BIN_TYPES.forEach((type, i) => {
+      const x = -W / 2 + (i + 0.5) * step;
+      const w = step - 0.08;
+      const root = new THREE.Group();
+      root.position.x = x;
+      // Une caisse ouverte : fond et quatre bords bas.
+      root.add(
+        box(w, 0.06, 0.82, C.woodDark, 0, 0.03, 0),
+        box(w, 0.2, 0.06, C.wood, 0, 0.12, 0.38), box(w, 0.2, 0.06, C.wood, 0, 0.12, -0.38),
+        box(0.06, 0.2, 0.82, C.wood, -w / 2, 0.12, 0), box(0.06, 0.2, 0.82, C.wood, w / 2, 0.12, 0),
+      );
+      const items: THREE.Object3D[] = [];
+      for (let k = 0; k < SHOWN; k++) {
+        const o = itemMesh(type);
+        const layer = Math.floor(k / 4);
+        const j = k % 4;
+        o.position.set(((j % 2) - 0.5) * w * 0.45, 0.08 + layer * 0.17, (Math.floor(j / 2) - 0.5) * 0.36);
+        o.rotation.y = (k * 1.7) % 3;
+        o.scale.setScalar(1.15);
+        o.visible = false;
+        root.add(o);
+        items.push(o);
+      }
+      shadow(root);
+      this.root.add(root);
+      const label = document.createElement('div');
+      label.className = 'bin-label empty';
+      labels.appendChild(label);
+      this.bins.push({ type, count: 0, x, items, label, pop: 0, root });
+      this.refresh(this.bins[i]!);
+    });
+    scene.add(this.root);
+  }
+
+  private bin(t: ItemType): Bin {
+    return this.bins.find((b) => b.type === t)!;
+  }
+
+  get total(): number {
+    return this.bins.reduce((a, b) => a + b.count, 0);
+  }
+
+  countOf(t: ItemType): number {
+    return this.bin(t).count;
+  }
+
+  /** Ou viser pour deposer (ou prendre) dans le bac d'un produit. */
+  binWorld(t: ItemType): THREE.Vector3 {
+    const b = this.bin(t);
+    return new THREE.Vector3(L.stall.x + b.x, 1.35, L.stall.z - 0.02);
+  }
+
+  add(t: ItemType): void {
+    const b = this.bin(t);
+    b.count = Math.min(BIN_CAP, b.count + 1);
+    b.pop = 1;
+    this.refresh(b);
+  }
+
+  take(t: ItemType): THREE.Vector3 | null {
+    const b = this.bin(t);
+    if (b.count <= 0) return null;
+    b.count--;
+    this.refresh(b);
+    return this.binWorld(t);
+  }
+
+  private refresh(b: Bin): void {
+    const shown = Math.min(SHOWN, b.count);
+    b.items.forEach((o, i) => { o.visible = i < shown; });
+    b.label.innerHTML = `<span>${ITEMS[b.type].icon}</span><b>${b.count}</b>`;
+    b.label.classList.toggle('empty', b.count === 0);
+  }
+
+  update(dt: number): void {
+    for (const b of this.bins) {
+      if (b.pop <= 0) continue;
+      b.pop = Math.max(0, b.pop - dt * 5);
+      b.root.scale.setScalar(1 + Math.sin(b.pop * Math.PI) * 0.12);
+    }
+  }
+}
+
 const LOOKS = [
   { shirt: 0xd9734a, pants: 0x3a4a5a, hair: 0x2a1a10 },
   { shirt: 0x6a9ad9, pants: 0x4a3a2a, hair: 0xd9b46a, hat: 0xc9a46a },
@@ -132,6 +236,8 @@ const LOOKS = [
 
 export interface Customer {
   human: Human;
+  /** File d'attente : 0 a gauche, 1 a droite. */
+  lane: number;
   want: ItemType;
   need: number;
   got: number;
@@ -146,30 +252,24 @@ export interface Customer {
 }
 
 export class Market {
-  readonly shelf: Pile;
+  readonly bins: Bins;
   readonly customers: Customer[] = [];
   cash = 0;
   private readonly cashRoot = new THREE.Group();
   private readonly cashCoins: THREE.Mesh[] = [];
   readonly cashRing: THREE.Mesh;
+  readonly dropRing: THREE.Mesh;
   private spawnClock = 2;
   private lookIdx = 0;
   private clock = 0;
 
   constructor(private readonly scene: THREE.Scene, private readonly labels: HTMLElement) {
-    // Les objets en vente sont poses sur le comptoir, cote camp.
-    this.shelf = new Pile(scene, L.shelf.x, L.shelf.z, 24, 6, false);
-    this.shelf.itemScale = 1.5;
-    this.shelf.root.position.set(L.stall.x, 1.12, L.stall.z - 0.1);
+    this.bins = new Bins(scene, labels);
+    this.dropRing = zoneRing(scene, L.shelf.x, L.shelf.z, 1.25);
     this.cashRoot.position.set(L.cash.x, 0, L.cash.z);
     this.cashRoot.add(shadow(box(1.1, 0.08, 1.1, C.woodDark, 0, 0.04, 0)));
     scene.add(this.cashRoot);
     this.cashRing = zoneRing(scene, L.cash.x, L.cash.z, 1.1, 0xffd84a);
-  }
-
-  /** Le joueur depose sur l'etal : la zone est devant le comptoir mais les objets vont dessus. */
-  get shelfZone(): { x: number; z: number } {
-    return L.shelf;
   }
 
   addCash(n: number): void {
@@ -202,17 +302,25 @@ export class Market {
     return new THREE.Vector3(L.cash.x, 0.3 + Math.min(10, this.cashCoins.length / 6) * 0.065, L.cash.z);
   }
 
+  private waitingIn(lane: number): Customer[] {
+    return this.customers.filter((c) => c.lane === lane && c.state !== 'leave');
+  }
+
   private spawn(products: ItemType[]): void {
+    // Le client rejoint la file la plus courte.
+    const lens = L.lanes.map((_, i) => this.waitingIn(i).length);
+    const lane = lens[0]! <= lens[1]! ? 0 : 1;
+    if (lens[lane]! >= L.lanes[lane]!.length) return;
     const side = Math.random() < 0.5 ? -1 : 1;
     const look = LOOKS[this.lookIdx++ % LOOKS.length]!;
     const h = new Human(look);
     h.root.position.set(side * 36, 0, ROAD_Z + 0.8);
     this.scene.add(h.root);
-    // Souvent, le client veut ce qu'il voit sur l'etal ; sinon les produits recents,
+    // Souvent, le client veut ce qu'il voit dans les bacs ; sinon les produits recents,
     // qui rapportent plus, sont un peu plus demandes.
-    const onShelf = products.filter((t) => this.shelf.countOf(t) > 0);
+    const onShelf = products.filter((t) => this.bins.countOf(t) > 0);
     let want = products[0]!;
-    if (onShelf.length && Math.random() < 0.6) {
+    if (onShelf.length && Math.random() < 0.7) {
       want = onShelf[Math.floor(Math.random() * onShelf.length)]!;
     } else {
       const weights = products.map((_, i) => 1 + i * 0.6);
@@ -222,31 +330,30 @@ export class Market {
         if (roll <= 0) { want = products[i]!; break; }
       }
     }
-    const need = want === 'soup' ? 1 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 4);
+    const need = want === 'soup' ? 1 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 5);
     const label = document.createElement('div');
     label.className = 'bubble';
     this.labels.appendChild(label);
+    const front = L.lanes[lane]![0]!;
     this.customers.push({
-      human: h, want, need, got: 0, state: 'arrive', label, buyClock: 0, happy: 0, wait: 0, sad: false,
-      path: [new THREE.Vector3(L.stall.x, 0, ROAD_Z + 0.8)],
+      human: h, lane, want, need, got: 0, state: 'arrive', label, buyClock: 0, happy: 0, wait: 0, sad: false,
+      path: [new THREE.Vector3(front.x, 0, ROAD_Z + 0.8)],
     });
-  }
-
-  private queueSlot(c: Customer): number {
-    return this.customers.filter((x) => x.state !== 'leave').indexOf(c);
   }
 
   /** Renvoie les ventes conclues pendant cette image (pour les effets). */
   update(dt: number, open: boolean, products: ItemType[], onBuy: (from: THREE.Vector3, to: THREE.Vector3, t: ItemType) => void): { pay: number; at: THREE.Vector3 }[] {
     const sales: { pay: number; at: THREE.Vector3 }[] = [];
-    // Les objets poses arrivent minuscules et grossissent : sans cette mise a jour,
-    // l'etal paraissait vide alors qu'il etait garni.
     this.clock += dt;
-    this.shelf.update(dt, this.clock);
+    this.bins.update(dt);
+    const s = 1 + Math.sin(this.clock * 3) * 0.03;
+    this.dropRing.scale.set(s, s, s);
     const waiting = this.customers.filter((c) => c.state !== 'leave').length;
+    const room = L.lanes.reduce((a, l) => a + l.length, 0);
     this.spawnClock -= dt;
-    if (open && waiting < L.queue.length && this.spawnClock <= 0 && products.length) {
-      this.spawnClock = 4 + Math.random() * 4;
+    if (open && waiting < room && this.spawnClock <= 0 && products.length) {
+      // Deux files : les clients arrivent deux fois plus souvent.
+      this.spawnClock = 2 + Math.random() * 2.5;
       this.spawn(products);
     }
 
@@ -256,8 +363,9 @@ export class Market {
       if (!open && c.state !== 'leave') this.leave(c);
 
       if (c.state === 'arrive' || c.state === 'queue') {
-        const slot = this.queueSlot(c);
-        const q = L.queue[Math.min(slot, L.queue.length - 1)]!;
+        const lane = L.lanes[c.lane]!;
+        const slot = this.waitingIn(c.lane).indexOf(c);
+        const q = lane[Math.min(slot, lane.length - 1)]!;
         const target = c.path.length ? c.path[0]! : new THREE.Vector3(q.x, 0, q.z);
         const arrived = h.walkTo(target, 3.2, dt);
         if (arrived && c.path.length) c.path.shift();
@@ -267,12 +375,12 @@ export class Market {
           if (slot === 0) {
             c.buyClock -= dt;
             if (c.buyClock <= 0 && c.got < c.need) {
-              const item = this.shelf.take((t) => t === c.want);
-              if (item) {
-                c.buyClock = 0.22;
+              const from = this.bins.take(c.want);
+              if (from) {
+                c.buyClock = 0.2;
                 c.got++;
                 c.wait = 0;
-                onBuy(item.pos, h.root.position.clone().setY(1.3), item.type);
+                onBuy(from, h.root.position.clone().setY(1.3), c.want);
               }
             }
             c.wait += dt;
@@ -311,8 +419,10 @@ export class Market {
   private leave(c: Customer): void {
     if (c.state === 'leave') return;
     c.state = 'leave';
-    const side = Math.random() < 0.5 ? -1 : 1;
-    c.path = [new THREE.Vector3(L.stall.x + side * 0.8, 0, ROAD_Z - 0.6), new THREE.Vector3(side * 40, 0, ROAD_Z - 0.6)];
+    // Chaque file repart de son cote, sans traverser l'autre.
+    const side = c.lane === 0 ? -1 : 1;
+    const x = L.lanes[c.lane]![0]!.x + side * 0.9;
+    c.path = [new THREE.Vector3(x, 0, ROAD_Z - 0.6), new THREE.Vector3(side * 40, 0, ROAD_Z - 0.6)];
   }
 }
 

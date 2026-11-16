@@ -148,7 +148,7 @@ function wallStates(len: number, H: number, seed: number): THREE.Group[] {
     if (l.roll < 0.6) heavy.add(stump(l.x, l.r, l.h * (0.3 + l.roll * 0.5), l.tone));
     else heavy.add(pike(l.x, l.r, l.h, l.tone));
   }
-  heavy.add(fallenLog(-len * 0.15, -0.9, H * 0.8, 0.35, logs[1]!.tone), fallenLog(len * 0.2, 0.8, H * 0.7, -0.5, logs[2]!.tone));
+  heavy.add(fallenLog(-len * 0.15, -0.9, H * 0.8, 0.35, logs[1 % n]!.tone), fallenLog(len * 0.2, 0.8, H * 0.7, -0.5, logs[2 % n]!.tone));
 
   const broken = group();
   const sp = spikes();
@@ -157,7 +157,7 @@ function wallStates(len: number, H: number, seed: number): THREE.Group[] {
   for (const l of logs) broken.add(stump(l.x, l.r, 0.15 + l.roll * 0.35, l.tone));
   broken.add(
     fallenLog(-len * 0.25, -1.0, H * 0.85, 0.5, logs[0]!.tone),
-    fallenLog(len * 0.1, 0.9, H * 0.8, -0.3, logs[3]!.tone),
+    fallenLog(len * 0.1, 0.9, H * 0.8, -0.3, logs[3 % n]!.tone),
     fallenLog(len * 0.3, -0.6, H * 0.6, 1.2, logs[4 % n]!.tone),
   );
   return [broken, heavy, damaged, intact];

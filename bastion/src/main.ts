@@ -3,19 +3,23 @@ import '@fontsource/baloo-2/latin-800.css';
 import './style.css';
 import * as THREE from 'three';
 import * as sfx from './audio';
-import { bakeStatic } from './bake';
-import { Bus, kitchen, northGate, sawmill, shelter, watchTower, workbench, type Building } from './buildings';
+import { bakeStatic, consolidate } from './bake';
+import { Bus, kitchen, sawmill, shelter, watchTower, workbench, type Building } from './buildings';
 import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type Drop, type HelperCtx } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
 import { damp, easeOutBack, glow } from './kit';
 import { CAMP, L } from './layout';
+import { LOG_HP, Palisade, logsNeeded, stateOf, type Section } from './palisade';
+import type { Segment } from './physics';
 import { Player } from './player';
 import {
-  DAY_LEN, PADS, UPGRADES, freshSave, loadSave, nightLen, wipeSave, writeSave,
+  CYCLE_FROM, DAY_LEN, PADS, UPGRADES, freshSave, loadSave, nightLen, wipeSave, writeSave,
   type Cost, type PadDef, type Save, type UpId,
 } from './progress';
 import { Bed, ChopTree, ScrapSource, plantForest } from './resources';
+import { Restorer } from './restore';
+import { bedRuin, benchRuin, gateJunk, kitchenRuin, sawmillRuin, shelterRuin, towerRuin } from './ruins';
 import { CoinDrops, Converter, Market } from './stations';
 import { buildWorld } from './world';
 import { Horde, type Zombie } from './zombies';
@@ -33,9 +37,10 @@ app.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 220);
 
+// Ciel voile, lumiere chaude et un peu poussiereuse : le monde d'apres, pas une carte postale.
 const DAY = {
-  sky: new THREE.Color(0xa9dcf2), hemiSky: new THREE.Color(0xfff1dc), hemiGround: new THREE.Color(0x7aa04a),
-  hemi: 1.7, sunColor: new THREE.Color(0xffe2b8), sun: 2.7, fogNear: 14, fogFar: 70, exposure: 1.05,
+  sky: new THREE.Color(0xbfd2cf), hemiSky: new THREE.Color(0xf6e9d2), hemiGround: new THREE.Color(0x6f7a45),
+  hemi: 1.6, sunColor: new THREE.Color(0xffdcb0), sun: 2.7, fogNear: 12, fogFar: 62, exposure: 1.02,
 };
 const NIGHT = {
   sky: new THREE.Color(0x0c1526), hemiSky: new THREE.Color(0x30487a), hemiGround: new THREE.Color(0x0b1220),
@@ -69,13 +74,15 @@ const scraps = L.scrap.map((s) => new ScrapSource(scene, s.x, s.z, s.ry, s.kind,
 
 const tower = watchTower(scene);
 const B: Record<string, Building> = {
-  gate: northGate(), bench: workbench(), sawmill: sawmill(), kitchen: kitchen(), shelter: shelter(),
+  bench: workbench(), sawmill: sawmill(), kitchen: kitchen(), shelter: shelter(),
 };
 for (const b of Object.values(B)) scene.add(b.group);
 B.tower = tower;
 const bus = new Bus(scene);
 world.solids.push({ x: L.bus.x - 2, z: L.bus.z, r: 1.4 }, { x: L.bus.x, z: L.bus.z, r: 1.4 }, { x: L.bus.x + 2, z: L.bus.z, r: 1.4 });
 
+// Les ruines occupent deja la place des batiments : memes collisions avant et apres
+// restauration, et la zone de paiement est a cote. Personne n'est jamais deplace.
 const SOLIDS: Record<string, { x: number; z: number; r: number }[]> = {
   bench: [{ x: L.bench.x, z: L.bench.z - 0.6, r: 0.8 }, { x: L.bench.x, z: L.bench.z + 0.6, r: 0.8 }],
   sawmill: [{ x: L.sawmill.x - 0.9, z: L.sawmill.z, r: 1.0 }, { x: L.sawmill.x + 0.9, z: L.sawmill.z, r: 1.0 }],
@@ -83,6 +90,21 @@ const SOLIDS: Record<string, { x: number; z: number; r: number }[]> = {
   tower: [{ x: L.tower.x, z: L.tower.z, r: 1.4 }],
   shelter: [{ x: L.shelter.x, z: L.shelter.z, r: 2.0 }],
 };
+for (const list of Object.values(SOLIDS)) for (const s of list) world.solids.push({ ...s });
+const RUINS: Record<string, THREE.Object3D> = {
+  bed2: bedRuin(scene, beds[1]!.x, beds[1]!.z),
+  bed3: bedRuin(scene, beds[2]!.x, beds[2]!.z),
+  bed4: bedRuin(scene, beds[3]!.x, beds[3]!.z),
+  gate: gateJunk(scene),
+  bench: benchRuin(scene),
+  sawmill: sawmillRuin(scene),
+  kitchen: kitchenRuin(scene),
+  tower: towerRuin(scene),
+  shelter: shelterRuin(scene),
+};
+/** La porte nord est bouchee par un amas de ferraille tant qu'on ne l'a pas degagee. */
+const gateBarrier: Segment = { x1: -CAMP.gate, z1: CAMP.minZ, x2: CAMP.gate, z2: CAMP.minZ };
+world.walls.push(gateBarrier);
 
 const player = new Player();
 scene.add(player.root);
@@ -100,6 +122,17 @@ const market = new Market(scene, labels);
 const saw = new Converter(scene, L.sawIn, L.sawOut, ['log'], 1, 'plank', 1.6);
 const cook = new Converter(scene, L.kitchenIn, L.kitchenOut, ['carrot', 'tomato'], 2, 'soup', 2.4);
 const helpers: Helper[] = [];
+
+const palisade = new Palisade(scene, labels);
+world.walls.push(...palisade.walls);
+/** Les zombies butent aussi sur les portes fermees ; le joueur, jamais. */
+const zombieWalls: Segment[] = [...world.walls, ...palisade.gateWalls];
+const restorer = new Restorer({
+  dust: (at, big) => particles.burst(at, [0xb9a58a, 0x9a8a72, 0xd8cbb5], big ? 36 : 5, big
+    ? { speed: 5, up: 3, size: 0.3, life: 1.0 }
+    : { speed: 2, up: 2, size: 0.15, life: 0.5 }),
+  tick: () => sfx.sfxChop(),
+});
 
 const fireflies = Array.from({ length: 26 }, (_, i) => {
   const s = glow(0xd8ff7a, 0.45);
@@ -223,76 +256,47 @@ function renderPad(p: Pad): void {
   p.fill.scale.setScalar(Math.max(0.001, done));
 }
 
-const popping: { g: THREE.Group; t: number }[] = [];
-let barrierFall = 0;
+/** Restaure un chantier : la ruine s'efface, le batiment se remonte piece par piece. */
+function restore(id: string, built: THREE.Object3D, instant: boolean, done?: () => void): void {
+  const ruin = RUINS[id] ?? null;
+  if (instant) {
+    restorer.instant(ruin, built);
+    done?.();
+  } else {
+    restorer.run(ruin, built, () => {
+      sfx.sfxBuild();
+      done?.();
+    });
+  }
+}
+
+/** Un batiment restaure : une fois remonte, ses pieces immobiles sont fusionnees (mobile). */
+function restoreBuilding(id: string, b: Building, instant: boolean, done?: () => void): void {
+  restore(id, b.group, instant, () => {
+    consolidate(b.group, b.live);
+    done?.();
+  });
+}
 
 /** Applique l'effet d'une construction ; `instant` au chargement d'une partie. */
-/**
- * Un batiment apparait la ou l'on vient de payer, donc sur le joueur. On le fait
- * sortir de ses cercles de collision, vers l'interieur du camp si la sortie
- * directe le collerait a la cloture (il resterait coince entre les deux).
- */
-function clearSpot(p: THREE.Vector3, R: number, solids: { x: number; z: number; r: number }[]): void {
-  const inCamp = (x: number, z: number) =>
-    x > CAMP.minX + R + 0.2 && x < CAMP.maxX - R - 0.2 && z > CAMP.minZ + R + 0.2 && z < CAMP.maxZ - R - 0.2;
-  for (let pass = 0; pass < 3; pass++) {
-    for (const s of solids) {
-      const dx = p.x - s.x;
-      const dz = p.z - s.z;
-      const d = Math.hypot(dx, dz);
-      const min = s.r + R + 0.05;
-      if (d >= min) continue;
-      let ux = d > 1e-3 ? dx / d : 0;
-      let uz = d > 1e-3 ? dz / d : 1;
-      if (!inCamp(s.x + ux * min, s.z + uz * min)) {
-        const l = Math.hypot(s.x, s.z) || 1;
-        ux = -s.x / l;
-        uz = -s.z / l;
-      }
-      p.x = s.x + ux * min;
-      p.z = s.z + uz * min;
-    }
-  }
-}
-
-/** Debloque un bac et fait sortir ceux qui se tiennent a sa place. */
-function unlockBed(bed: Bed): void {
-  bed.unlock();
-  const margin = 0.6;
-  const free = (x: number, z: number) =>
-    x > CAMP.minX + margin && x < CAMP.maxX - margin && z > CAMP.minZ + margin && z < CAMP.maxZ - margin &&
-    !beds.some((b) => b !== bed && b.unlocked && b.overlaps(x, z, margin));
-  bed.eject(player.position, margin, free);
-  for (const h of helpers) bed.eject(h.human.root.position, margin, free);
-}
-
 function applyBuild(id: string, instant: boolean): void {
-  const pop = (b: Building) => {
-    b.group.visible = true;
-    if (instant) b.group.scale.setScalar(1);
-    else popping.push({ g: b.group, t: 0 });
-  };
-  const added = SOLIDS[id] ?? [];
-  for (const s of added) world.solids.push({ ...s });
-  if (added.length) {
-    clearSpot(player.position, 0.45, added);
-    for (const h of helpers) clearSpot(h.human.root.position, 0.4, added);
+  const bed = { bed2: beds[1], bed3: beds[2], bed4: beds[3] }[id];
+  if (bed) {
+    bed.unlock();
+    restore(id, bed.group, instant);
+    return;
   }
   switch (id) {
-    case 'bed2': unlockBed(beds[1]!); break;
-    case 'bed3': unlockBed(beds[2]!); break;
-    case 'bed4': unlockBed(beds[3]!); break;
     case 'gate':
-      world.northBarrier.wall.off = true;
-      if (instant) world.northBarrier.group.visible = false;
-      else barrierFall = 0.001;
-      pop(B.gate!);
+      gateBarrier.off = true;
+      palisade.enableNorth();
+      restore('gate', palisade.north.root, instant);
       break;
-    case 'bench': pop(B.bench!); break;
-    case 'sawmill': pop(B.sawmill!); saw.built = true; saw.setVisible(true); break;
-    case 'kitchen': pop(B.kitchen!); cook.built = true; cook.setVisible(true); break;
-    case 'tower': pop(tower); break;
-    case 'shelter': pop(B.shelter!); break;
+    case 'bench': restoreBuilding(id, B.bench!, instant); break;
+    case 'sawmill': restoreBuilding(id, B.sawmill!, instant, () => { saw.built = true; saw.setVisible(true); }); break;
+    case 'kitchen': restoreBuilding(id, B.kitchen!, instant, () => { cook.built = true; cook.setVisible(true); }); break;
+    case 'tower': restoreBuilding(id, tower, instant); break;
+    case 'shelter': restoreBuilding(id, B.shelter!, instant); break;
     case 'farmer': helpers.push(new Helper(scene, 'farmer')); break;
     case 'lumber': helpers.push(new Helper(scene, 'lumber')); break;
     case 'bus1': bus.setStage(1); break;
@@ -310,11 +314,20 @@ function build(p: Pad): void {
   applyBuild(p.def.id, false);
   sfx.sfxBuild();
   buzz(40);
-  shake = 0.35;
-  particles.burst(new THREE.Vector3(p.def.x, 1.5, p.def.z), [0xffd84a, 0xffffff, 0x8be36b, 0xff8fb1], 70, { speed: 7, up: 7, size: 0.18, life: 1.1 });
-  toast(`${p.def.icon} ${p.def.name} : débloqué !`);
+  shake = 0.25;
+  const site = p.def.site ?? p.def;
+  particles.burst(new THREE.Vector3(site.x, 1.5, site.z), [0xffd84a, 0xffffff, 0xe0b077], 40, { speed: 6, up: 6, size: 0.16, life: 1.0 });
+  toast(`${p.def.icon} ${DONE[p.def.id] ?? p.def.name} !`);
   persist();
 }
+
+const DONE: Record<string, string> = {
+  bed2: 'Potager remis en état', bed3: 'Potager remis en état', bed4: 'Potager remis en état',
+  gate: 'Porte nord dégagée', bench: 'Établi réparé', sawmill: 'La scierie tourne',
+  tower: 'Tour de guet relevée', kitchen: 'La cuisine fume', shelter: 'Abri retapé',
+  farmer: 'La fermière rejoint le camp', lumber: 'Le bûcheron rejoint le camp',
+  bus1: 'Le moteur tousse', bus2: 'Carrosserie retapée', bus3: 'Plein fait',
+};
 
 // ---------------------------------------------------------------- objectifs
 
@@ -337,21 +350,34 @@ function nearestOf<T extends { x: number; z: number }>(list: T[], ok: (t: T) => 
   };
 }
 
+/** Le troncon abime le plus proche, de preference a l'interieur de la zone de jeu. */
+function nearestRepair(): THREE.Vector3 | null {
+  let best: Section | null = null;
+  let bd = Infinity;
+  for (const s of palisade.sections) {
+    if (!s.enabled || s.hp >= s.max) continue;
+    const d = Math.hypot(s.repair.x - player.position.x, s.repair.z - player.position.z);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best ? new THREE.Vector3(best.repair.x, 0, best.repair.z) : null;
+}
+
 const OBJECTIVES: Objective[] = [
   { icon: '🥕', text: 'Récolte des carottes au potager', target: () => new THREE.Vector3(beds[0]!.x, 0, beds[0]!.z), done: () => save.stats.harvested > 0 },
   { icon: '🧺', text: 'Pose-les sur l’étal', target: () => new THREE.Vector3(L.shelf.x, 0, L.shelf.z), done: () => save.stats.shelved > 0 },
   { icon: '💰', text: 'Ramasse l’argent des ventes', target: () => new THREE.Vector3(L.cash.x, 0, L.cash.z), done: () => save.stats.cashed > 0 },
-  { icon: '🥕', text: 'Débloque un deuxième potager', target: padPos('bed2'), done: () => isBuilt('bed2') },
-  { icon: '🚪', text: 'Ouvre la porte nord', target: padPos('gate'), done: () => isBuilt('gate') },
+  { icon: '🥕', text: 'Remets en état le deuxième potager', target: padPos('bed2'), done: () => isBuilt('bed2') },
+  { icon: '🚪', text: 'Dégage la porte nord', target: padPos('gate'), done: () => isBuilt('gate') },
   { icon: '🪓', text: 'Coupe du bois dans la forêt', target: nearestOf(trees, (t) => t.standing), done: () => save.stats.logs > 0 },
-  { icon: '🔧', text: 'Construis l’établi', target: padPos('bench'), done: () => isBuilt('bench') },
-  { icon: '🪚', text: 'Construis la scierie', target: padPos('sawmill'), done: () => isBuilt('sawmill') },
+  { icon: '🪵', text: 'Répare un trou de la palissade', target: nearestRepair, done: () => save.stats.repairs > 0 || !palisade.sections.some((s) => s.enabled && s.hp < s.max) },
+  { icon: '🔧', text: 'Répare l’établi', target: padPos('bench'), done: () => isBuilt('bench') },
+  { icon: '🪚', text: 'Remets la scierie en marche', target: padPos('sawmill'), done: () => isBuilt('sawmill') },
   { icon: '🪚', text: 'Apporte du bois à la scierie', target: () => new THREE.Vector3(L.sawIn.x, 0, L.sawIn.z), done: () => save.stats.planks > 0 },
   { icon: '🔩', text: 'Démonte une épave sur la route', target: nearestOf(scraps, (s) => s.amount > 0), done: () => save.stats.scrap > 0 },
-  { icon: '🗼', text: 'Construis la tour de guet', target: padPos('tower'), done: () => isBuilt('tower') },
-  { icon: '🍅', text: 'Plante des tomates', target: padPos('bed3'), done: () => isBuilt('bed3') },
-  { icon: '🍲', text: 'Construis la cuisine', target: padPos('kitchen'), done: () => isBuilt('kitchen') },
-  { icon: '⛺', text: 'Construis l’abri des survivants', target: padPos('shelter'), done: () => isBuilt('shelter') },
+  { icon: '🗼', text: 'Relève la tour de guet', target: padPos('tower'), done: () => isBuilt('tower') },
+  { icon: '🍅', text: 'Remets en état un potager à tomates', target: padPos('bed3'), done: () => isBuilt('bed3') },
+  { icon: '🍲', text: 'Remets la cuisine en état', target: padPos('kitchen'), done: () => isBuilt('kitchen') },
+  { icon: '🏠', text: 'Retape l’abri des survivants', target: padPos('shelter'), done: () => isBuilt('shelter') },
   { icon: '👩‍🌾', text: 'Recrute une fermière', target: padPos('farmer'), done: () => isBuilt('farmer') },
   { icon: '🧔', text: 'Recrute un bûcheron', target: padPos('lumber'), done: () => isBuilt('lumber') },
   { icon: '🔧', text: 'Répare le moteur du bus', target: padPos('bus1'), done: () => isBuilt('bus1') },
@@ -666,6 +692,19 @@ function interact(dt: number): void {
       sfx.sfxDrop(market.shelf.count);
     }
   }
+  // Reparer la palissade : chaque rondin depose devant un troncon abime le consolide.
+  if (dropClock <= 0 && player.stack.has('log')) {
+    for (const s of palisade.sections) {
+      if (!s.enabled || logsNeeded(s) - s.inflight <= 0 || !near(s.repair.x, s.repair.z, 1.0)) continue;
+      const item = player.stack.take((t) => t === 'log');
+      if (!item) break;
+      dropClock = 0.14;
+      s.inflight++;
+      const to = new THREE.Vector3(s.x, 1.1, s.z);
+      flyers.launch(itemMesh('log'), item.pos, () => to, () => repairLanded(s), 0.3, 1.3);
+      break;
+    }
+  }
   // Nourrir les machines, ramasser ce qu'elles produisent.
   for (const c of [saw, cook]) {
     if (!c.built) continue;
@@ -723,6 +762,39 @@ function interact(dt: number): void {
 
   // Etabli : le panneau d'ameliorations s'ouvre quand on se tient devant.
   setSheet(isBuilt('bench') && near(L.benchZone.x, L.benchZone.z, 1.5));
+}
+
+function repairLanded(s: Section): void {
+  s.inflight = Math.max(0, s.inflight - 1);
+  const before = stateOf(s);
+  palisade.setHp(s, s.hp + LOG_HP);
+  save.stats.repairs++;
+  sfx.sfxChop();
+  buzz(10);
+  const at = new THREE.Vector3(s.x, 1.2, s.z);
+  particles.burst(at, [0xc68a4f, 0xe0b077, 0xd9b07a], 10, { speed: 3, up: 3, size: 0.12, life: 0.6 });
+  if (stateOf(s) !== before) {
+    palisade.bump(s);
+    particles.burst(at.setY(0.4), [0xb9a58a, 0x9a8a72], 12, { speed: 3, up: 2, size: 0.22, life: 0.7 });
+  }
+  if (s.hp >= s.max) {
+    sfx.sfxBuild();
+    toast('🪵 Palissade consolidée');
+  }
+}
+
+let wallToast = 0;
+/** Un coup de zombie sur la palissade : eclats de bois, et alerte si elle cede. */
+function onWallHit(s: Section, at: THREE.Vector3): void {
+  particles.burst(at, [0xc68a4f, 0x7a5a3a, 0xd9b07a], 5, { speed: 3, up: 2, size: 0.1, life: 0.5 });
+  const near0 = Math.hypot(at.x - player.position.x, at.z - player.position.z) < 14;
+  if (near0) sfx.sfxChop();
+  if (s.hp <= 0 && performance.now() - wallToast > 4000) {
+    wallToast = performance.now();
+    toast('⚠️ La palissade a cédé !');
+    buzz(60);
+    if (near0) shake = Math.max(shake, 0.2);
+  }
 }
 
 function landOnPad(pad: Pad): void {
@@ -789,7 +861,7 @@ function startDay(): void {
 
 function updateCycle(dt: number): void {
   if (!save.cycle) {
-    if (save.obj >= 6) {
+    if (save.obj >= CYCLE_FROM) {
       save.cycle = true;
       save.phase = 'day';
       save.phaseT = 0;
@@ -937,6 +1009,7 @@ function offlineGains(): void {
 
 function persist(): void {
   save.lastSeen = Date.now();
+  save.walls = palisade.hpList();
   writeSave(save);
 }
 document.addEventListener('visibilitychange', () => {
@@ -1090,6 +1163,7 @@ function productsList(): ItemType[] {
   const list: ItemType[] = ['carrot'];
   if (isBuilt('gate')) list.push('log');
   if (isBuilt('sawmill')) list.push('plank');
+  if (save.stats.scrap > 0) list.push('scrap');
   if (isBuilt('bed3')) list.push('tomato');
   if (isBuilt('kitchen')) list.push('soup');
   return list;
@@ -1102,11 +1176,13 @@ function step(dt: number, time: number): void {
   interact(dt);
   updateCycle(dt);
   updateCombat(dt);
-  const contacts = horde.update(dt, player.position, world.walls, world.solids, nightK, isBuilt('gate'));
+  const contacts = horde.update(dt, player.position, zombieWalls, world.solids, nightK, palisade, onWallHit);
+  palisade.update(dt, save.cycle && save.phase === 'night', time);
   hurt(dt, contacts);
   drops.update(dt, player.position, (v) => earn(v));
 
   for (const b of beds) b.update(dt, time);
+  restorer.update(dt);
   for (const t of trees) t.update(dt);
   for (const s of scraps) s.update(dt);
   if (saw.update(dt, time)) save.stats.planks++;
@@ -1148,18 +1224,6 @@ function step(dt: number, time: number): void {
     pad.pulse = Math.max(0, pad.pulse - dt * 4);
     const s = Math.max(0.001, easeOutBack(pad.appear)) * (1 + pad.pulse * 0.12 + (near(pad.def.x, pad.def.z, 1.45) ? 0.05 : 0));
     pad.ring.scale.set(s, s, s);
-  }
-  for (let i = popping.length - 1; i >= 0; i--) {
-    const pp = popping[i]!;
-    pp.t = Math.min(1, pp.t + dt * 1.5);
-    const k = easeOutBack(pp.t);
-    pp.g.scale.set(1 + (1 - k) * 0.3, Math.max(0.001, k), 1 + (1 - k) * 0.3);
-    if (pp.t >= 1) popping.splice(i, 1);
-  }
-  if (barrierFall > 0) {
-    barrierFall += dt;
-    world.northBarrier.group.position.y = -barrierFall * barrierFall * 3;
-    if (barrierFall > 1) { world.northBarrier.group.visible = false; barrierFall = 0; }
   }
   if (victoryT > 0) {
     victoryT += dt;
@@ -1218,6 +1282,19 @@ function frame(): void {
   sun.target.position.copy(camTarget);
 
   for (const pad of pads) if (pad.shown && !isBuilt(pad.def.id)) placeLabel(pad.label, pad.def.x, 0.3, pad.def.z - 1.4);
+  // Troncons abimes : combien de rondins pour les remettre d'aplomb (seulement a proximite).
+  for (const s of palisade.sections) {
+    const need = s.enabled ? logsNeeded(s) : 0;
+    const show = need > 0 && Math.hypot(s.repair.x - player.position.x, s.repair.z - player.position.z) < 7.5;
+    if (!show) {
+      s.label.classList.add('off');
+      continue;
+    }
+    const html = `🪵 ${need}`;
+    if (s.label.innerHTML !== html) s.label.innerHTML = html;
+    s.label.classList.toggle('broken', s.hp <= 0);
+    placeLabel(s.label, s.repair.x, 0.2, s.repair.z - 0.9);
+  }
   for (const c of market.customers) {
     const left = c.need - c.got;
     const html = c.state === 'leave' ? (c.happy > 0 ? (c.sad ? '😞' : '😊') : '') : `${ITEMS[c.want].icon} ${left}`;
@@ -1237,6 +1314,10 @@ function frame(): void {
 // ---------------------------------------------------------------- demarrage
 
 beds[0]!.unlock();
+{
+  const hp = save.walls && save.walls.length === palisade.sections.length ? save.walls : palisade.initialHp();
+  palisade.sections.forEach((s, i) => palisade.setHp(s, hp[i]!));
+}
 for (const id of save.built) applyBuild(id, true);
 applyUpgrades();
 player.hp = player.maxHp;
@@ -1257,7 +1338,8 @@ requestAnimationFrame(frame);
 
 // Acces pour les tests automatiques.
 (window as unknown as { __bastion: unknown }).__bastion = {
-  player, save: () => save, SIM, market, beds, pads, horde, trees, scraps, helpers, saw, cook,
+  player, save: () => save, SIM, market, beds, pads, horde, trees, scraps, helpers, saw, cook, palisade,
+  renderer,
   give: (n: number) => { save.coins += n; },
   build: (id: string) => { const p = pads.find((x) => x.def.id === id); if (p) { save.paid[id] = { ...p.def.cost }; build(p); } },
   setObj: (n: number) => { save.obj = n; renderObjective(); },

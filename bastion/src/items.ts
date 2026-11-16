@@ -20,7 +20,8 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   log: { name: 'Bois', icon: '🪵', price: 3, h: 0.27 },
   plank: { name: 'Planches', icon: '🪚', price: 7, h: 0.15 },
   soup: { name: 'Soupe', icon: '🍲', price: 12, h: 0.28 },
-  scrap: { name: 'Ferraille', icon: '🔩', price: 0, h: 0.22 },
+  // Les survivants de passage la rachetent pour bricoler : elle se vend a l'etal.
+  scrap: { name: 'Ferraille', icon: '🔩', price: 5, h: 0.22 },
 };
 
 export function itemMesh(t: ItemType): THREE.Group {

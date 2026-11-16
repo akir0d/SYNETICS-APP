@@ -25,6 +25,21 @@ export const L = {
   tower: { x: 10.6, z: 7.6 },
   shelter: { x: 10.2, z: -4.2 },
   northGate: { x: 0, z: -11 },
+  /**
+   * Zones de paiement : a cote de chaque ruine, jamais dessus. Le joueur paie
+   * en se tenant devant le chantier, puis le batiment se restaure sous ses yeux.
+   */
+  pads: {
+    bed2: { x: -9.6, z: -0.5 },
+    bed3: { x: -3.2, z: -6.6 },
+    bed4: { x: -6.0, z: -0.5 },
+    gate: { x: 0, z: -8.3 },
+    bench: { x: 8.6, z: 1.6 },
+    sawmill: { x: 6.4, z: -6.4 },
+    tower: { x: 7.9, z: 6.5 },
+    kitchen: { x: -6.3, z: 4.3 },
+    shelter: { x: 7.3, z: -3.9 },
+  },
   bus: { x: -14, z: 19.4 },
   busPad: { x: -14, z: 15.7 },
   forest: { minX: -16, maxX: 16, minZ: -30, maxZ: -13.5 },

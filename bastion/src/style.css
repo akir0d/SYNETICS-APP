@@ -105,6 +105,12 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; background: 
   background: rgba(40, 28, 14, .78); color: #fff; border: 2px solid rgba(255,255,255,.8);
 }
 .bubble.empty { display: none; }
+/* Rondins qu'il manque pour remettre un troncon de palissade d'aplomb. */
+.wall-label {
+  padding: 1px 9px; border-radius: 11px; font-size: 14px; font-weight: 800; white-space: nowrap;
+  background: #ffa040; color: #3a1f00; border: 2px solid #fff3e0; box-shadow: 0 2px 0 #9a5a10;
+}
+.wall-label.broken { background: #e0443a; color: #fff; box-shadow: 0 2px 0 #7a1a12; }
 .hpbar {
   width: 64px; height: 9px; border-radius: 6px; overflow: hidden; background: rgba(0,0,0,.45); border: 2px solid #fff;
 }

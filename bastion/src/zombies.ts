@@ -3,11 +3,15 @@
 import * as THREE from 'three';
 import { C, box, glow, group, rbox, shadow, sphere, uniqueMat } from './kit';
 import { CAMP, insideCamp } from './layout';
+import type { Palisade, Section } from './palisade';
 import { collide, type Circle, type Segment } from './physics';
 
 const WHITE = new THREE.Color(0xffffff);
 const SHIRTS = [0x7a6a8f, 0x8f5a4a, 0x5a7a8f, 0x8a8a5a, 0x6a8f6a];
 const POOL = 16;
+/** Degats d'un coup de zombie sur la palissade, et cadence des coups. */
+const WALL_HIT = 1.4;
+const WALL_RATE = 0.7;
 
 export interface Zombie {
   root: THREE.Group;
@@ -27,6 +31,8 @@ export interface Zombie {
   timer: number;
   flash: number;
   knock: THREE.Vector3;
+  /** Temps avant le prochain coup sur la palissade. */
+  hit: number;
 }
 
 export interface Hit { pos: THREE.Vector3; killed: boolean; colors: number[] }
@@ -77,7 +83,7 @@ export class Horde {
     return {
       root, body, armL, armR, legL, legR, mats, bases: mats.map((m) => m.emissive.clone()), eyes: [gL, gR],
       hp: 3, speed: 1.3 + Math.random() * 0.9, phase: Math.random() * 6, rise: 0,
-      state: 'hidden', timer: 0, flash: 0, knock: new THREE.Vector3(),
+      state: 'hidden', timer: 0, flash: 0, knock: new THREE.Vector3(), hit: 0,
     };
   }
 
@@ -107,12 +113,13 @@ export class Horde {
     return this.alive + this.toSpawn;
   }
 
-  private spawn(z: Zombie, northOpen: boolean): void {
-    // Ils sortent de terre hors du camp : surtout cote route, et de la foret si la porte nord est ouverte.
+  private spawn(z: Zombie): void {
+    // Ils sortent de terre tout autour du camp : surtout cote route, puis de la foret, puis des flancs.
     const roll = Math.random();
-    if (northOpen && roll < 0.3) z.root.position.set((Math.random() - 0.5) * 24, 0, -24 - Math.random() * 6);
-    else if (roll < 0.8) z.root.position.set((Math.random() - 0.5) * 50, 0, 23 + Math.random() * 5);
-    else z.root.position.set((Math.random() < 0.5 ? -1 : 1) * (22 + Math.random() * 6), 0, (Math.random() - 0.5) * 20);
+    if (roll < 0.45) z.root.position.set((Math.random() - 0.5) * 50, 0, 23 + Math.random() * 5);
+    else if (roll < 0.7) z.root.position.set((Math.random() - 0.5) * 24, 0, -18 - Math.random() * 6);
+    else z.root.position.set((Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 6), 0, (Math.random() - 0.5) * 20);
+    z.hit = 0.5 + Math.random() * 0.5;
     z.hp = this.hpPerZombie;
     z.rise = 0;
     z.state = 'rising';
@@ -150,14 +157,21 @@ export class Horde {
     return { pos, killed: false, colors };
   }
 
-  update(dt: number, player: THREE.Vector3, walls: Segment[], solids: Circle[], nightK: number, northOpen: boolean): number {
+  /**
+   * Les zombies foncent droit sur le joueur. La palissade les arrete : ils cognent
+   * alors le troncon qui les bloque jusqu'a le casser (`onWall` a chaque coup).
+   */
+  update(
+    dt: number, player: THREE.Vector3, walls: Segment[], solids: Circle[], nightK: number,
+    palisade: Palisade, onWall: (s: Section, at: THREE.Vector3) => void,
+  ): number {
     let contact = 0;
     if (this.active && this.toSpawn > 0) {
       this.spawnClock -= dt;
       if (this.spawnClock <= 0) {
         const free = this.zs.find((z) => z.state === 'hidden');
         if (free) {
-          this.spawn(free, northOpen);
+          this.spawn(free);
           this.toSpawn--;
         }
         this.spawnClock = 1.4;
@@ -190,22 +204,44 @@ export class Horde {
       }
 
       const pos = z.root.position;
-      const target = waypoint(pos, player, northOpen);
-      const dir = new THREE.Vector3(target.x - pos.x, 0, target.z - pos.z);
+      const dir = new THREE.Vector3(player.x - pos.x, 0, player.z - pos.z);
       const dist = dir.length();
       dir.normalize();
       z.phase += dt * (3 + z.speed);
+      const wall = palisade.blocking(pos, player);
       const step = z.speed * (0.7 + 0.3 * Math.abs(Math.sin(z.phase))) * dt;
-      if (player.distanceTo(pos) > 0.95) pos.addScaledVector(dir, Math.min(step, dist));
-      else contact++;
+      if (dist < 0.95) contact++;
+      else if (!wall) pos.addScaledVector(dir, Math.min(step, dist));
       pos.addScaledVector(z.knock, dt);
       z.knock.multiplyScalar(Math.exp(-8 * dt));
       this.separate(z);
       collide(pos, 0.4, walls, solids, 46);
-      const want = Math.atan2(dir.x, dir.z);
-      let diff = want - z.body.rotation.y;
+      // Face au mur, il frappe ; sinon il marche.
+      let fx = dir.x;
+      let fz = dir.z;
+      if (wall) {
+        const side = Math.sign((pos.x - wall.x) * wall.nx + (pos.z - wall.z) * wall.nz) || 1;
+        fx = -wall.nx * side;
+        fz = -wall.nz * side;
+      }
+      let diff = Math.atan2(fx, fz) - z.body.rotation.y;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       z.body.rotation.y += diff * (1 - Math.exp(-5 * dt));
+      if (wall) {
+        z.hit -= dt;
+        const k = Math.max(0, z.hit / WALL_RATE);
+        z.armL.rotation.x = -2.4 + k * 1.2;
+        z.armR.rotation.x = -2.3 + k * 1.1;
+        z.body.rotation.z = 0;
+        z.legL.rotation.x = 0;
+        z.legR.rotation.x = 0;
+        if (z.hit <= 0) {
+          z.hit = WALL_RATE * (0.85 + Math.random() * 0.3);
+          palisade.damage(wall, WALL_HIT);
+          onWall(wall, pos.clone().setY(1.3));
+        }
+        continue;
+      }
       z.body.rotation.z = Math.sin(z.phase * 0.5) * 0.12;
       z.legL.rotation.x = Math.sin(z.phase) * 0.5;
       z.legR.rotation.x = -Math.sin(z.phase) * 0.5;

@@ -14,6 +14,8 @@ export class Pile {
   readonly root = new THREE.Group();
   readonly pieces: Piece[] = [];
   readonly ring: THREE.Mesh;
+  /** Taille des objets poses (plus gros sur l'etal, pour qu'on les voie de loin). */
+  itemScale = 1.2;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, readonly cap: number, private readonly perRow = 3, pallet = true) {
     if (pallet) {
@@ -64,7 +66,7 @@ export class Pile {
   }
 
   update(dt: number, time: number): void {
-    for (const p of this.pieces) p.obj.scale.setScalar(damp(p.obj.scale.x, 1.2, 14, dt));
+    for (const p of this.pieces) p.obj.scale.setScalar(damp(p.obj.scale.x, this.itemScale, 14, dt));
     const s = 1 + Math.sin(time * 3 + this.x) * 0.03;
     this.ring.scale.set(s, s, s);
   }
@@ -152,10 +154,12 @@ export class Market {
   readonly cashRing: THREE.Mesh;
   private spawnClock = 2;
   private lookIdx = 0;
+  private clock = 0;
 
   constructor(private readonly scene: THREE.Scene, private readonly labels: HTMLElement) {
     // Les objets en vente sont poses sur le comptoir, cote camp.
     this.shelf = new Pile(scene, L.shelf.x, L.shelf.z, 24, 6, false);
+    this.shelf.itemScale = 1.5;
     this.shelf.root.position.set(L.stall.x, 1.12, L.stall.z - 0.1);
     this.cashRoot.position.set(L.cash.x, 0, L.cash.z);
     this.cashRoot.add(shadow(box(1.1, 0.08, 1.1, C.woodDark, 0, 0.04, 0)));
@@ -235,6 +239,10 @@ export class Market {
   /** Renvoie les ventes conclues pendant cette image (pour les effets). */
   update(dt: number, open: boolean, products: ItemType[], onBuy: (from: THREE.Vector3, to: THREE.Vector3, t: ItemType) => void): { pay: number; at: THREE.Vector3 }[] {
     const sales: { pay: number; at: THREE.Vector3 }[] = [];
+    // Les objets poses arrivent minuscules et grossissent : sans cette mise a jour,
+    // l'etal paraissait vide alors qu'il etait garni.
+    this.clock += dt;
+    this.shelf.update(dt, this.clock);
     const waiting = this.customers.filter((c) => c.state !== 'leave').length;
     this.spawnClock -= dt;
     if (open && waiting < L.queue.length && this.spawnClock <= 0 && products.length) {

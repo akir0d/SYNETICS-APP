@@ -34,6 +34,9 @@ import { Horde, type Zombie } from './zombies';
 
 // ================================================================ rendu
 
+/** Reperes de chargement (index.html) : si le jeu bloque, on saura a quelle etape. */
+const boot = (step: string) => (window as unknown as { __bootStep?: (s: string) => void }).__bootStep?.(step);
+boot('rendu 3D');
 const app = document.getElementById('app')!;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
@@ -71,9 +74,12 @@ scene.add(sun, sun.target);
 
 // ================================================================ monde
 
+boot('decor');
 const world = buildWorld(scene);
+boot('fusion du decor');
 bakeStatic(scene, world.keep);
 
+boot('cultures et foret');
 const beds = L.beds.map((b, i) => new Bed(scene, b.x, b.z, i < 2 ? 'carrot' : 'tomato'));
 /** Les champs de ble de la ferme : des « bacs » geants, recoltes de la meme facon. */
 const fields = L.fields.map((f) => new Bed(scene, f.x, f.z, 'wheat', FIELD_W, FIELD_D));
@@ -84,6 +90,7 @@ const trees = plantForest(scene);
 for (const t of trees) world.solids.push(t.solid);
 const scraps = L.scrap.map((s) => new ScrapSource(scene, s.x, s.z, s.ry, s.kind, world.solids));
 
+boot('batiments');
 const tower = watchTower(scene);
 const B: Record<string, Building> = {
   bench: workbench(), sawmill: sawmill(), kitchen: kitchen(), shelter: shelter(), mill: windmill(), dock: dock(),
@@ -105,6 +112,7 @@ const SOLIDS: Record<string, { x: number; z: number; r: number }[]> = {
   chest: [{ x: L.chest.x, z: L.chest.z, r: 0.9 }],
 };
 for (const list of Object.values(SOLIDS)) for (const s of list) world.solids.push({ ...s });
+boot('ruines');
 const RUINS: Record<string, THREE.Object3D> = {
   bed2: bedRuin(scene, beds[1]!.x, beds[1]!.z),
   bed3: bedRuin(scene, beds[2]!.x, beds[2]!.z),
@@ -134,6 +142,7 @@ world.walls.push(...dockWalls);
 const gateBarrier: Segment = { x1: -CAMP.gate, z1: CAMP.minZ, x2: CAMP.gate, z2: CAMP.minZ };
 world.walls.push(gateBarrier);
 
+boot('joueur et effets');
 const player = new Player();
 scene.add(player.root);
 const particles = new Particles(scene);
@@ -157,6 +166,7 @@ const R = regions(nav);
 const navAll = [R.camp, R.farm, R.station];
 const navZombies = [R.farm, R.station];
 
+boot('palissade');
 const palisade = new Palisade(scene, labels);
 world.walls.push(...palisade.walls);
 /** Les zombies butent aussi sur les portes fermees ; le joueur, jamais. */
@@ -250,6 +260,7 @@ interface Pad {
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
 const fillMat = new THREE.MeshBasicMaterial({ color: 0xffd84a, transparent: true, opacity: 0.8, depthWrite: false });
 
+boot('zones et sauvegarde');
 const pads: Pad[] = PADS.map((def) => {
   const ring = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.4, 48), ringMat);
   ring.rotation.x = -Math.PI / 2;
@@ -1661,7 +1672,12 @@ const clock = new THREE.Clock();
 let lastPersist = performance.now();
 const SIM = { scale: 1 };
 
+let firstFrame = true;
 function frame(): void {
+  if (firstFrame) {
+    firstFrame = false;
+    (window as unknown as { __bootDone?: () => void }).__bootDone?.();
+  }
   const dt = Math.min(0.05, clock.getDelta());
   const time = clock.elapsedTime;
   // Les tests automatiques peuvent accelerer la simulation.
@@ -1755,6 +1771,7 @@ function frame(): void {
 
 // ---------------------------------------------------------------- demarrage
 
+boot('restauration de la partie');
 beds[0]!.unlock();
 {
   const hp = save.walls && save.walls.length === palisade.sections.length ? save.walls : palisade.initialHp();
@@ -1775,6 +1792,7 @@ if (save.cycle && save.phase === 'night') {
   horde.startNight(save.day);
   document.body.classList.add('night');
 }
+boot('gains hors ligne');
 offlineGains();
 requestAnimationFrame(frame);
 

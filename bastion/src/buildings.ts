@@ -216,8 +216,9 @@ export function windmill(): Building {
     arm.rotation.z = (i * Math.PI) / 2;
     hub.add(arm);
   }
-  hub.add(cyl(0.2, 0.2, 0.3, 0x3a3a3a, 8, 0, 0, 0));
-  (hub.children.at(-1) as THREE.Mesh).rotation.x = Math.PI / 2;
+  const axle = cyl(0.2, 0.2, 0.3, 0x3a3a3a, 8, 0, 0, 0);
+  axle.rotation.x = Math.PI / 2;
+  hub.add(axle);
   g.add(hub);
   // Le four de brique, accole.
   g.add(rbox(1.6, 1.1, 1.3, 0xa8553a, 0.1, 2.0, 0.55, 0.8), cyl(0.18, 0.18, 1.2, 0x6a3a2a, 6, 2.4, 1.6, 0.5));

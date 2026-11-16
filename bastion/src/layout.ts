@@ -1,18 +1,26 @@
-// Plan du camp n°1 « La Clairiere » : toutes les positions au meme endroit.
+// Plan de la vallee : le camp fortifie au centre, la ferme a l'ouest, la station-service
+// a l'est, l'etang au sud, la foret au nord. Toutes les positions au meme endroit.
 
 export const CAMP = { minX: -13, maxX: 13, minZ: -11, maxZ: 11, gate: 2.6 };
 export const ROAD_Z = 19;
+
+/** Enclos de la ferme (ouest) : entree cote route, bouchee tant qu'on ne l'a pas degagee. */
+export const FARM = { minX: -48, maxX: -23, minZ: -9, maxZ: 13, gateX: -34, gate: 2.4 };
+/** Enclos de la station-service (est) : la route le traverse, entree a l'ouest. */
+export const STATION = { minX: 24, maxX: 50, minZ: 5, maxZ: 31, gateZ: 19, gate: 3.2 };
+/** L'etang au sud de la route ; on y accede par le ponton. */
+export const POND = { x: 2, z: 34, rx: 9, rz: 5 };
 
 export const L = {
   spawn: { x: 0, z: 3.4 },
   campfire: { x: 0, z: 0.5 },
   /** Etal encastre dans la palissade sud : un bac par produit, deux files dehors. */
-  stall: { x: 6.2, z: 11, w: 5.6 },
-  shelf: { x: 6.2, z: 9.0 },
-  cash: { x: 9.0, z: 8.3 },
+  stall: { x: 7.1, z: 11, w: 7.4 },
+  shelf: { x: 7.1, z: 9.0 },
+  cash: { x: 3.0, z: 7.9 },
   lanes: [
-    [{ x: 5.0, z: 12.7 }, { x: 5.0, z: 13.9 }, { x: 5.0, z: 15.1 }, { x: 5.0, z: 16.3 }],
-    [{ x: 7.5, z: 12.7 }, { x: 7.5, z: 13.9 }, { x: 7.5, z: 15.1 }, { x: 7.5, z: 16.3 }],
+    [{ x: 5.6, z: 12.7 }, { x: 5.6, z: 13.9 }, { x: 5.6, z: 15.1 }, { x: 5.6, z: 16.3 }],
+    [{ x: 8.6, z: 12.7 }, { x: 8.6, z: 13.9 }, { x: 8.6, z: 15.1 }, { x: 8.6, z: 16.3 }],
   ],
   beds: [
     { x: -9.6, z: -6.6 }, { x: -9.6, z: -3.1 }, { x: -6.0, z: -6.6 }, { x: -6.0, z: -3.1 },
@@ -27,7 +35,28 @@ export const L = {
   benchZone: { x: 8.7, z: 1.6 },
   tower: { x: 10.6, z: 7.6 },
   shelter: { x: 10.2, z: -4.2 },
+  /** La reserve : les survivants y deposent tout, le joueur s'y sert. */
+  chest: { x: 3.4, z: -3.2 },
   northGate: { x: 0, z: -11 },
+
+  // ---- la ferme (ouest)
+  fields: [{ x: -29, z: -4.5 }, { x: -29, z: 1.5 }, { x: -29, z: 7.5 }],
+  mill: { x: -41, z: -3 },
+  millIn: { x: -37.4, z: 1.6 },
+  millOut: { x: -42.6, z: 2.2 },
+  farmhouse: { x: -42, z: 8.5 },
+  farmGate: { x: FARM.gateX, z: FARM.maxZ },
+
+  // ---- la station-service (est)
+  stationGate: { x: STATION.minX, z: STATION.gateZ },
+  pumps: [{ x: 33, z: 12.6 }, { x: 36.4, z: 12.6 }],
+  canopy: { x: 34.7, z: 12.6 },
+  shop: { x: 41, z: 9.5 },
+
+  // ---- l'etang (sud)
+  dock: { x: 2, z: 29.2 },
+  fishSpot: { x: 2, z: 30.5 },
+
   /**
    * Zones de paiement : a cote de chaque ruine, jamais dessus. Le joueur paie
    * en se tenant devant le chantier, puis le batiment se restaure sous ses yeux.
@@ -42,17 +71,38 @@ export const L = {
     tower: { x: 7.9, z: 6.5 },
     kitchen: { x: -6.3, z: 4.3 },
     shelter: { x: 7.3, z: -3.9 },
+    farmer: { x: 6.6, z: -1.6 },
+    lumber: { x: 6.6, z: -6.0 },
+    westRoad: { x: -34, z: 15.6 },
+    field1: { x: -24.8, z: -4.5 },
+    field2: { x: -24.8, z: 1.5 },
+    field3: { x: -24.8, z: 7.5 },
+    mill: { x: -36.4, z: -3.2 },
+    dock: { x: 5.6, z: 26.4 },
+    fisher: { x: -1.8, z: 26.4 },
+    eastRoad: { x: 20.8, z: 19 },
+    scav: { x: 29, z: 9 },
   },
   bus: { x: -14, z: 19.4 },
   busPad: { x: -14, z: 15.7 },
-  forest: { minX: -16, maxX: 16, minZ: -30, maxZ: -13.5 },
+  forest: { minX: -21, maxX: 21, minZ: -44, maxZ: -13.5 },
   scrap: [
     { x: 13.5, z: 19.6, ry: -0.3, kind: 'car' as const },
-    { x: 25, z: 18.2, ry: 2.6, kind: 'car' as const },
-    { x: -24, z: 14.4, ry: 0.4, kind: 'heap' as const },
+    { x: -21, z: 24.5, ry: 0.4, kind: 'heap' as const },
+    { x: 29.5, z: 25, ry: 2.6, kind: 'car' as const },
+    { x: 42, z: 25.5, ry: 0.9, kind: 'car' as const },
+    { x: 45, z: 14, ry: 0.2, kind: 'heap' as const },
   ],
 };
 
 export function insideCamp(x: number, z: number): boolean {
   return x > CAMP.minX && x < CAMP.maxX && z > CAMP.minZ && z < CAMP.maxZ;
+}
+
+export function insideFarm(x: number, z: number): boolean {
+  return x > FARM.minX && x < FARM.maxX && z > FARM.minZ && z < FARM.maxZ;
+}
+
+export function insideStation(x: number, z: number): boolean {
+  return x > STATION.minX && x < STATION.maxX && z > STATION.minZ && z < STATION.maxZ;
 }

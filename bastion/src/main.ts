@@ -4,12 +4,13 @@ import './style.css';
 import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
-import { Bus, kitchen, sawmill, shelter, watchTower, workbench, type Building } from './buildings';
+import { Bus, dock, kitchen, sawmill, shelter, watchTower, windmill, workbench, type Building } from './buildings';
 import { Flyers, Particles, Tracers } from './fx';
-import { Helper, type Drop, type HelperCtx } from './helpers';
+import { Helper, type HelperCtx, type Job } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
 import { damp, easeOutBack, glow } from './kit';
-import { CAMP, L } from './layout';
+import { CAMP, L, insideFarm, insideStation } from './layout';
+import { regions, type NavState } from './nav';
 import { LOG_HP, Palisade, logsNeeded, stateOf, type Section } from './palisade';
 import type { Segment } from './physics';
 import { Player } from './player';
@@ -17,10 +18,12 @@ import {
   CYCLE_FROM, DAY_LEN, PADS, UPGRADES, freshSave, loadSave, nightLen, wipeSave, writeSave,
   type Cost, type PadDef, type Save, type UpId,
 } from './progress';
-import { Bed, ChopTree, ScrapSource, plantForest } from './resources';
+import { Bed, ChopTree, FIELD_D, FIELD_W, Pump, ScrapSource, plantForest } from './resources';
 import { Restorer } from './restore';
-import { bedRuin, benchRuin, gateJunk, kitchenRuin, sawmillRuin, shelterRuin, towerRuin } from './ruins';
-import { BIN_CAP, CoinDrops, Converter, Market } from './stations';
+import {
+  bedRuin, benchRuin, dockRuin, fieldRuin, gateJunk, junkPile, kitchenRuin, millRuin, sawmillRuin, shelterRuin, towerRuin,
+} from './ruins';
+import { BIN_CAP, CoinDrops, Converter, Market, Reserve } from './stations';
 import { buildWorld } from './world';
 import { Horde, type Zombie } from './zombies';
 
@@ -67,14 +70,18 @@ const world = buildWorld(scene);
 bakeStatic(scene, world.keep);
 
 const beds = L.beds.map((b, i) => new Bed(scene, b.x, b.z, i < 2 ? 'carrot' : 'tomato'));
+/** Les champs de ble de la ferme : des « bacs » geants, recoltes de la meme facon. */
+const fields = L.fields.map((f) => new Bed(scene, f.x, f.z, 'wheat', FIELD_W, FIELD_D));
+beds.push(...fields);
 for (const b of beds) world.walls.push(...b.walls);
+const pumps = L.pumps.map((p) => new Pump(scene, p.x, p.z, world.solids));
 const trees = plantForest(scene);
 for (const t of trees) world.solids.push(t.solid);
 const scraps = L.scrap.map((s) => new ScrapSource(scene, s.x, s.z, s.ry, s.kind, world.solids));
 
 const tower = watchTower(scene);
 const B: Record<string, Building> = {
-  bench: workbench(), sawmill: sawmill(), kitchen: kitchen(), shelter: shelter(),
+  bench: workbench(), sawmill: sawmill(), kitchen: kitchen(), shelter: shelter(), mill: windmill(), dock: dock(),
 };
 for (const b of Object.values(B)) scene.add(b.group);
 B.tower = tower;
@@ -89,6 +96,8 @@ const SOLIDS: Record<string, { x: number; z: number; r: number }[]> = {
   kitchen: [{ x: L.kitchen.x - 0.7, z: L.kitchen.z, r: 0.9 }, { x: L.kitchen.x + 0.7, z: L.kitchen.z, r: 0.9 }],
   tower: [{ x: L.tower.x, z: L.tower.z, r: 1.4 }],
   shelter: [{ x: L.shelter.x, z: L.shelter.z, r: 2.0 }],
+  mill: [{ x: L.mill.x, z: L.mill.z, r: 1.9 }, { x: L.mill.x + 2.0, z: L.mill.z + 0.8, r: 0.9 }],
+  chest: [{ x: L.chest.x, z: L.chest.z, r: 0.9 }],
 };
 for (const list of Object.values(SOLIDS)) for (const s of list) world.solids.push({ ...s });
 const RUINS: Record<string, THREE.Object3D> = {
@@ -101,7 +110,21 @@ const RUINS: Record<string, THREE.Object3D> = {
   kitchen: kitchenRuin(scene),
   tower: towerRuin(scene),
   shelter: shelterRuin(scene),
+  field1: fieldRuin(scene, fields[0]!.x, fields[0]!.z, FIELD_W, FIELD_D),
+  field2: fieldRuin(scene, fields[1]!.x, fields[1]!.z, FIELD_W, FIELD_D),
+  field3: fieldRuin(scene, fields[2]!.x, fields[2]!.z, FIELD_W, FIELD_D),
+  mill: millRuin(scene, L.mill.x, L.mill.z),
+  dock: dockRuin(scene, L.dock.x, L.dock.z),
+  westRoad: junkPile(scene, L.farmGate.x, L.farmGate.z + 0.3, 0, 21),
+  eastRoad: junkPile(scene, L.stationGate.x - 0.3, L.stationGate.z, Math.PI / 2, 23),
 };
+/** Le ponton : une fois repare, on peut s'avancer sur l'eau (mais pas tomber dedans). */
+const dockWalls: Segment[] = [
+  { x1: L.dock.x - 0.75, z1: 28.6, x2: L.dock.x - 0.75, z2: 31.2, off: true },
+  { x1: L.dock.x + 0.75, z1: 28.6, x2: L.dock.x + 0.75, z2: 31.2, off: true },
+  { x1: L.dock.x - 0.75, z1: 31.2, x2: L.dock.x + 0.75, z2: 31.2, off: true },
+];
+world.walls.push(...dockWalls);
 /** La porte nord est bouchee par un amas de ferraille tant qu'on ne l'a pas degagee. */
 const gateBarrier: Segment = { x1: -CAMP.gate, z1: CAMP.minZ, x2: CAMP.gate, z2: CAMP.minZ };
 world.walls.push(gateBarrier);
@@ -121,7 +144,13 @@ const hint = document.querySelector<HTMLElement>('.hint')!;
 const market = new Market(scene, labels);
 const saw = new Converter(scene, L.sawIn, L.sawOut, ['log'], 1, 'plank', 1.6);
 const cook = new Converter(scene, L.kitchenIn, L.kitchenOut, ['carrot', 'tomato'], 2, 'soup', 2.4);
+const mill = new Converter(scene, L.millIn, L.millOut, ['wheat'], 2, 'bread', 2.8);
+const reserve = new Reserve(scene, labels);
 const helpers: Helper[] = [];
+const nav: NavState = { northOpen: false, westOpen: false, eastOpen: false };
+const R = regions(nav);
+const navAll = [R.camp, R.farm, R.station];
+const navZombies = [R.farm, R.station];
 
 const palisade = new Palisade(scene, labels);
 world.walls.push(...palisade.walls);
@@ -280,7 +309,7 @@ function restoreBuilding(id: string, b: Building, instant: boolean, done?: () =>
 
 /** Applique l'effet d'une construction ; `instant` au chargement d'une partie. */
 function applyBuild(id: string, instant: boolean): void {
-  const bed = { bed2: beds[1], bed3: beds[2], bed4: beds[3] }[id];
+  const bed = { bed2: beds[1], bed3: beds[2], bed4: beds[3], field1: fields[0], field2: fields[1], field3: fields[2] }[id];
   if (bed) {
     bed.unlock();
     restore(id, bed.group, instant);
@@ -297,8 +326,26 @@ function applyBuild(id: string, instant: boolean): void {
     case 'kitchen': restoreBuilding(id, B.kitchen!, instant, () => { cook.built = true; cook.setVisible(true); }); break;
     case 'tower': restoreBuilding(id, tower, instant); break;
     case 'shelter': restoreBuilding(id, B.shelter!, instant); break;
-    case 'farmer': helpers.push(new Helper(scene, 'farmer')); break;
-    case 'lumber': helpers.push(new Helper(scene, 'lumber')); break;
+    case 'farmer': case 'lumber': case 'scav': case 'fisher':
+      helpers.push(new Helper(scene, id as Job));
+      break;
+    case 'westRoad':
+      world.locks.west.off = true;
+      nav.westOpen = true;
+      restore(id, new THREE.Group(), instant);
+      break;
+    case 'eastRoad':
+      world.locks.east.off = true;
+      nav.eastOpen = true;
+      market.eastOpen = true;
+      restore(id, new THREE.Group(), instant);
+      break;
+    case 'mill': restoreBuilding(id, B.mill!, instant, () => { mill.built = true; mill.setVisible(true); }); break;
+    case 'dock':
+      world.locks.dock.off = true;
+      for (const w of dockWalls) w.off = false;
+      restoreBuilding(id, B.dock!, instant);
+      break;
     case 'bus1': bus.setStage(1); break;
     case 'bus2': bus.setStage(2); break;
     case 'bus3': bus.setStage(3); if (!instant) startVictory(); break;
@@ -326,6 +373,10 @@ const DONE: Record<string, string> = {
   gate: 'Porte nord dégagée', bench: 'Établi réparé', sawmill: 'La scierie tourne',
   tower: 'Tour de guet relevée', kitchen: 'La cuisine fume', shelter: 'Abri retapé',
   farmer: 'La fermière rejoint le camp', lumber: 'Le bûcheron rejoint le camp',
+  scav: 'Le ferrailleur rejoint le camp', fisher: 'Le pêcheur rejoint le camp',
+  westRoad: 'La ferme est accessible', eastRoad: 'La route de l’est est libre',
+  field1: 'Champ remis en culture', field2: 'Champ remis en culture', field3: 'Champ remis en culture',
+  mill: 'Le moulin tourne', dock: 'Ponton réparé',
   bus1: 'Le moteur tousse', bus2: 'Carrosserie retapée', bus3: 'Plein fait',
 };
 
@@ -362,27 +413,52 @@ function nearestRepair(): THREE.Vector3 | null {
   return best ? new THREE.Vector3(best.repair.x, 0, best.repair.z) : null;
 }
 
+const stat = (k: keyof Save['stats']) => () => save.stats[k] > 0;
+const at = (p: { x: number; z: number }) => () => new THREE.Vector3(p.x, 0, p.z);
+
 const OBJECTIVES: Objective[] = [
-  { icon: '🥕', text: 'Récolte des carottes au potager', target: () => new THREE.Vector3(beds[0]!.x, 0, beds[0]!.z), done: () => save.stats.harvested > 0 },
-  { icon: '🧺', text: 'Pose-les sur l’étal', target: () => new THREE.Vector3(L.shelf.x, 0, L.shelf.z), done: () => save.stats.shelved > 0 },
-  { icon: '💰', text: 'Ramasse l’argent des ventes', target: () => new THREE.Vector3(L.cash.x, 0, L.cash.z), done: () => save.stats.cashed > 0 },
+  // ---- le camp (0 a 18)
+  { icon: '🥕', text: 'Récolte des carottes au potager', target: () => new THREE.Vector3(beds[0]!.x, 0, beds[0]!.z), done: stat('harvested') },
+  { icon: '🧺', text: 'Pose-les dans les bacs de l’étal', target: at(L.shelf), done: stat('shelved') },
+  { icon: '💰', text: 'Ramasse l’argent des ventes', target: at(L.cash), done: stat('cashed') },
   { icon: '🥕', text: 'Remets en état le deuxième potager', target: padPos('bed2'), done: () => isBuilt('bed2') },
   { icon: '🚪', text: 'Dégage la porte nord', target: padPos('gate'), done: () => isBuilt('gate') },
-  { icon: '🪓', text: 'Coupe du bois dans la forêt', target: nearestOf(trees, (t) => t.standing), done: () => save.stats.logs > 0 },
+  { icon: '🪓', text: 'Coupe du bois dans la forêt', target: nearestOf(trees, (t) => t.standing), done: stat('logs') },
   { icon: '🪵', text: 'Répare un trou de la palissade', target: nearestRepair, done: () => save.stats.repairs > 0 || !palisade.sections.some((s) => s.enabled && s.hp < s.max) },
   { icon: '🔧', text: 'Répare l’établi', target: padPos('bench'), done: () => isBuilt('bench') },
   { icon: '🪚', text: 'Remets la scierie en marche', target: padPos('sawmill'), done: () => isBuilt('sawmill') },
-  { icon: '🪚', text: 'Apporte du bois à la scierie', target: () => new THREE.Vector3(L.sawIn.x, 0, L.sawIn.z), done: () => save.stats.planks > 0 },
-  { icon: '🔩', text: 'Démonte une épave sur la route', target: nearestOf(scraps, (s) => s.amount > 0), done: () => save.stats.scrap > 0 },
+  { icon: '🪚', text: 'Apporte du bois à la scierie', target: at(L.sawIn), done: stat('planks') },
+  { icon: '🔩', text: 'Démonte une épave sur la route', target: nearestOf(scraps, (s) => s.amount > 0 && !insideStation(s.x, s.z)), done: stat('scrap') },
   { icon: '🗼', text: 'Relève la tour de guet', target: padPos('tower'), done: () => isBuilt('tower') },
   { icon: '🍅', text: 'Remets en état un potager à tomates', target: padPos('bed3'), done: () => isBuilt('bed3') },
   { icon: '🍲', text: 'Remets la cuisine en état', target: padPos('kitchen'), done: () => isBuilt('kitchen') },
+  { icon: '🍲', text: 'Fais cuire de la soupe (légumes à la cuisine)', target: at(L.kitchenIn), done: stat('soup') },
   { icon: '🏠', text: 'Retape l’abri des survivants', target: padPos('shelter'), done: () => isBuilt('shelter') },
   { icon: '👩‍🌾', text: 'Recrute une fermière', target: padPos('farmer'), done: () => isBuilt('farmer') },
+  { icon: '📦', text: 'Récupère sa récolte dans la réserve', target: () => new THREE.Vector3(reserve.zone.x, 0, reserve.zone.z), done: stat('chest') },
   { icon: '🧔', text: 'Recrute un bûcheron', target: padPos('lumber'), done: () => isBuilt('lumber') },
+  // ---- la ferme (19 a 24)
+  { icon: '🚜', text: 'Dégage l’entrée de la ferme, à l’ouest', target: padPos('westRoad'), done: () => isBuilt('westRoad') },
+  { icon: '🌾', text: 'Remets un champ de blé en culture', target: padPos('field1'), done: () => isBuilt('field1') },
+  { icon: '🌾', text: 'Récolte du blé', target: () => new THREE.Vector3(fields[0]!.x, 0, fields[0]!.z), done: stat('wheat') },
+  { icon: '🍞', text: 'Restaure le moulin', target: padPos('mill'), done: () => isBuilt('mill') },
+  { icon: '🍞', text: 'Apporte du blé au moulin pour faire du pain', target: at(L.millIn), done: stat('bread') },
+  { icon: '🌾', text: 'Remets un deuxième champ en culture', target: padPos('field2'), done: () => isBuilt('field2') },
+  // ---- l'etang (25 a 27)
+  { icon: '🎣', text: 'Répare le ponton de l’étang, au sud', target: padPos('dock'), done: () => isBuilt('dock') },
+  { icon: '🐟', text: 'Pêche au bout du ponton (reste immobile)', target: at(L.fishSpot), done: stat('fish') },
+  { icon: '🧑‍🦰', text: 'Recrute un pêcheur', target: padPos('fisher'), done: () => isBuilt('fisher') },
+  // ---- la station (28 a 30)
+  { icon: '⛽', text: 'Dégage la route de l’est', target: padPos('eastRoad'), done: () => isBuilt('eastRoad') },
+  { icon: '⛽', text: 'Siphonne du carburant à la station', target: nearestOf(pumps, (p) => p.amount > 0), done: stat('fuel') },
+  { icon: '🧑‍🔧', text: 'Recrute un ferrailleur', target: padPos('scav'), done: () => isBuilt('scav') },
+  // ---- le depart (31 a 36)
+  { icon: '🍅', text: 'Remets en état le dernier potager', target: padPos('bed4'), done: () => isBuilt('bed4') },
+  { icon: '🌾', text: 'Remets le dernier champ en culture', target: padPos('field3'), done: () => isBuilt('field3') },
+  { icon: '🛡️', text: 'Renforce la palissade à l’établi', target: at(L.benchZone), done: () => save.up.wall > 0 },
   { icon: '🔧', text: 'Répare le moteur du bus', target: padPos('bus1'), done: () => isBuilt('bus1') },
   { icon: '🚌', text: 'Retape la carrosserie du bus', target: padPos('bus2'), done: () => isBuilt('bus2') },
-  { icon: '⛽', text: 'Fais le plein et quitte le camp', target: padPos('bus3'), done: () => isBuilt('bus3') },
+  { icon: '⛽', text: 'Fais le plein et quitte la vallée', target: padPos('bus3'), done: () => isBuilt('bus3') },
 ];
 
 function currentObjective(): Objective | null {
@@ -438,6 +514,7 @@ function applyUpgrades(): void {
   player.speedMul = 1 + 0.12 * save.up.boots;
   player.maxHp = 100 + 30 * save.up.health;
   player.hp = Math.min(player.hp, player.maxHp);
+  palisade.setLevel(save.up.wall);
 }
 
 let sheetOpen = false;
@@ -566,7 +643,7 @@ const playerChest = () => player.position.clone().setY(1.3);
 
 /** Objets en vol vers chaque bac de l'etal. */
 const shelfPending = new Map<ItemType, number>();
-const convPending = new Map<Converter, number>([[saw, 0], [cook, 0]]);
+const convPending = new Map<Converter, number>([[saw, 0], [cook, 0], [mill, 0]]);
 
 function putOnShelf(t: ItemType, from: THREE.Vector3): void {
   shelfPending.set(t, (shelfPending.get(t) ?? 0) + 1);
@@ -596,6 +673,11 @@ let dropClock = 0;
 let pickClock = 0;
 let payClock = 0;
 let fullClock = 0;
+let fishClock = 0;
+let pumpClock = 0;
+/** Temps passe immobile : on ne depose rien tant qu'on n'est pas reste 0,5 s sur place. */
+let still = 0;
+const SETTLE = 0.5;
 
 const near = (x: number, z: number, r: number) => Math.hypot(player.position.x - x, player.position.z - z) < r;
 
@@ -606,6 +688,10 @@ function interact(dt: number): void {
   dropClock -= dt;
   pickClock -= dt;
   payClock -= dt;
+  fishClock -= dt;
+  pumpClock -= dt;
+  still = move.lengthSq() > 0 ? 0 : still + dt;
+  const settled = still >= SETTLE;
   if (ko > 0) return;
 
   // Sac plein pres d'une ressource : on le signale, sans insister.
@@ -683,8 +769,39 @@ function interact(dt: number): void {
     }
   }
 
+  // Station : on siphonne les cuves, bidon par bidon.
+  if (freeSpace() > 0 && pumpClock <= 0) {
+    const pump = pumps.find((u) => u.amount > 0 && near(u.x, u.z, u.radius));
+    if (pump && pump.take()) {
+      pumpClock = 0.8;
+      sfx.sfxClang();
+      const from = new THREE.Vector3(pump.x, 1.0, pump.z);
+      particles.burst(from, [0xc9412f, 0x3a3a3a], 5, { speed: 2, up: 2, size: 0.08, life: 0.4 });
+      giveToPlayer('fuel', from, () => { save.stats.fuel++; });
+    }
+  }
+  // Peche : au bout du ponton, immobile, ca mord regulierement.
+  if (isBuilt('dock') && settled && freeSpace() > 0 && near(L.fishSpot.x, L.fishSpot.z, 1.1)) {
+    player.faceTowards(L.fishSpot.x, L.fishSpot.z + 3, dt);
+    if (fishClock <= 0) {
+      fishClock = 1.9;
+      const from = new THREE.Vector3(L.fishSpot.x + (Math.random() - 0.5) * 1.4, 0.3, L.fishSpot.z + 1.6 + Math.random());
+      particles.burst(from, [0xbfe6ff, 0xffffff, 0x4f8090], 14, { speed: 2.5, up: 4, size: 0.12, life: 0.6 });
+      sfx.sfxPickup(3);
+      giveToPlayer('fish', from, () => { save.stats.fish++; });
+    }
+  }
+  // Reserve : immobile devant le coffre, on recupere ce que les survivants y ont mis.
+  if (settled && pickClock <= 0 && reserve.total > 0 && freeSpace() > 0 && near(reserve.zone.x, reserve.zone.z, 1.1)) {
+    const t = reserve.take();
+    if (t) {
+      pickClock = 0.09;
+      giveToPlayer(t, reserve.topWorld(), () => { save.stats.chest++; });
+    }
+  }
+
   // Deposer a l'etal tout ce qui se vend.
-  if (dropClock <= 0 && near(L.shelf.x, L.shelf.z, 1.6)) {
+  if (settled && dropClock <= 0 && near(L.shelf.x, L.shelf.z, 1.6)) {
     const item = player.stack.take((t) => shelfRoom(t) > 0);
     if (item) {
       dropClock = 0.08;
@@ -693,23 +810,27 @@ function interact(dt: number): void {
       sfx.sfxDrop(market.bins.total);
     }
   }
-  // Reparer la palissade : chaque rondin depose devant un troncon abime le consolide.
-  if (dropClock <= 0 && player.stack.has('log')) {
-    for (const s of palisade.sections) {
-      if (!s.enabled || logsNeeded(s) - s.inflight <= 0 || !near(s.repair.x, s.repair.z, 1.0)) continue;
-      const item = player.stack.take((t) => t === 'log');
-      if (!item) break;
-      dropClock = 0.14;
+  // Reparer la palissade : immobile le long d'un troncon abime, avec des rondins.
+  // On ne repare pas si l'on se tient dans une autre zone (etal, chantier, machine) :
+  // le bois va la ou on l'a voulu.
+  const busyZone = near(L.shelf.x, L.shelf.z, 1.8) || near(reserve.zone.x, reserve.zone.z, 1.3)
+    || pads.some((q) => q.shown && !isBuilt(q.def.id) && near(q.def.x, q.def.z, 1.6))
+    || [saw, cook, mill].some((c) => c.built && near(c.input.x, c.input.z, 1.5));
+  repairTarget = !busyZone && player.stack.has('log') ? palisade.repairable(p.x, p.z) : null;
+  if (settled && dropClock <= 0 && repairTarget) {
+    const s = repairTarget;
+    const item = player.stack.take((t) => t === 'log');
+    if (item) {
+      dropClock = 0.16;
       s.inflight++;
       const to = new THREE.Vector3(s.x, 1.1, s.z);
       flyers.launch(itemMesh('log'), item.pos, () => to, () => repairLanded(s), 0.3, 1.3);
-      break;
     }
   }
   // Nourrir les machines, ramasser ce qu'elles produisent.
-  for (const c of [saw, cook]) {
+  for (const c of [saw, cook, mill]) {
     if (!c.built) continue;
-    if (dropClock <= 0 && near(c.input.x, c.input.z, 1.35) && convRoom(c) > 0) {
+    if (settled && dropClock <= 0 && near(c.input.x, c.input.z, 1.35) && convRoom(c) > 0) {
       const item = player.stack.take((t) => c.accepts.includes(t));
       if (item) {
         dropClock = 0.08;
@@ -735,7 +856,7 @@ function interact(dt: number): void {
   }
   // Payer les zones a debloquer : d'abord les pieces, puis les materiaux.
   for (const pad of pads) {
-    if (!pad.shown || isBuilt(pad.def.id) || payClock > 0 || !near(pad.def.x, pad.def.z, 1.45)) continue;
+    if (!settled || !pad.shown || isBuilt(pad.def.id) || payClock > 0 || !near(pad.def.x, pad.def.z, 1.45)) continue;
     const rem = remaining(pad);
     const paid = paidOf(pad.def.id);
     const target = () => new THREE.Vector3(pad.def.x, 0.2, pad.def.z);
@@ -764,6 +885,9 @@ function interact(dt: number): void {
   // Etabli : le panneau d'ameliorations s'ouvre quand on se tient devant.
   setSheet(isBuilt('bench') && near(L.benchZone.x, L.benchZone.z, 1.5));
 }
+
+/** Le troncon que le joueur est en train de reparer (pour son etiquette). */
+let repairTarget: Section | null = null;
 
 function repairLanded(s: Section): void {
   s.inflight = Math.max(0, s.inflight - 1);
@@ -807,25 +931,36 @@ function landOnPad(pad: Pad): void {
 
 // ================================================================ survivants
 
-function dropFor(t: ItemType): Drop | null {
-  const conv = t === 'log' ? saw : t === 'carrot' || t === 'tomato' ? cook : null;
-  if (conv && conv.built && convRoom(conv) > 0) {
-    return { at: () => ({ x: conv.input.x, z: conv.input.z }), accept: (x) => conv.accepts.includes(x) && convRoom(conv) > 0, put: (x, from) => putInConverter(conv, x, from) };
-  }
-  if (shelfRoom(t) > 0) {
-    return { at: () => L.shelf, accept: (x) => shelfRoom(x) > 0, put: (x, from) => putOnShelf(x, from) };
-  }
-  return null;
+/** Les survivants deposent tout dans la reserve ; le joueur s'y sert. */
+let reservePending = 0;
+function putInReserve(t: ItemType, from: THREE.Vector3): void {
+  reservePending++;
+  flyers.launch(itemMesh(t), from, () => reserve.topWorld(), () => {
+    reservePending = Math.max(0, reservePending - 1);
+    reserve.add(t);
+  }, 0.3, 1.1);
 }
 
 const helperCtx: HelperCtx = {
-  beds, trees, walls: world.walls, solids: world.solids, northOpen: false, night: false, dropFor,
+  beds, trees, scraps, walls: world.walls, solids: world.solids, nav: navAll, night: false, dockReady: false,
+  reachable: (x, z) => (!insideFarm(x, z) || nav.westOpen) && (!insideStation(x, z) || nav.eastOpen),
+  reserve: { at: reserve.zone, room: () => reserve.total + reservePending < reserve.cap, put: putInReserve },
   onHarvest: (from) => particles.burst(from, [0x7fdc5a, 0x5a3a20], 4, { speed: 2, up: 3, size: 0.08, life: 0.4 }),
   onChop: (tree, h) => {
     if (tree.chop(h.human.root.position.x, h.human.root.position.z, 3)) {
       h.stack.add('log');
       particles.burst(new THREE.Vector3(tree.x, 1.2, tree.z), [0xc68a4f, 0xe0b077], 6, { speed: 3, up: 3, size: 0.09, life: 0.5 });
     }
+  },
+  onScrap: (src, h) => {
+    if (src.hit()) {
+      h.stack.add('scrap');
+      particles.burst(new THREE.Vector3(src.x, 1.0, src.z), [0xfff1a8, 0x9aa3ab], 6, { speed: 3, up: 3, size: 0.08, life: 0.4 });
+    }
+  },
+  onFish: (h) => {
+    h.stack.add('fish');
+    particles.burst(new THREE.Vector3(L.fishSpot.x, 0.3, L.fishSpot.z + 1.8), [0xbfe6ff, 0xffffff], 8, { speed: 2, up: 3, size: 0.1, life: 0.5 });
   },
 };
 
@@ -844,7 +979,7 @@ function startNight(): void {
   save.phaseT = 0;
   horde.startNight(save.day);
   sfx.sfxToggle(true);
-  toast(`🌙 Nuit ${save.day} : ils arrivent !`);
+  toast(horde.bruteNight ? `🌙 Nuit ${save.day} : une brute est avec eux !` : `🌙 Nuit ${save.day} : ils arrivent !`);
   document.body.classList.add('night');
 }
 
@@ -1161,12 +1296,17 @@ resize();
 const CAM_DIR = new THREE.Vector3(0, 1, 0.78).normalize();
 
 function productsList(): ItemType[] {
+  // Dans l'ordre d'arrivee : les derniers produits, plus chers, sont un peu plus demandes.
   const list: ItemType[] = ['carrot'];
   if (isBuilt('gate')) list.push('log');
   if (isBuilt('sawmill')) list.push('plank');
   if (save.stats.scrap > 0) list.push('scrap');
   if (isBuilt('bed3')) list.push('tomato');
   if (isBuilt('kitchen')) list.push('soup');
+  if (isBuilt('field1')) list.push('wheat');
+  if (isBuilt('mill')) list.push('bread');
+  if (isBuilt('dock')) list.push('fish');
+  if (isBuilt('eastRoad')) list.push('fuel');
   return list;
 }
 
@@ -1177,7 +1317,7 @@ function step(dt: number, time: number): void {
   interact(dt);
   updateCycle(dt);
   updateCombat(dt);
-  const contacts = horde.update(dt, player.position, zombieWalls, world.solids, nightK, palisade, onWallHit);
+  const contacts = horde.update(dt, player.position, zombieWalls, world.solids, nightK, palisade, onWallHit, navZombies);
   palisade.update(dt, save.cycle && save.phase === 'night', time);
   hurt(dt, contacts);
   drops.update(dt, player.position, (v) => earn(v));
@@ -1186,10 +1326,14 @@ function step(dt: number, time: number): void {
   restorer.update(dt);
   for (const t of trees) t.update(dt);
   for (const s of scraps) s.update(dt);
+  for (const u of pumps) u.update(dt);
   if (saw.update(dt, time)) save.stats.planks++;
-  cook.update(dt, time);
+  if (cook.update(dt, time)) save.stats.soup++;
+  if (mill.update(dt, time)) save.stats.bread++;
+  reserve.update(dt, time);
   B.sawmill!.anim?.(dt, time, saw.busy);
   B.kitchen!.anim?.(dt, time, cook.busy);
+  B.mill!.anim?.(dt, time, mill.busy);
   bus.update(dt, time);
 
   const open = !save.cycle || save.phase === 'day';
@@ -1202,7 +1346,8 @@ function step(dt: number, time: number): void {
     flyCoins(s.pay, s.at, () => market.cashWorld(), (n) => market.addCash(n), 6);
   }
 
-  helperCtx.northOpen = isBuilt('gate');
+  nav.northOpen = isBuilt('gate');
+  helperCtx.dockReady = isBuilt('dock');
   helperCtx.night = save.cycle && save.phase === 'night';
   for (const h of helpers) h.update(dt, helperCtx);
 
@@ -1285,22 +1430,32 @@ function frame(): void {
   for (const pad of pads) if (pad.shown && !isBuilt(pad.def.id)) placeLabel(pad.label, pad.def.x, 0.3, pad.def.z - 1.4);
   // Bacs de l'etal : ce qu'il y a dedans et combien, des qu'on est dans le coin.
   const nearStall = Math.hypot(L.stall.x - player.position.x, L.stall.z - player.position.z) < 13;
-  for (const bin of market.bins.bins) {
-    if (!nearStall) { bin.label.classList.add('off'); continue; }
-    placeLabel(bin.label, L.stall.x + bin.x, 0.55, L.stall.z + 0.5);
-  }
-  // Troncons abimes : combien de rondins pour les remettre d'aplomb (seulement a proximite).
-  for (const s of palisade.sections) {
-    const need = s.enabled ? logsNeeded(s) : 0;
-    const show = need > 0 && Math.hypot(s.repair.x - player.position.x, s.repair.z - player.position.z) < 7.5;
-    if (!show) {
-      s.label.classList.add('off');
-      continue;
+  market.bins.bins.forEach((bin, i) => {
+    if (!nearStall) { bin.label.classList.add('off'); return; }
+    // Deux rangees en quinconce : dix etiquettes sans se chevaucher.
+    if (i % 2 === 0) placeLabel(bin.label, L.stall.x + bin.x, 0.35, L.stall.z + 0.6);
+    else placeLabel(bin.label, L.stall.x + bin.x, 1.95, L.stall.z - 0.1);
+  });
+  // Reserve : son contenu, quand on passe a cote.
+  if (Math.hypot(L.chest.x - player.position.x, L.chest.z - player.position.z) < 9) placeLabel(reserve.label, L.chest.x, 1.6, L.chest.z);
+  else reserve.label.classList.add('off');
+  // Palissade : une seule etiquette, celle du troncon abime le plus proche.
+  let wallLabel: Section | null = repairTarget;
+  if (!wallLabel) {
+    let bd = 7;
+    for (const s of palisade.sections) {
+      if (!s.enabled || s.hp >= s.max) continue;
+      const d = palisade.distanceTo(s, player.position.x, player.position.z);
+      if (d < bd) { bd = d; wallLabel = s; }
     }
-    const html = `🪵 ${need}`;
+  }
+  for (const s of palisade.sections) {
+    if (s !== wallLabel) { s.label.classList.add('off'); continue; }
+    const html = `🪵 ${logsNeeded(s)}`;
     if (s.label.innerHTML !== html) s.label.innerHTML = html;
     s.label.classList.toggle('broken', s.hp <= 0);
-    placeLabel(s.label, s.repair.x, 0.2, s.repair.z - 0.9);
+    s.label.classList.toggle('active', s === repairTarget);
+    placeLabel(s.label, s.x, s.z > CAMP.maxZ - 0.5 ? 2.2 : 3.4, s.z);
   }
   for (const c of market.customers) {
     const left = c.need - c.got;
@@ -1346,7 +1501,7 @@ requestAnimationFrame(frame);
 // Acces pour les tests automatiques.
 (window as unknown as { __bastion: unknown }).__bastion = {
   player, save: () => save, SIM, market, beds, pads, horde, trees, scraps, helpers, saw, cook, palisade,
-  renderer,
+  renderer, reserve, pumps, fields, mill,
   give: (n: number) => { save.coins += n; },
   build: (id: string) => { const p = pads.find((x) => x.def.id === id); if (p) { save.paid[id] = { ...p.def.cost }; build(p); } },
   setObj: (n: number) => { save.obj = n; renderObjective(); },

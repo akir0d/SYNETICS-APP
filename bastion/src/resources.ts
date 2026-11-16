@@ -4,15 +4,22 @@ import * as THREE from 'three';
 import { C, at, blob, box, cone, cyl, damp, group, rbox, rng, shadow, sphere } from './kit';
 import { L } from './layout';
 import type { Circle, Segment } from './physics';
+import { mergeColored } from './bake';
 import { wreck } from './props';
 import { leafy, pine } from './world';
 
-// ---------------------------------------------------------------- potagers
+// ---------------------------------------------------------------- potagers et champs
 
 interface Plant { obj: THREE.Object3D; g: number; pos: THREE.Vector3; pop: number }
 
 export const BED_W = 2.8;
 export const BED_D = 2.0;
+/** Un champ de ble : plus grand qu'un bac de potager. */
+export const FIELD_W = 4.4;
+export const FIELD_D = 3.0;
+
+export type Crop = 'carrot' | 'tomato' | 'wheat';
+const GROW: Record<Crop, number> = { carrot: 8, tomato: 13, wheat: 10 };
 
 export class Bed {
   readonly group = new THREE.Group();
@@ -21,18 +28,30 @@ export class Bed {
   unlocked = false;
   readonly growTime: number;
 
-  constructor(scene: THREE.Scene, readonly x: number, readonly z: number, readonly kind: 'carrot' | 'tomato') {
-    this.growTime = kind === 'carrot' ? 8 : 13;
+  constructor(scene: THREE.Scene, readonly x: number, readonly z: number, readonly kind: Crop, readonly w = BED_W, readonly d = BED_D) {
+    this.growTime = GROW[kind];
     const g = this.group;
-    g.add(rbox(BED_W, 0.4, BED_D, C.wood, 0.05, 0, 0.2, 0));
-    g.add(box(BED_W - 0.3, 0.06, BED_D - 0.3, C.soil, 0, 0.41, 0));
+    if (kind === 'wheat') {
+      // Un champ : de la terre labouree bordee de piquets.
+      g.add(box(w, 0.12, d, C.soil, 0, 0.06, 0));
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(cyl(0.06, 0.07, 0.7, C.woodDark, 5, sx * w / 2, 0.35, sz * d / 2));
+      for (const sz of [-1, 1]) g.add(box(w, 0.06, 0.06, C.wood, 0, 0.5, sz * d / 2));
+    } else {
+      g.add(rbox(w, 0.4, d, C.wood, 0.05, 0, 0.2, 0));
+      g.add(box(w - 0.3, 0.06, d - 0.3, C.soil, 0, 0.41, 0));
+    }
+    const base = kind === 'wheat' ? 0.12 : 0.44;
+    const cols = Math.max(2, Math.round((w - 0.3) / 0.64));
+    const rows = Math.max(2, Math.round((d - 0.3) / 0.55));
     const r = rng(Math.round(x * 13 + z * 7));
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 4; j++) {
-        const px = -0.96 + j * 0.64;
-        const pz = -0.55 + i * 0.55;
-        const obj = kind === 'carrot' ? carrotPlant() : tomatoPlant(r);
-        at(obj, px, 0.44, pz, r() * 6);
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        const px = (j - (cols - 1) / 2) * ((w - 0.5) / Math.max(1, cols - 1));
+        const pz = (i - (rows - 1) / 2) * ((d - 0.5) / Math.max(1, rows - 1));
+        // Chaque plante fusionnee en un maillage : 60 epis de ble ne coutent que 60 appels de dessin.
+        const obj = mergeColored(kind === 'carrot' ? carrotPlant() : kind === 'tomato' ? tomatoPlant(r) : wheatPlant(r));
+        at(obj, px, base, pz, r() * 6);
+        obj.userData.base = base;
         g.add(obj);
         this.plants.push({ obj, g: 0.3 + r() * 0.7, pos: new THREE.Vector3(x + px, 0.6, z + pz), pop: 0 });
       }
@@ -43,8 +62,8 @@ export class Bed {
     scene.add(g);
     // Le bac (ou sa ruine) occupe sa place des le depart : les collisions ne
     // changent jamais quand on le restaure, personne ne peut s'y retrouver coince.
-    const hw = BED_W / 2;
-    const hd = BED_D / 2;
+    const hw = w / 2;
+    const hd = d / 2;
     this.walls = [
       { x1: x - hw, z1: z - hd, x2: x + hw, z2: z - hd },
       { x1: x + hw, z1: z - hd, x2: x + hw, z2: z + hd },
@@ -60,8 +79,8 @@ export class Bed {
 
   /** Distance d'un point au bord du bac. */
   distance(px: number, pz: number): number {
-    const dx = Math.max(Math.abs(px - this.x) - BED_W / 2, 0);
-    const dz = Math.max(Math.abs(pz - this.z) - BED_D / 2, 0);
+    const dx = Math.max(Math.abs(px - this.x) - this.w / 2, 0);
+    const dz = Math.max(Math.abs(pz - this.z) - this.d / 2, 0);
     return Math.hypot(dx, dz);
   }
 
@@ -84,15 +103,15 @@ export class Bed {
     return best.pos.clone();
   }
 
-  /** Point au bord du bac le plus proche d'une position : la ou un survivant se poste. */
-  edgePoint(px: number, pz: number): THREE.Vector3 {
-    const cx = Math.max(this.x - BED_W / 2, Math.min(this.x + BED_W / 2, px));
-    const cz = Math.max(this.z - BED_D / 2, Math.min(this.z + BED_D / 2, pz));
-    const dx = cx - this.x;
-    const dz = cz - this.z;
-    const nx = Math.abs(dx) / (BED_W / 2) > Math.abs(dz) / (BED_D / 2) ? Math.sign(dx) : 0;
-    const nz = nx === 0 ? Math.sign(dz) || 1 : 0;
-    return new THREE.Vector3(cx + nx * 0.75, 0, cz + nz * 0.75);
+  /**
+   * Ou un survivant se poste pour recolter : toujours sur un grand cote (nord ou sud).
+   * Entre deux bacs voisins par les petits cotes il n'y a pas la place de passer :
+   * c'est la que la fermiere se coincait.
+   */
+  edgePoint(px: number, pz: number, side?: number): THREE.Vector3 {
+    const s = side ?? (pz < this.z ? -1 : 1);
+    const cx = Math.max(this.x - this.w / 2 + 0.4, Math.min(this.x + this.w / 2 - 0.4, px));
+    return new THREE.Vector3(cx, 0, this.z + s * (this.d / 2 + 0.65));
   }
 
   update(dt: number, time: number): void {
@@ -103,7 +122,7 @@ export class Bed {
       const ripe = p.g >= 1;
       const s = 0.25 + p.g * 0.75;
       p.obj.scale.setScalar(damp(p.obj.scale.x, s, 10, dt));
-      p.obj.position.y = 0.44 + (ripe ? Math.abs(Math.sin(time * 3 + p.pos.x * 3)) * 0.04 : 0);
+      p.obj.position.y = (p.obj.userData.base as number) + (ripe ? Math.abs(Math.sin(time * 3 + p.pos.x * 3)) * 0.04 : 0);
       p.obj.rotation.z = ripe ? Math.sin(time * 2 + p.pos.z * 5) * 0.08 : 0;
     }
   }
@@ -120,6 +139,16 @@ function carrotPlant(): THREE.Group {
 function tomatoPlant(r: () => number): THREE.Group {
   const g = group(cyl(0.025, 0.03, 0.8, C.woodLight, 4, 0, 0.4, 0), blob(0.24, C.leafDark, 0, 0.5, 0));
   for (let i = 0; i < 3; i++) g.add(sphere(0.085, 0xe8432f, (r() - 0.5) * 0.36, 0.3 + r() * 0.4, (r() - 0.5) * 0.36, 8));
+  return g;
+}
+
+function wheatPlant(r: () => number): THREE.Group {
+  const g = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const x = (r() - 0.5) * 0.3;
+    const z = (r() - 0.5) * 0.3;
+    g.add(cyl(0.02, 0.025, 0.8, 0xc9a640, 4, x, 0.4, z), cone(0.05, 0.22, 0xe8c25a, 5, x, 0.9, z));
+  }
   return g;
 }
 
@@ -213,7 +242,7 @@ export function plantForest(scene: THREE.Scene): ChopTree[] {
   const trees: ChopTree[] = [];
   const f = L.forest;
   let guard = 0;
-  while (trees.length < 34 && guard++ < 2000) {
+  while (trees.length < 64 && guard++ < 4000) {
     const x = f.minX + r() * (f.maxX - f.minX);
     const z = f.minZ + r() * (f.maxZ - f.minZ);
     // Un chemin degage depuis la porte nord.
@@ -277,6 +306,50 @@ export class ScrapSource {
     }
     this.shake = Math.max(0, this.shake - dt * 6);
     this.root.position.x = this.x + Math.sin(this.shake * 40) * this.shake * 0.06;
+  }
+}
+
+/** Pompe de la station : il reste du carburant au fond des cuves, on le siphonne en bidons. */
+export class Pump {
+  readonly root: THREE.Group;
+  amount = 4;
+  readonly max = 4;
+  private regen = 0;
+  private shake = 0;
+
+  constructor(scene: THREE.Scene, readonly x: number, readonly z: number, solids: Circle[]) {
+    this.root = shadow(at(group(
+      box(0.9, 0.18, 0.7, C.concrete, 0, 0.09, 0),
+      rbox(0.6, 1.5, 0.45, 0xc9412f, 0.06, 0, 0.93, 0),
+      box(0.5, 0.35, 0.47, C.white, 0, 1.35, 0),
+      box(0.3, 0.18, 0.48, 0x2e3439, 0, 1.0, 0),
+      cyl(0.04, 0.04, 0.8, 0x2b2b2b, 5, 0.36, 0.8, 0.1),
+    ), x, 0, z));
+    scene.add(this.root);
+    solids.push({ x, z, r: 0.55 });
+  }
+
+  get radius(): number {
+    return 1.7;
+  }
+
+  take(): boolean {
+    if (this.amount <= 0) return false;
+    this.amount -= 1;
+    this.shake = 1;
+    return true;
+  }
+
+  update(dt: number): void {
+    if (this.amount < this.max) {
+      this.regen += dt;
+      if (this.regen > 12) {
+        this.regen = 0;
+        this.amount += 1;
+      }
+    }
+    this.shake = Math.max(0, this.shake - dt * 6);
+    this.root.position.z = this.z + Math.sin(this.shake * 40) * this.shake * 0.04;
   }
 }
 

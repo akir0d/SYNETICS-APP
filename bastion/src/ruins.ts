@@ -35,21 +35,80 @@ function finish(scene: THREE.Scene, g: THREE.Group, x: number, z: number, ry = 0
   return m;
 }
 
-export function bedRuin(scene: THREE.Scene, x: number, z: number): THREE.Group {
+export function bedRuin(scene: THREE.Scene, x: number, z: number, W = BED_W, D = BED_D): THREE.Group {
   const r = rng(Math.round(x * 31 + z * 17));
   const g = new THREE.Group();
-  g.add(box(BED_W - 0.2, 0.05, BED_D - 0.2, 0x6a4a2e, 0, 0.03, 0));
+  g.add(box(W - 0.2, 0.05, D - 0.2, 0x6a4a2e, 0, 0.03, 0));
   // Cadre eventre : un long cote tient encore, l'autre est tombe.
-  g.add(box(BED_W, 0.4, 0.1, C.woodDark, 0, 0.2, -BED_D / 2));
-  const fallen = box(BED_W * 0.7, 0.4, 0.1, C.wood, 0.3, 0.1, BED_D / 2 + 0.25);
+  g.add(box(W, 0.4, 0.1, C.woodDark, 0, 0.2, -D / 2));
+  const fallen = box(W * 0.7, 0.4, 0.1, C.wood, 0.3, 0.1, D / 2 + 0.25);
   fallen.rotation.x = 1.3;
   g.add(fallen);
-  const side = box(0.1, 0.4, BED_D, C.woodDark, -BED_W / 2, 0.2, 0);
+  const side = box(0.1, 0.4, D, C.woodDark, -W / 2, 0.2, 0);
   side.rotation.z = 0.25;
   g.add(side);
-  g.add(plank(1.3, C.wood, BED_W / 2 + 0.2, 0.05, 0.2, 0.8));
-  weeds(g, r, 9, BED_W);
+  g.add(plank(1.3, C.wood, W / 2 + 0.2, 0.05, 0.2, 0.8));
+  weeds(g, r, Math.round(9 * (W * D) / (BED_W * BED_D)), W);
   g.add(at(cyl(0.18, 0.14, 0.3, 0x5f7a8a, 8, 0, 0, 0), 0.6, 0.15, -0.2));
+  return finish(scene, g, x, z);
+}
+
+/** Un champ en friche : terre seche, piquets tombes, herbes folles. */
+export function fieldRuin(scene: THREE.Scene, x: number, z: number, W: number, D: number): THREE.Group {
+  const r = rng(Math.round(x * 7 + z * 29));
+  const g = new THREE.Group();
+  g.add(box(W, 0.05, D, 0x7a5a3a, 0, 0.03, 0));
+  for (let i = 0; i < 4; i++) {
+    const p = cyl(0.06, 0.07, 0.7, C.woodDark, 5, (i < 2 ? -1 : 1) * W / 2, 0.35, (i % 2 ? -1 : 1) * D / 2);
+    if (i % 2) p.rotation.z = 1.2;
+    g.add(p);
+  }
+  weeds(g, r, 16, W);
+  return finish(scene, g, x, z);
+}
+
+/** Un amas qui bouche un passage : carcasse, toles, pneus, palettes. */
+export function junkPile(scene: THREE.Scene, x: number, z: number, ry: number, seed: number): THREE.Group {
+  const r = rng(seed);
+  const g = new THREE.Group();
+  const car = wreck(r() < 0.5 ? 0x5f7a8a : 0x8a5a3a, r() < 0.4);
+  car.rotation.y = 0.15;
+  car.position.set(-0.4, 0, 0);
+  g.add(car);
+  for (let i = 0; i < 3; i++) {
+    const s = sheet(1.0, 1.3, [0xa5603a, 0x8a8f91, 0x9c4a3c][i]!);
+    s.position.set(2.0 + i * 0.3, 0, 0.3 - i * 0.25);
+    s.rotation.set(-0.2, 0.4 - i * 0.2, (i - 1) * 0.15);
+    g.add(s);
+  }
+  g.add(at(tireStack(3, seed + 1), -2.6, 0, 0.3), at(crate(0.6), 2.6, 0, -0.6, 0.3));
+  return finish(scene, g, x, z, ry);
+}
+
+/** Le moulin effondre : tour de pierre arrachee, ailes au sol. */
+export function millRuin(scene: THREE.Scene, x: number, z: number): THREE.Group {
+  const r = rng(14);
+  const g = new THREE.Group();
+  g.add(cyl(1.5, 1.8, 2.0, C.stone, 9, 0, 1.0, 0));
+  for (let i = 0; i < 7; i++) {
+    const b = rbox(0.5 + r() * 0.4, 0.4, 0.4, r() < 0.5 ? C.stone : 0x85837b, 0.06, (r() - 0.5) * 4, 0.2, (r() - 0.5) * 4);
+    b.rotation.y = r() * 3;
+    g.add(b);
+  }
+  for (let i = 0; i < 2; i++) {
+    const wing = box(0.5, 0.06, 3.4, C.woodDark, 2.0 + i * 0.6, 0.06 + i * 0.07, -0.6 + i * 1.2);
+    wing.rotation.y = 0.5 + i * 0.9;
+    g.add(wing);
+  }
+  weeds(g, r, 8, 3.6, 2.0);
+  return finish(scene, g, x, z);
+}
+
+/** Le ponton : des pieux qui depassent de l'eau, deux planches flottantes. */
+export function dockRuin(scene: THREE.Scene, x: number, z: number): THREE.Group {
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) for (const sx of [-0.55, 0.55]) g.add(cyl(0.09, 0.09, 0.5 + (i % 2) * 0.3, 0x5e452c, 5, sx, 0.15, -1.2 + i * 1.3));
+  g.add(plank(1.2, C.wood, 0.3, 0.03, 0.4, 0.4), plank(1.0, C.woodDark, -0.4, 0.03, 1.6, 2.2));
   return finish(scene, g, x, z);
 }
 

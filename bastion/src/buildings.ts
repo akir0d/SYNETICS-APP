@@ -202,6 +202,49 @@ export function shelter(): Building {
   return { group: hidden(g, L.shelter.x, L.shelter.z, -0.5), glowMats: [winMat], live: [win] };
 }
 
+/** Le moulin de la ferme : il moud le ble et un four accole en fait du pain. */
+export function windmill(): Building {
+  const g = new THREE.Group();
+  g.add(cyl(1.35, 1.8, 4.2, 0xd8cfc0, 9, 0, 2.1, 0));
+  for (let i = 0; i < 4; i++) g.add(cyl(1.82 - i * 0.12, 1.82 - i * 0.12, 0.1, C.stone, 9, 0, 0.6 + i * 1.0, 0));
+  g.add(cone(1.6, 1.6, 0x8a4526, 9, 0, 5.0, 0));
+  g.add(rbox(0.8, 1.4, 0.1, C.woodDark, 0.04, 0, 0.7, 1.72), box(0.5, 0.5, 0.08, 0x2e3439, 0, 2.8, 1.5));
+  const hub = new THREE.Group();
+  hub.position.set(0, 4.0, 1.75);
+  for (let i = 0; i < 4; i++) {
+    const arm = group(box(0.12, 3.2, 0.08, C.woodDark, 0, 1.7, 0), box(0.55, 2.6, 0.03, 0xe8e0cc, 0.32, 1.9, 0.03));
+    arm.rotation.z = (i * Math.PI) / 2;
+    hub.add(arm);
+  }
+  hub.add(cyl(0.2, 0.2, 0.3, 0x3a3a3a, 8, 0, 0, 0));
+  (hub.children.at(-1) as THREE.Mesh).rotation.x = Math.PI / 2;
+  g.add(hub);
+  // Le four de brique, accole.
+  g.add(rbox(1.6, 1.1, 1.3, 0xa8553a, 0.1, 2.0, 0.55, 0.8), cyl(0.18, 0.18, 1.2, 0x6a3a2a, 6, 2.4, 1.6, 0.5));
+  const fireMat = uniqueMat(0xff8a2a, 0xff5a10);
+  const fire = mesh(new THREE.BoxGeometry(0.5, 0.35, 0.04), fireMat, 2.0, 0.45, 1.46);
+  g.add(fire);
+  g.add(at(crate(0.5, C.woodLight), -1.9, 0, 1.2), group(cyl(0.35, 0.4, 0.6, 0xd9b24a, 8, -2.2, 0.3, -0.4)));
+  return {
+    group: hidden(g, L.mill.x, L.mill.z),
+    glowMats: [fireMat],
+    live: [hub, fire],
+    anim: (dt, t, busy) => {
+      hub.rotation.z -= dt * (busy ? 1.6 : 0.25);
+      fireMat.emissiveIntensity = busy ? 1 + Math.sin(t * 18) * 0.3 : 0.2;
+    },
+  };
+}
+
+/** Le ponton de l'etang : on y peche. */
+export function dock(): Building {
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) for (const sx of [-0.6, 0.6]) g.add(cyl(0.09, 0.09, 0.6, 0x5e452c, 5, sx, 0.2, -1.2 + i * 1.3));
+  for (let i = 0; i < 11; i++) g.add(box(1.5, 0.06, 0.3, i % 2 ? C.wood : C.woodLight, 0, 0.07, -1.6 + i * 0.34));
+  g.add(at(crate(0.45), 0.45, 0.1, -1.4, 0.3), group(cyl(0.2, 0.2, 0.4, 0x5f7a8a, 8, -0.5, 0.3, -1.3)));
+  return { group: hidden(g, L.dock.x, L.dock.z) };
+}
+
 /** Le bus : epave rouillee au depart, il se refait une beaute a chaque etape. */
 export class Bus {
   readonly root = new THREE.Group();

@@ -39,7 +39,6 @@ export interface Section {
   /** Petit rebond quand une reparation fait changer d'etat. */
   pop: number;
   repair: { x: number; z: number };
-  ring: THREE.Mesh;
   label: HTMLElement;
   /** Rondins en vol vers ce troncon. */
   inflight: number;
@@ -247,20 +246,12 @@ export class Palisade {
     root.rotation.y = -f.ang;
     this.scene.add(root);
     const repair = { x: f.x + f.nx * 1.25, z: f.z + f.nz * 1.25 };
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.7, 0.9, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.85, depthWrite: false }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(repair.x, 0.05, repair.z);
-    ring.visible = false;
-    this.scene.add(ring);
     const label = document.createElement('div');
     label.className = 'wall-label off';
     this.labels.appendChild(label);
     const s: Section = {
       id: this.sections.length, kind, x: f.x, z: f.z, nx: f.nx, nz: f.nz, len: f.len,
-      seg: { x1, z1, x2, z2 }, hp: max, max, root, states: [], shake: 0, pop: 0, repair, ring, label, inflight: 0, enabled: true,
+      seg: { x1, z1, x2, z2 }, hp: max, max, root, states: [], shake: 0, pop: 0, repair, label, inflight: 0, enabled: true,
     };
     this.sections.push(s);
     return s;
@@ -395,12 +386,43 @@ export class Palisade {
         g.left.rotation.y = -g.angle * g.swing;
         g.right.rotation.y = g.angle * g.swing;
       }
-      const damaged = s.enabled && s.hp < s.max;
-      s.ring.visible = damaged;
-      if (damaged) {
-        const k = 1 + Math.sin(time * 4 + s.id) * 0.06;
-        s.ring.scale.set(k, k, k);
-      }
+    }
+  }
+
+  /** Distance d'un point au troncon. */
+  distanceTo(s: Section, x: number, z: number): number {
+    const { x1, z1, x2, z2 } = s.seg;
+    const vx = x2 - x1;
+    const vz = z2 - z1;
+    const t = Math.max(0, Math.min(1, ((x - x1) * vx + (z - z1) * vz) / (vx * vx + vz * vz)));
+    return Math.hypot(x - (x1 + vx * t), z - (z1 + vz * t));
+  }
+
+  /**
+   * Le troncon abime le plus proche qu'on peut reparer d'ici : il suffit de longer le mur,
+   * d'un cote ou de l'autre. Plus de cercle au sol, rien d'inaccessible.
+   */
+  repairable(x: number, z: number, reach = 1.7): Section | null {
+    let best: Section | null = null;
+    let bd = reach;
+    for (const s of this.sections) {
+      if (!s.enabled || s.hp + s.inflight * LOG_HP >= s.max) continue;
+      const d = this.distanceTo(s, x, z);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+
+  /** Palissade renforcee (etabli) : chaque niveau ajoute la moitie de la solidite de base. */
+  setLevel(lvl: number): void {
+    for (const s of this.sections) {
+      const base = s.kind === 'gate' ? GATE_HP : WALL_HP;
+      const max = Math.round(base * (1 + 0.5 * lvl));
+      if (max === s.max) continue;
+      const k = s.hp / s.max;
+      s.max = max;
+      s.hp = Math.round(max * k);
+      this.refresh(s);
     }
   }
 

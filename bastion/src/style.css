@@ -228,3 +228,14 @@ body.night .cbar i { background: linear-gradient(90deg, #8fb0ff, #c39bff); }
 .bin-label.empty { opacity: .5; }
 body.night .bin-label { background: var(--night-bg); color: var(--night-ink); border-color: var(--night-line); }
 body.night .bin-label b { color: #ffd27a; }
+
+/* Reserve : ce que les survivants y ont depose. */
+.chest-label {
+  display: flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 12px; white-space: nowrap;
+  background: var(--cream); border: 2px solid #6f9a3a; box-shadow: 0 2px 0 #4a6a22; font-size: 13px;
+}
+.chest-label i { font-style: normal; font-weight: 800; font-size: 11px; color: #4a6a22; text-transform: uppercase; }
+.chest-label b { font-weight: 800; margin-left: 1px; }
+.chest-label em { font-style: normal; opacity: .6; }
+.wall-label.active { transform-origin: bottom center; animation: bump .6s infinite; }
+body.night .chest-label { background: var(--night-bg); color: var(--night-ink); border-color: var(--night-line); }

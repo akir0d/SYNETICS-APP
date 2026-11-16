@@ -3,11 +3,11 @@
 
 import * as THREE from 'three';
 import { C, at, blob, box, cone, cyl, glow, group, mat, rbox, rng, shadow, uniqueMat } from './kit';
-import { CAMP, L, ROAD_Z, insideCamp } from './layout';
+import { CAMP, FARM, L, POND, ROAD_Z, STATION, insideCamp } from './layout';
 import type { Circle, Segment } from './physics';
 import {
-  crate, deadTree, drum, floodlight, gasBottle, hedgehog, jerrycan, paintedBoard, sandbags, sheet, tarp,
-  tireStack, wreck,
+  crate, deadTree, drum, floodlight, gasBottle, hedgehog, jerrycan, jersey, paintedBoard, roofSheet, sandbags, sheet,
+  tire, tireStack, wreck,
 } from './props';
 
 export interface NightLight { light: THREE.Light; night: number; day: number; flicker?: number }
@@ -22,6 +22,8 @@ export interface World {
   bulbMats: THREE.MeshLambertMaterial[];
   keep: Set<THREE.Object3D>;
   bounds: number;
+  /** Passages bloques tant qu'on ne les a pas degages (ou construits). */
+  locks: { west: Segment; east: Segment; dock: Segment };
 }
 
 /** Zones a garder libres de decor aleatoire (arbres, rochers). */
@@ -33,14 +35,18 @@ function reserved(x: number, z: number): boolean {
   const pylon = Math.hypot(x + 21, z + 4) < 4;
   const south = z > 11 && z < 30 && x > -30 && x < 30;
   const scrap = L.scrap.some((s) => Math.hypot(x - s.x, z - s.z) < 5);
-  return nearCamp || onRoad || forest || ruins || pylon || south || scrap;
+  const farm = x > FARM.minX - 2 && x < FARM.maxX + 2 && z > FARM.minZ - 2 && z < FARM.maxZ + 3;
+  const station = x > STATION.minX - 2 && x < STATION.maxX + 2 && z > STATION.minZ - 2 && z < STATION.maxZ + 2;
+  const pond = Math.hypot((x - POND.x) / (POND.rx + 3), (z - POND.z) / (POND.rz + 3)) < 1;
+  return nearCamp || onRoad || forest || ruins || pylon || south || scrap || farm || station || pond;
 }
 
 export function buildWorld(scene: THREE.Scene): World {
   const w: World = {
     walls: [], solids: [], swayers: [], flames: [], nightLights: [], glows: [], bulbMats: [],
     keep: new Set(),
-    bounds: 44,
+    bounds: 54,
+    locks: { west: { x1: 0, z1: 0, x2: 0, z2: 0 }, east: { x1: 0, z1: 0, x2: 0, z2: 0 }, dock: { x1: 0, z1: 0, x2: 0, z2: 0 } },
   };
   const r = rng(7);
 
@@ -58,6 +64,9 @@ export function buildWorld(scene: THREE.Scene): World {
   w.solids.push({ x: -18, z: 5, r: 1.6 }, { x: -18 + Math.cos(0.6) * 1.2, z: 5 - Math.sin(0.6) * 1.2, r: 1.1 }, { x: -18 - Math.cos(0.6) * 1.2, z: 5 + Math.sin(0.6) * 1.2, r: 1.1 });
   solarRig(scene, w, -10.6, -9.6);
   waterTank(scene, w, 11.6, -9.7);
+  farmZone(scene, w, r);
+  stationZone(scene, w, r);
+  pondZone(scene, w, r);
   surroundings(scene, w, r);
   return w;
 }
@@ -120,7 +129,9 @@ function ground(scene: THREE.Scene, r: () => number): void {
     // Pas d'herbe dans le camp, sauf des mauvaises herbes au pied de la palissade.
     const inCamp = insideCamp(x, z);
     const atWall = inCamp && (x < CAMP.minX + 0.7 || x > CAMP.maxX - 0.7 || z < CAMP.minZ + 0.7);
-    if ((inCamp && !atWall) || (onRoad(z) && r() < 0.85)) continue;
+    const wet = Math.hypot((x - POND.x) / (POND.rx + 0.4), (z - POND.z) / (POND.rz + 0.4)) < 1;
+    const paved = Math.abs(x - 35) < 9.5 && Math.abs(z - 12) < 6.5;
+    if ((inCamp && !atWall) || wet || paved || (onRoad(z) && r() < 0.85)) continue;
     e.set((r() - 0.5) * 0.5, r() * 6, (r() - 0.5) * 0.5);
     q.setFromEuler(e);
     const s = 0.6 + r() * 0.9;
@@ -359,13 +370,6 @@ function campProps(scene: THREE.Scene, w: World): void {
   w.solids.push({ x: 3.4, z: -10.2, r: 0.55 });
   // Sud : sacs de sable aux montants de la porte, interieur.
   put(sandbags(1.0, 2, 9), -5.6, 10.3, 0, 0.5);
-  // Bache tendue au coin sud-est, au-dessus de rien d'utile.
-  const lean = group(
-    cyl(0.05, 0.05, 2.2, C.woodDark, 5, -0.9, 1.1, 0.6), cyl(0.05, 0.05, 2.2, C.woodDark, 5, 0.9, 1.1, 0.6),
-    at(tarp(2.2, 1.6, 0x5f7a8a, 0.5), 0, 1.75, 0.1),
-    at(crate(0.5), -0.4, 0, -0.1), at(drum(0x3f6a8a), 0.45, 0, -0.2),
-  );
-  put(lean, 11.9, 9.8, Math.PI, 0.9);
 }
 
 function rainCollector(scene: THREE.Scene, w: World, x: number, z: number): void {
@@ -520,4 +524,159 @@ function pylon(scene: THREE.Scene, w: World, x: number, z: number): void {
   }
   scene.add(shadow(at(g, x, 0, z, 0.4)));
   w.solids.push({ x, z, r: 1.3 });
+}
+
+// ---------------------------------------------------------------- zones de la vallee
+
+function railFence(scene: THREE.Scene, w: World, x1: number, z1: number, x2: number, z2: number, metal: boolean): void {
+  const len = Math.hypot(x2 - x1, z2 - z1);
+  const n = Math.max(1, Math.round(len / 2.2));
+  const g = new THREE.Group();
+  const postC = metal ? 0x6f7479 : C.woodDark;
+  const railC = metal ? 0x8f969c : C.wood;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    g.add(cyl(0.07, 0.08, 1.3, postC, 5, x1 + (x2 - x1) * t, 0.65, z1 + (z2 - z1) * t));
+  }
+  const ang = Math.atan2(z2 - z1, x2 - x1);
+  for (const y of metal ? [0.5, 1.0, 1.25] : [0.45, 0.95]) {
+    const rail = box(len, metal ? 0.05 : 0.1, metal ? 0.05 : 0.06, railC, (x1 + x2) / 2, y, (z1 + z2) / 2);
+    rail.rotation.y = -ang;
+    g.add(rail);
+  }
+  if (metal) {
+    // Grillage : un panneau semi-ajoure figure par des montants fins.
+    for (let i = 0; i < n * 4; i++) {
+      const t = (i + 0.5) / (n * 4);
+      g.add(box(0.03, 1.1, 0.03, 0x9aa0a3, x1 + (x2 - x1) * t, 0.65, z1 + (z2 - z1) * t));
+    }
+  }
+  scene.add(shadow(g));
+  w.walls.push({ x1, z1, x2, z2 });
+}
+
+/** La ferme abandonnee, a l'ouest : enclos, maison effondree, meules, tracteur. */
+function farmZone(scene: THREE.Scene, w: World, r: () => number): void {
+  const F = FARM;
+  railFence(scene, w, F.minX, F.minZ, F.maxX, F.minZ, false);
+  railFence(scene, w, F.minX, F.minZ, F.minX, F.maxZ, false);
+  railFence(scene, w, F.maxX, F.minZ, F.maxX, F.maxZ, false);
+  railFence(scene, w, F.minX, F.maxZ, F.gateX - F.gate, F.maxZ, false);
+  railFence(scene, w, F.gateX + F.gate, F.maxZ, F.maxX, F.maxZ, false);
+  w.locks.west = { x1: F.gateX - F.gate, z1: F.maxZ, x2: F.gateX + F.gate, z2: F.maxZ };
+  w.walls.push(w.locks.west);
+  patch(scene, -35, 2, 12, 10, C.dirt, 0.012, r, 0.15);
+  // Maison de ferme effondree.
+  const hx = L.farmhouse.x;
+  const hz = L.farmhouse.z;
+  const house = group(
+    box(5, 2.6, 0.3, 0xd8cfc0, 0, 1.3, -1.8), box(0.3, 2.6, 3.6, 0xd8cfc0, -2.5, 1.3, 0), box(0.3, 1.4, 3.6, 0xd8cfc0, 2.5, 0.7, 0),
+    box(2.4, 1.8, 0.3, 0xd8cfc0, -1.3, 0.9, 1.8),
+  );
+  const roof = roofSheet(5.4, 2.4, 0x8a4526);
+  roof.position.set(0.4, 1.6, -0.4);
+  roof.rotation.set(0.5, 0, -0.35);
+  house.add(roof, box(0.8, 1.3, 0.05, 0x2e3439, -1.0, 1.4, 1.96));
+  scene.add(shadow(at(house, hx, 0, hz)));
+  w.walls.push({ x1: hx - 2.5, z1: hz - 1.8, x2: hx + 2.5, z2: hz - 1.8 }, { x1: hx - 2.5, z1: hz - 1.8, x2: hx - 2.5, z2: hz + 1.8 },
+    { x1: hx + 2.5, z1: hz - 1.8, x2: hx + 2.5, z2: hz + 1.8 }, { x1: hx - 2.5, z1: hz + 1.8, x2: hx, z2: hz + 1.8 });
+  // Meules de foin, epouvantail, abreuvoir, tracteur rouille.
+  for (const [x, z] of [[-45, -6.5], [-44, -4.6], [-46, 0.5]] as const) {
+    const hay = cyl(0.8, 0.8, 1.1, 0xd9b24a, 10, 0, 0.8, 0);
+    hay.rotation.z = Math.PI / 2;
+    scene.add(shadow(at(group(hay), x, 0, z, r() * 3)));
+    w.solids.push({ x, z, r: 0.9 });
+  }
+  const crow = group(cyl(0.05, 0.05, 2.0, C.woodDark, 5, 0, 1.0, 0), box(1.4, 0.06, 0.06, C.woodDark, 0, 1.5, 0),
+    rbox(0.5, 0.6, 0.3, 0x6f7a4a, 0.08, 0, 1.4, 0), blob(0.22, 0xd9b24a, 0, 1.9, 0), cone(0.32, 0.3, 0x8a6a3a, 8, 0, 2.15, 0));
+  scene.add(shadow(at(crow, -33.5, 0, 10.5, 0.4)));
+  const tractor = group(rbox(2.2, 1.0, 1.3, 0xa5603a, 0.12, 0, 0.9, 0), rbox(1.0, 1.0, 1.1, 0x8a4526, 0.1, -0.5, 1.8, 0),
+    at(tire(), -0.6, 0.7, 0.75), at(tire(), -0.6, 0.7, -0.75), at(tire(), 0.8, 0.4, 0.7), at(tire(), 0.8, 0.4, -0.7));
+  tractor.children.slice(2).forEach((t) => { t.rotation.set(0, 0, 0); t.scale.setScalar(t.position.y > 0.5 ? 1.6 : 1); });
+  scene.add(shadow(at(tractor, -25.2, 0, 11.2, 0.3)));
+  w.solids.push({ x: -25.2, z: 11.2, r: 1.4 });
+  scene.add(shadow(at(group(box(1.6, 0.5, 0.6, 0x7d8790, 0, 0.25, 0), box(1.4, 0.05, 0.45, 0x4f8fa0, 0, 0.45, 0)), -38.5, 0, 9.5, 0.2)));
+  w.solids.push({ x: -38.5, z: 9.5, r: 0.8 });
+}
+
+/** La station-service, a l'est : auvent, pompes, boutique pillee. */
+function stationZone(scene: THREE.Scene, w: World, r: () => number): void {
+  const S = STATION;
+  railFence(scene, w, S.minX, S.minZ, S.maxX, S.minZ, true);
+  railFence(scene, w, S.minX, S.maxZ, S.maxX, S.maxZ, true);
+  railFence(scene, w, S.maxX, S.minZ, S.maxX, S.maxZ, true);
+  railFence(scene, w, S.minX, S.minZ, S.minX, S.gateZ - S.gate, true);
+  railFence(scene, w, S.minX, S.gateZ + S.gate, S.minX, S.maxZ, true);
+  w.locks.east = { x1: S.minX, z1: S.gateZ - S.gate, x2: S.minX, z2: S.gateZ + S.gate };
+  w.walls.push(w.locks.east);
+  for (const z of [17, 19, 21]) scene.add(shadow(at(jersey(1.8, true), S.maxX - 0.6, 0, z, Math.PI / 2)));
+  patch(scene, 35, 12, 9, 6, 0x8a8a84, 0.013, r, 0.08);
+  // L'auvent et ses piliers.
+  const { x, z } = L.canopy;
+  const canopy = group(box(7.2, 0.3, 4.2, C.white, 0, 3.7, 0), box(7.25, 0.32, 0.2, 0xc9412f, 0, 3.7, 2.1), box(7.25, 0.32, 0.2, 0xc9412f, 0, 3.7, -2.1));
+  for (const sx of [-3, 3]) canopy.add(box(0.3, 3.6, 0.3, C.concrete, sx, 1.8, 0));
+  const torn = box(2.2, 0.05, 1.4, C.white, 2.6, 2.9, 1.6);
+  torn.rotation.set(0.5, 0.2, 0.4);
+  canopy.add(torn);
+  scene.add(shadow(at(canopy, x, 0, z)));
+  w.solids.push({ x: x - 3, z, r: 0.35 }, { x: x + 3, z, r: 0.35 });
+  // La boutique.
+  const { x: bx, z: bz } = L.shop;
+  const shop = group(
+    box(6, 3, 0.3, C.concrete, 0, 1.5, -2), box(0.3, 3, 4, C.concrete, -3, 1.5, 0), box(0.3, 3, 4, C.concrete, 3, 1.5, 0),
+    box(2.2, 3, 0.3, C.concrete, -1.9, 1.5, 2), box(2.2, 3, 0.3, C.concrete, 1.9, 1.5, 2), box(6.2, 0.3, 4.4, C.concreteDark, 0, 3.1, 0),
+    box(3.4, 0.7, 0.1, 0xc9412f, 0, 3.6, 2.2), box(1.6, 1.2, 0.05, 0x2e3439, -1.9, 1.6, 2.17),
+  );
+  scene.add(shadow(at(shop, bx, 0, bz)));
+  w.walls.push({ x1: bx - 3, z1: bz - 2, x2: bx + 3, z2: bz - 2 }, { x1: bx - 3, z1: bz - 2, x2: bx - 3, z2: bz + 2 },
+    { x1: bx + 3, z1: bz - 2, x2: bx + 3, z2: bz + 2 }, { x1: bx - 3, z1: bz + 2, x2: bx - 0.8, z2: bz + 2 }, { x1: bx + 0.8, z1: bz + 2, x2: bx + 3, z2: bz + 2 });
+  // Panneau de prix sur un mat, futs, pneus.
+  scene.add(shadow(at(group(box(0.25, 5, 0.25, 0x6f7479, 0, 2.5, 0), box(1.6, 1.4, 0.2, C.white, 0, 5, 0), box(1.6, 0.3, 0.22, 0xc9412f, 0, 5.5, 0)), 27.5, 0, 8)));
+  w.solids.push({ x: 27.5, z: 8, r: 0.3 });
+  for (const [px, pz] of [[38.5, 15.5], [39.2, 16.1], [46.5, 7.5]] as const) {
+    scene.add(shadow(at(drum(0x3f6a8a), px, 0, pz)));
+    w.solids.push({ x: px, z: pz, r: 0.4 });
+  }
+  scene.add(shadow(at(tireStack(3, 17), 47.5, 0, 28)));
+}
+
+/** L'etang au sud de la route : eau, roseaux, une barque coulee. */
+function pondZone(scene: THREE.Scene, w: World, r: () => number): void {
+  const P = POND;
+  const water = new THREE.Mesh(new THREE.CircleGeometry(1, 40), mat(0x4f8090, { flat: false }));
+  water.rotation.x = -Math.PI / 2;
+  water.scale.set(P.rx, P.rz, 1);
+  water.position.set(P.x, 0.02, P.z);
+  water.receiveShadow = true;
+  scene.add(water);
+  patch(scene, P.x, P.z, P.rx + 1.4, P.rz + 1.2, 0x8a7a55, 0.011, r, 0.12);
+  const N = 24;
+  const pt = (k: number) => {
+    const a = (-90 - 7.5 + k * 15) * (Math.PI / 180);
+    return { x: P.x + Math.cos(a) * (P.rx + 0.2), z: P.z + Math.sin(a) * (P.rz + 0.2) };
+  };
+  for (let k = 0; k < N; k++) {
+    const a = pt(k);
+    const b = pt(k + 1);
+    const seg = { x1: a.x, z1: a.z, x2: b.x, z2: b.z };
+    if (k === 0) w.locks.dock = seg;
+    w.walls.push(seg);
+  }
+  for (let i = 0; i < 70; i++) {
+    const a = r() * Math.PI * 2;
+    const k = 0.95 + r() * 0.2;
+    const x = P.x + Math.cos(a) * P.rx * k;
+    const z = P.z + Math.sin(a) * P.rz * k;
+    if (Math.abs(x - P.x) < 2 && z < P.z) continue;
+    scene.add(shadow(group(cone(0.05, 0.9 + r() * 0.6, r() < 0.5 ? 0x6f8a4a : 0x8a9a5a, 4, x, 0.5, z))));
+  }
+  for (let i = 0; i < 8; i++) {
+    const a = r() * Math.PI * 2;
+    const b = blob(0.4 + r() * 0.4, r() < 0.5 ? C.stone : 0x85837b, P.x + Math.cos(a) * (P.rx + 0.8), 0.2, P.z + Math.sin(a) * (P.rz + 0.6));
+    b.scale.y = 0.6;
+    scene.add(b);
+  }
+  const boat = group(rbox(2.2, 0.4, 0.9, 0x6e5034, 0.15, 0, 0.1, 0), box(0.9, 0.06, 0.85, 0x5e452c, 0.2, 0.25, 0));
+  boat.rotation.z = 0.25;
+  scene.add(shadow(at(boat, P.x + 5.2, 0, P.z + 1.4, 0.7)));
 }

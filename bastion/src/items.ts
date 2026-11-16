@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { C, blob, box, cone, cyl, group, rbox, shadow, sphere } from './kit';
 
-export type ItemType = 'carrot' | 'tomato' | 'log' | 'plank' | 'soup' | 'scrap';
+export type ItemType = 'carrot' | 'tomato' | 'log' | 'plank' | 'soup' | 'scrap' | 'wheat' | 'bread' | 'fish' | 'fuel';
 
 export interface ItemDef {
   name: string;
@@ -22,6 +22,10 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   soup: { name: 'Soupe', icon: '🍲', price: 12, h: 0.28 },
   // Les survivants de passage la rachetent pour bricoler : elle se vend a l'etal.
   scrap: { name: 'Ferraille', icon: '🔩', price: 5, h: 0.22 },
+  wheat: { name: 'Blé', icon: '🌾', price: 3, h: 0.22 },
+  bread: { name: 'Pain', icon: '🍞', price: 16, h: 0.2 },
+  fish: { name: 'Poisson', icon: '🐟', price: 8, h: 0.16 },
+  fuel: { name: 'Carburant', icon: '⛽', price: 10, h: 0.5 },
 };
 
 export function itemMesh(t: ItemType): THREE.Group {
@@ -76,6 +80,36 @@ export function itemMesh(t: ItemType): THREE.Group {
       g = group(plate, pipe, gear);
       break;
     }
+    case 'wheat': {
+      // Une gerbe liee : tiges dorees et epis.
+      g = new THREE.Group();
+      for (let i = 0; i < 5; i++) {
+        const s = cyl(0.025, 0.025, 0.7, 0xd9b24a, 4, (i - 2) * 0.03, 0.1, (i % 2) * 0.04);
+        s.rotation.z = Math.PI / 2 + (i - 2) * 0.08;
+        g.add(s);
+        const ear = cone(0.05, 0.18, 0xe8c25a, 5, 0.42, 0.1 + (i - 2) * 0.03, (i % 2) * 0.04);
+        ear.rotation.z = -Math.PI / 2;
+        g.add(ear);
+      }
+      const tie = cyl(0.08, 0.08, 0.06, 0x8a5a30, 8, 0, 0.1, 0.02);
+      tie.rotation.z = Math.PI / 2;
+      g.add(tie);
+      break;
+    }
+    case 'bread':
+      g = group(rbox(0.5, 0.2, 0.26, 0xc98a42, 0.1, 0, 0.11, 0), box(0.06, 0.03, 0.2, 0xe8b870, -0.12, 0.215, 0), box(0.06, 0.03, 0.2, 0xe8b870, 0.08, 0.215, 0));
+      break;
+    case 'fish': {
+      const body = sphere(0.14, 0x7a9ab0, 0, 0.09, 0, 8);
+      body.scale.set(2.0, 0.7, 0.8);
+      const tail = cone(0.1, 0.18, 0x5f7f96, 4, -0.34, 0.09, 0);
+      tail.rotation.z = Math.PI / 2;
+      g = group(body, tail, sphere(0.025, 0x1a1a1a, 0.2, 0.12, 0.08, 5));
+      break;
+    }
+    case 'fuel':
+      g = group(rbox(0.34, 0.46, 0.18, 0xc9412f, 0.04, 0, 0.23, 0), box(0.14, 0.07, 0.07, 0x8a2a20, 0.07, 0.5, 0), box(0.2, 0.04, 0.2, 0x8a2a20, -0.05, 0.42, 0));
+      break;
   }
   return shadow(g);
 }

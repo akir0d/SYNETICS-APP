@@ -122,7 +122,7 @@ export class Converter {
 // ---------------------------------------------------------------- etal et clients
 
 /** L'ordre des bacs sur le comptoir, de gauche a droite. */
-export const BIN_TYPES: ItemType[] = ['carrot', 'tomato', 'soup', 'log', 'plank', 'scrap'];
+export const BIN_TYPES: ItemType[] = ['carrot', 'tomato', 'wheat', 'soup', 'bread', 'fish', 'log', 'plank', 'scrap', 'fuel'];
 /** Contenance d'un bac : on peut deposer enormement avant qu'il deborde. */
 export const BIN_CAP = 99;
 /** Objets visibles dans un bac (le reste est compte, pas dessine). */
@@ -158,9 +158,9 @@ export class Bins {
         const o = itemMesh(type);
         const layer = Math.floor(k / 4);
         const j = k % 4;
-        o.position.set(((j % 2) - 0.5) * w * 0.45, 0.08 + layer * 0.17, (Math.floor(j / 2) - 0.5) * 0.36);
-        o.rotation.y = (k * 1.7) % 3;
-        o.scale.setScalar(1.15);
+        o.position.set(((j % 2) - 0.5) * w * 0.42, 0.08 + layer * 0.17, (Math.floor(j / 2) - 0.5) * 0.36);
+        o.rotation.y = Math.PI / 2 + ((k * 1.7) % 1) - 0.5;
+        o.scale.setScalar(0.95);
         o.visible = false;
         root.add(o);
         items.push(o);
@@ -306,12 +306,15 @@ export class Market {
     return this.customers.filter((c) => c.lane === lane && c.state !== 'leave');
   }
 
+  /** La route de l'est est-elle degagee ? Sinon, les clients n'arrivent que de l'ouest. */
+  eastOpen = false;
+
   private spawn(products: ItemType[]): void {
     // Le client rejoint la file la plus courte.
     const lens = L.lanes.map((_, i) => this.waitingIn(i).length);
     const lane = lens[0]! <= lens[1]! ? 0 : 1;
     if (lens[lane]! >= L.lanes[lane]!.length) return;
-    const side = Math.random() < 0.5 ? -1 : 1;
+    const side = this.eastOpen && Math.random() < 0.5 ? 1 : -1;
     const look = LOOKS[this.lookIdx++ % LOOKS.length]!;
     const h = new Human(look);
     h.root.position.set(side * 36, 0, ROAD_Z + 0.8);
@@ -420,9 +423,96 @@ export class Market {
     if (c.state === 'leave') return;
     c.state = 'leave';
     // Chaque file repart de son cote, sans traverser l'autre.
-    const side = c.lane === 0 ? -1 : 1;
-    const x = L.lanes[c.lane]![0]!.x + side * 0.9;
+    const side = c.lane === 0 || !this.eastOpen ? -1 : 1;
+    const x = L.lanes[c.lane]![0]!.x + (c.lane === 0 ? -0.9 : 0.9);
     c.path = [new THREE.Vector3(x, 0, ROAD_Z - 0.6), new THREE.Vector3(side * 40, 0, ROAD_Z - 0.6)];
+  }
+}
+
+// ---------------------------------------------------------------- reserve
+
+/**
+ * La reserve : un grand coffre ou les survivants deposent tout ce qu'ils recoltent.
+ * Le joueur s'y sert ; l'etiquette dit ce qu'il y a dedans.
+ */
+export class Reserve {
+  readonly counts = new Map<ItemType, number>();
+  readonly root = new THREE.Group();
+  readonly label: HTMLElement;
+  readonly ring: THREE.Mesh;
+  /** Ou se tenir pour se servir (devant le coffre). */
+  readonly zone: { x: number; z: number };
+  private pop = 0;
+  readonly cap = 240;
+
+  constructor(scene: THREE.Scene, labels: HTMLElement) {
+    const { x, z } = L.chest;
+    const lid = rbox(1.7, 0.16, 1.05, C.woodDark, 0.04, 0, 0, -0.5);
+    const lidG = new THREE.Group();
+    lidG.add(lid);
+    lidG.position.set(0, 0.92, -0.5);
+    lid.position.z = 0.5;
+    lidG.rotation.x = -1.1;
+    this.root.add(
+      rbox(1.7, 0.85, 1.05, C.wood, 0.05, 0, 0.45, 0),
+      box(1.74, 0.08, 1.09, 0x55595c, 0, 0.25, 0), box(1.74, 0.08, 1.09, 0x55595c, 0, 0.7, 0),
+      box(1.55, 0.05, 0.9, 0x3a2a1a, 0, 0.86, 0),
+      lidG,
+    );
+    shadow(this.root);
+    this.root.position.set(x, 0, z);
+    scene.add(this.root);
+    this.zone = { x, z: z + 1.45 };
+    this.ring = zoneRing(scene, this.zone.x, this.zone.z, 0.95, 0x9fd36a);
+    this.label = document.createElement('div');
+    this.label.className = 'chest-label';
+    labels.appendChild(this.label);
+    this.refresh();
+  }
+
+  get total(): number {
+    let n = 0;
+    for (const v of this.counts.values()) n += v;
+    return n;
+  }
+
+  get full(): boolean {
+    return this.total >= this.cap;
+  }
+
+  add(t: ItemType): void {
+    this.counts.set(t, (this.counts.get(t) ?? 0) + 1);
+    this.pop = 1;
+    this.refresh();
+  }
+
+  /** Prend un objet (le type le plus abondant d'abord). */
+  take(accept: (t: ItemType) => boolean = () => true): ItemType | null {
+    let best: ItemType | null = null;
+    let bn = 0;
+    for (const [t, n] of this.counts) if (n > bn && accept(t)) { bn = n; best = t; }
+    if (!best) return null;
+    this.counts.set(best, bn - 1);
+    this.refresh();
+    return best;
+  }
+
+  topWorld(): THREE.Vector3 {
+    return new THREE.Vector3(L.chest.x, 1.0, L.chest.z);
+  }
+
+  private refresh(): void {
+    const parts = [...this.counts].filter(([, n]) => n > 0).map(([t, n]) => `<span>${ITEMS[t].icon}<b>${n}</b></span>`);
+    this.label.innerHTML = `<i>Réserve</i>${parts.length ? parts.join('') : '<em>vide</em>'}`;
+  }
+
+  update(dt: number, time: number): void {
+    if (this.pop > 0) {
+      this.pop = Math.max(0, this.pop - dt * 5);
+      this.root.scale.setScalar(1 + Math.sin(this.pop * Math.PI) * 0.06);
+    }
+    const s = 1 + Math.sin(time * 3) * 0.03;
+    this.ring.scale.set(s, s, s);
   }
 }
 

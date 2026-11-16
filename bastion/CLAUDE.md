@@ -25,3 +25,13 @@ Dans `android/app/build.gradle` (`versionName` et `versionCode`) :
 ## Icône
 
 Source unique : `design/icon.svg`. `npm run icons` régénère toutes les icônes Android.
+
+## Monétisation
+
+- Modèle : pubs récompensées (toujours au choix du joueur) + achats intégrés.
+- `src/monetize.ts` est le seul point de contact : `showRewarded()` et `purchase()`. Ils sont
+  **simulés** (`SIMULATED = true`) tant qu'AdMob et Google Play Billing ne sont pas branchés ;
+  la boutique l'affiche au joueur. Ne jamais présenter un achat simulé comme réel.
+- Méta (quêtes du jour, coffre toutes les 4 h, boosts, niveaux de bâtiments) : `src/meta.ts`.
+- Les tests de jeu sont faits par le propriétaire : vérifier la compilation (`npx tsc --noEmit`),
+  ne pas lancer de serveur ni de navigateur de test.

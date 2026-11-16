@@ -91,6 +91,18 @@ export interface Save {
   playTime: number;
   lastSeen: number;
   muted: boolean;
+  // ---- meta et boutique
+  gems: number;
+  /** Achats uniques deja faits (sans pub, pack de depart). */
+  owned: string[];
+  /** Niveaux des batiments (meta.ts, LEVELS). */
+  lv: Record<string, number>;
+  /** Secondes restantes de chaque boost. */
+  boosts: Record<string, number>;
+  /** Date (ms) a partir de laquelle le coffre gratuit est pret. */
+  chestAt: number;
+  quests: { key: string; list: { id: string; base: number; goal: number; claimed: boolean }[] };
+  gemAds: { key: string; n: number };
 }
 
 /** Nouvelle cle : la vallee est un nouveau niveau, l'ancienne partie du camp n'est pas reprise. */
@@ -103,6 +115,7 @@ export function freshSave(): Save {
     stats: { harvested: 0, shelved: 0, cashed: 0, logs: 0, planks: 0, scrap: 0, sold: 0, earned: 0, kills: 0, nights: 0, repairs: 0,
       soup: 0, chest: 0, wheat: 0, bread: 0, fish: 0, fuel: 0 },
     playTime: 0, lastSeen: Date.now(), muted: false,
+    gems: 0, owned: [], lv: {}, boosts: {}, chestAt: 0, quests: { key: '', list: [] }, gemAds: { key: '', n: 0 },
   };
 }
 
@@ -119,6 +132,11 @@ export function loadSave(): Save {
       paid: d.paid ?? {},
       built: Array.isArray(d.built) ? d.built : [],
       walls: Array.isArray(d.walls) ? d.walls : undefined,
+      owned: Array.isArray(d.owned) ? d.owned : [],
+      lv: { ...(d.lv ?? {}) },
+      boosts: { ...(d.boosts ?? {}) },
+      quests: d.quests && Array.isArray(d.quests.list) ? d.quests : base.quests,
+      gemAds: d.gemAds ?? base.gemAds,
     };
     return s;
   } catch {

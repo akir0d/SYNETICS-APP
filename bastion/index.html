@@ -13,11 +13,14 @@
       <div class="clock"><span class="ci">☀️</span><span class="ct">Jour 1</span><div class="cbar"><i></i></div></div>
       <div class="purse">
         <div class="money"><span class="coin"></span><b>0</b></div>
+        <div class="gems"><span>💎</span><b>0</b></div>
         <div class="bag"><span>🎒</span><b>0/8</b></div>
       </div>
     </header>
     <div class="objective"><span class="oi">🥕</span><span class="ot">Récolte des carottes</span></div>
     <button class="menu-btn" aria-label="Menu">⚙️</button>
+    <button class="shop-btn" aria-label="Boutique">🛒<i class="dot"></i></button>
+    <div class="boost-bar"></div>
     <div class="menu">
       <button class="m-sound">🔊 Son activé</button>
       <button class="m-reset">Recommencer le camp</button>
@@ -25,6 +28,15 @@
     <section class="sheet"><div class="sheet-body"></div></section>
     <div class="hint">Glisse le doigt pour marcher</div>
     <div class="joy"><div class="joy-knob"></div></div>
+    <section class="shop">
+      <div class="shop-card">
+        <div class="shop-head">
+          <div class="shop-tabs"><button data-tab="shop" class="on">🛒 Boutique</button><button data-tab="quests">📜 Quêtes<i class="dot"></i></button></div>
+          <button class="shop-close" aria-label="Fermer">✕</button>
+        </div>
+        <div class="shop-body"></div>
+      </div>
+    </section>
     <div class="toast"></div>
     <div class="modal"></div>
     <script type="module" src="/src/main.ts"></script>

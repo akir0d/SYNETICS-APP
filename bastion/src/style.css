@@ -239,3 +239,62 @@ body.night .bin-label b { color: #ffd27a; }
 .chest-label em { font-style: normal; opacity: .6; }
 .wall-label.active { transform-origin: bottom center; animation: bump .6s infinite; }
 body.night .chest-label { background: var(--night-bg); color: var(--night-ink); border-color: var(--night-line); }
+
+/* ---------------------------------------------------------------- boutique et meta */
+.gems {
+  display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 8px; border-radius: 20px; font-size: 17px; font-weight: 800;
+  background: var(--cream); border: 3px solid #5fa8c8; box-shadow: 0 3px 0 #3a7a96; min-width: 76px; justify-content: space-between;
+}
+.shop-btn {
+  position: fixed; z-index: 6; right: max(14px, var(--safe-right)); bottom: calc(84px + var(--safe-bottom));
+  width: 56px; height: 56px; border-radius: 50%; font-size: 26px;
+  background: var(--cream); border: 3px solid var(--wood); box-shadow: 0 4px 0 var(--wood-dark);
+}
+.shop-btn .dot, .shop-tabs .dot {
+  position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: #e0443a; border: 2px solid #fff; display: none;
+}
+.shop-btn.alert .dot, .shop-tabs .alert .dot { display: block; }
+.boost-bar {
+  position: fixed; z-index: 5; left: max(12px, var(--safe-left)); top: calc(118px + var(--safe-top));
+  display: flex; flex-direction: column; gap: 5px; pointer-events: none;
+}
+.boost-bar span {
+  padding: 2px 9px; border-radius: 12px; font-size: 13px; font-weight: 800; color: #fff;
+  background: linear-gradient(180deg, #8a5ad9, #6a3ab9); box-shadow: 0 2px 0 #4a2a89;
+}
+.shop { position: fixed; inset: 0; z-index: 15; display: none; align-items: flex-end; justify-content: center; background: rgba(30, 20, 5, .45); }
+.shop.show { display: flex; }
+.shop-card {
+  width: 100%; max-width: 520px; max-height: 86vh; display: flex; flex-direction: column;
+  background: var(--cream); border: 4px solid var(--wood); border-bottom: 0; border-radius: 22px 22px 0 0;
+  padding: 10px 12px calc(12px + var(--safe-bottom));
+}
+.shop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.shop-tabs { display: flex; gap: 6px; }
+.shop-tabs button {
+  position: relative; padding: 6px 12px; border-radius: 14px; font-size: 15px; font-weight: 800;
+  background: #f0dfbf; border: 2px solid var(--wood); color: #5a3a1a;
+}
+.shop-tabs button.on { background: var(--wood); color: #fff; }
+.shop-close { width: 36px; height: 36px; border-radius: 50%; font-size: 18px; font-weight: 800; background: #f0dfbf; border: 2px solid var(--wood); }
+.shop-body { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.shop-body h3 { margin: 10px 2px 6px; font-size: 14px; font-weight: 800; text-transform: uppercase; opacity: .65; }
+.shop-body .note { font-size: 12px; opacity: .65; margin: 8px 2px; }
+.btns { display: flex; gap: 6px; flex: none; }
+.btn.ad { background: linear-gradient(180deg, #8a5ad9, #6a3ab9); box-shadow: 0 4px 0 #4a2a89; }
+.btn.gem { background: linear-gradient(180deg, #5fb8d8, #3a8ab0); box-shadow: 0 4px 0 #2a6a86; }
+.btn.real { background: linear-gradient(180deg, #ffb84a, #e08a1a); box-shadow: 0 4px 0 #a05a00; }
+.btn.ghost { background: transparent; box-shadow: none; color: #5a3a1a; text-decoration: underline; margin-top: 6px; }
+.bar { height: 8px; border-radius: 5px; background: #e8d6b0; overflow: hidden; margin-top: 4px; }
+.bar i { display: block; height: 100%; background: linear-gradient(90deg, #6fd36a, #3aa83a); }
+.ad-layer { position: fixed; inset: 0; z-index: 40; display: none; place-items: center; padding: 16px; background: rgba(10, 8, 20, .82); }
+.ad-layer.show { display: grid; }
+.ad-card { width: 100%; max-width: 340px; text-align: center; padding: 18px; border-radius: 20px; background: var(--cream); border: 4px solid #fff; }
+.ad-card h3 { margin: 4px 0; font-size: 20px; }
+.ad-card p { margin: 6px 0; font-size: 14px; }
+.ad-card .muted { font-size: 12px; opacity: .7; }
+.ad-tag { display: inline-block; padding: 2px 10px; border-radius: 10px; background: #6a3ab9; color: #fff; font-size: 12px; font-weight: 800; }
+.ad-big { font-size: 56px; margin: 6px 0; }
+.ad-count { font-size: 34px; font-weight: 800; color: #6a3ab9; }
+.modal-card .btn.ad { display: block; width: 100%; padding: 11px; font-size: 17px; margin-top: 10px; }

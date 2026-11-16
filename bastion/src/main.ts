@@ -21,6 +21,11 @@ import {
 import { Bed, ChopTree, FIELD_D, FIELD_W, Pump, ScrapSource, plantForest } from './resources';
 import { Restorer } from './restore';
 import {
+  BOOSTS, BOOST_TIME, CHEST_EVERY, GEM_ADS_PER_DAY, LEVELS, MAX_LEVEL, QUESTS, levelCost, rollQuests, todayKey,
+  type BoostId, type LevelId,
+} from './meta';
+import { PRODUCTS, SIMULATED, purchase, showRewarded, type Product } from './monetize';
+import {
   bedRuin, benchRuin, dockRuin, fieldRuin, gateJunk, junkPile, kitchenRuin, millRuin, sawmillRuin, shelterRuin, towerRuin,
 } from './ruins';
 import { BIN_CAP, CoinDrops, Converter, Market, Reserve } from './stations';
@@ -178,6 +183,8 @@ const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySele
 const ui = {
   clockIcon: $('.clock .ci'), clockText: $('.clock .ct'), clockBar: $('.clock .cbar i'),
   money: $('.money b'), moneyPill: $('.money'), bag: $('.bag b'), bagPill: $('.bag'),
+  gems: $('.gems b'), gemsPill: $('.gems'), shop: $('.shop'), shopBody: $('.shop-body'), shopBtn: $('.shop-btn'),
+  boostBar: $('.boost-bar'),
   objective: $('.objective'), objIcon: $('.objective .oi'), objText: $('.objective .ot'),
   toast: $('.toast'), modal: $('.modal'), sheetBody: $('.sheet-body'),
   joy: $('.joy'), knob: $('.joy-knob'), hp: $('.hpbar'), hpFill: $('.hpbar i'),
@@ -519,7 +526,18 @@ function applyUpgrades(): void {
 
 let sheetOpen = false;
 function renderSheet(): void {
-  ui.sheetBody.innerHTML = `<h2>🔧 Établi</h2>` + UPGRADES.map((u) => {
+  const levels = LEVELS.filter((d) => !d.needs || isBuilt(d.needs)).map((d) => {
+    const lvl = lv(d.id);
+    const max = lvl >= MAX_LEVEL;
+    const cost = levelCost(d, lvl);
+    return `<div class="card">
+      <div class="card-icon">${d.icon}</div>
+      <div class="card-main"><div class="card-title">${d.name} <span class="lv">niv. ${lvl}/${MAX_LEVEL}</span></div>
+      <div class="card-desc">${d.effect(max ? lvl : lvl + 1)}</div></div>
+      <button class="btn ${!max && save.coins < cost ? 'poor' : ''}" data-lv="${d.id}" ${max ? 'disabled' : ''}>${max ? 'MAX' : `<span class="coin"></span>${cost}`}</button>
+    </div>`;
+  }).join('');
+  ui.sheetBody.innerHTML = `<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + UPGRADES.map((u) => {
     const lvl = save.up[u.id];
     const max = lvl >= u.costs.length;
     const cost = u.costs[lvl] ?? 0;
@@ -533,6 +551,27 @@ function renderSheet(): void {
 }
 
 ui.sheetBody.addEventListener('click', (e) => {
+  const lb = (e.target as HTMLElement).closest<HTMLElement>('[data-lv]');
+  if (lb) {
+    const d = LEVELS.find((x) => x.id === lb.dataset.lv)!;
+    const cost = levelCost(d, lv(d.id));
+    if (lv(d.id) >= MAX_LEVEL) return;
+    if (save.coins < cost) {
+      sfx.sfxNope();
+      lb.classList.remove('shake');
+      void lb.offsetWidth;
+      lb.classList.add('shake');
+      return;
+    }
+    save.coins -= cost;
+    save.lv[d.id] = lv(d.id) + 1;
+    sfx.sfxBuild();
+    buzz(30);
+    particles.burst(player.position.clone().setY(2), [0xffd84a, 0xffffff], 30, { speed: 4, up: 5, size: 0.14 });
+    renderSheet();
+    persist();
+    return;
+  }
   const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-up]');
   if (!btn) return;
   const id = btn.dataset.up as UpId;
@@ -574,6 +613,234 @@ function refreshSheetButtons(): void {
     const cost = UPGRADES.find((x) => x.id === id)!.costs[save.up[id]];
     b.classList.toggle('poor', cost !== undefined && save.coins < cost);
   });
+  ui.sheetBody.querySelectorAll<HTMLElement>('[data-lv]').forEach((b) => {
+    const d = LEVELS.find((x) => x.id === b.dataset.lv)!;
+    b.classList.toggle('poor', lv(d.id) < MAX_LEVEL && save.coins < levelCost(d, lv(d.id)));
+  });
+}
+
+// ---------------------------------------------------------------- meta : niveaux, boosts, quetes, boutique
+
+const lv = (id: LevelId) => save.lv[id] ?? 0;
+const owns = (id: string) => save.owned.includes(id);
+const boostOn = (id: BoostId) => (save.boosts[id] ?? 0) > 0;
+/** Ce que rapporte une vente : niveau de l'etal et boost « ventes x2 ». */
+const sellMul = () => (1 + 0.06 * lv('stall')) * (boostOn('sell') ? 2 : 1);
+
+/** Applique niveaux et boosts aux machines, cultures, reserve et au joueur (chaque image). */
+function applyMeta(dt: number): void {
+  for (const b of BOOSTS) if ((save.boosts[b.id] ?? 0) > 0) save.boosts[b.id] = Math.max(0, save.boosts[b.id]! - dt);
+  const grow = boostOn('grow') ? 2 : 1;
+  for (const b of beds) b.growMul = (1 + 0.12 * lv('crops')) * grow;
+  saw.speed = (1 + 0.15 * lv('saw')) * grow;
+  cook.speed = (1 + 0.15 * lv('cook')) * grow;
+  mill.speed = (1 + 0.15 * lv('mill')) * grow;
+  reserve.cap = 240 + 60 * lv('reserve');
+  player.speedMul = (1 + 0.12 * save.up.boots) * (boostOn('speed') ? 1.4 : 1);
+}
+
+function startBoost(id: BoostId): void {
+  save.boosts[id] = (save.boosts[id] ?? 0) + BOOST_TIME;
+  const b = BOOSTS.find((x) => x.id === id)!;
+  sfx.sfxObjective();
+  toast(`${b.icon} ${b.name} : 3 minutes !`);
+  persist();
+}
+
+/** Pieces qu'offre un coffre : de quoi avancer, a la mesure de la partie. */
+const chestCoins = () => 120 + 60 * save.day + 8 * save.obj;
+
+function gainGems(n: number): void {
+  save.gems += n;
+  bump(ui.gemsPill);
+  sfx.sfxCoin();
+}
+
+function ensureQuests(): void {
+  const key = todayKey();
+  if (save.quests.key === key) return;
+  save.quests = { key, list: rollQuests(key, save.obj, save.day, save.stats) };
+  if (save.gemAds.key !== key) save.gemAds = { key, n: 0 };
+}
+
+function questProgress(q: { id: string; base: number; goal: number }): number {
+  const def = QUESTS.find((d) => d.id === q.id)!;
+  return Math.min(q.goal, save.stats[def.stat] - q.base);
+}
+
+const chestReady = () => Date.now() >= save.chestAt;
+const questToClaim = () => save.quests.list.some((q) => !q.claimed && questProgress(q) >= q.goal);
+
+function fmtWait(ms: number): string {
+  const m = Math.ceil(ms / 60000);
+  return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
+}
+
+let shopTab: 'shop' | 'quests' = 'shop';
+let hudClock = 0;
+
+function renderMetaHud(): void {
+  hudClock -= 1;
+  if (hudClock > 0) return;
+  hudClock = 20;
+  ensureQuests();
+  const alert = chestReady() || questToClaim();
+  ui.shopBtn.classList.toggle('alert', alert);
+  ui.shop.querySelector('[data-tab="quests"]')!.classList.toggle('alert', questToClaim());
+  const html = BOOSTS.filter((b) => boostOn(b.id))
+    .map((b) => `<span>${b.icon} ${b.name} · ${Math.ceil(save.boosts[b.id]! / 60)} min</span>`).join('');
+  if (ui.boostBar.innerHTML !== html) ui.boostBar.innerHTML = html;
+  if (ui.shop.classList.contains('show')) renderShop();
+}
+
+function renderShop(): void {
+  ensureQuests();
+  ui.shop.querySelectorAll<HTMLElement>('[data-tab]').forEach((t) => t.classList.toggle('on', t.dataset.tab === shopTab));
+  let h = '';
+  if (shopTab === 'quests') {
+    h = `<h3>Quêtes du jour</h3>` + save.quests.list.map((q, i) => {
+      const def = QUESTS.find((d) => d.id === q.id)!;
+      const n = questProgress(q);
+      const done = n >= q.goal;
+      return `<div class="card"><div class="card-icon">${def.icon}</div>
+        <div class="card-main"><div class="card-title">${def.text.replace('{n}', String(q.goal))}</div>
+        <div class="card-desc">${n} / ${q.goal}</div><div class="bar"><i style="width:${(n / q.goal) * 100}%"></i></div></div>
+        <button class="btn gem" data-claim="${i}" ${!done || q.claimed ? 'disabled' : ''}>${q.claimed ? '✓' : `+${def.gems} 💎`}</button></div>`;
+    }).join('') + `<p class="note">Nouvelles quêtes chaque jour à minuit.</p>`;
+  } else {
+    const wait = save.chestAt - Date.now();
+    const adsLeft = GEM_ADS_PER_DAY - (save.gemAds.key === todayKey() ? save.gemAds.n : 0);
+    const card = (icon: string, title: string, desc: string, btns: string) =>
+      `<div class="card"><div class="card-icon">${icon}</div><div class="card-main"><div class="card-title">${title}</div><div class="card-desc">${desc}</div></div><div class="btns">${btns}</div></div>`;
+    h = `<h3>Gratuit</h3>`;
+    h += card('🎁', 'Coffre du ravitailleur', chestReady() ? `${chestCoins()} pièces et 3 💎` : `Prochain dans ${fmtWait(wait)}`,
+      chestReady() ? `<button class="btn" data-chest="free">Ouvrir</button>` : `<button class="btn ad" data-chest="ad">📺 Ouvrir</button>`);
+    h += card('💎', 'Gemmes offertes', `+3 💎 · encore ${adsLeft} aujourd'hui`, `<button class="btn ad" data-gemad ${adsLeft <= 0 ? 'disabled' : ''}>📺 +3</button>`);
+    h += `<h3>Boosts · 3 minutes</h3>`;
+    for (const b of BOOSTS) {
+      const left = save.boosts[b.id] ?? 0;
+      h += card(b.icon, b.name, left > 0 ? `En cours · ${Math.ceil(left / 60)} min` : b.desc,
+        `<button class="btn ad" data-boost="${b.id}" data-pay="ad">📺</button><button class="btn gem" data-boost="${b.id}" data-pay="gem">${b.gems} 💎</button>`);
+    }
+    h += `<h3>Pièces</h3>`;
+    h += card('💰', 'Sac de pièces', `${chestCoins() * 2} pièces`, `<button class="btn gem" data-coins="1">30 💎</button>`);
+    h += card('💰', 'Coffre de pièces', `${chestCoins() * 9} pièces`, `<button class="btn gem" data-coins="2">120 💎</button>`);
+    h += `<h3>Offres</h3>`;
+    for (const p of PRODUCTS) {
+      if (p.once && owns(p.id)) continue;
+      h += card(p.icon, p.name, p.desc, `<button class="btn real" data-buy="${p.id}">${p.price}</button>`);
+    }
+    if (SIMULATED) h += `<p class="note">Version de test : les publicités et les achats sont simulés, rien n'est jamais débité.</p>`;
+  }
+  // On ne reconstruit que si le contenu a change : un bouton remplace sous le doigt perd le toucher.
+  if (h === lastShop) return;
+  lastShop = h;
+  const scroll = ui.shopBody.scrollTop;
+  ui.shopBody.innerHTML = h;
+  ui.shopBody.scrollTop = scroll;
+}
+let lastShop = '';
+
+function openShop(tab: 'shop' | 'quests' = shopTab): void {
+  shopTab = tab;
+  renderShop();
+  ui.shop.classList.add('show');
+}
+
+ui.shopBtn.addEventListener('click', () => openShop(questToClaim() && !chestReady() ? 'quests' : 'shop'));
+ui.shop.querySelector('.shop-close')!.addEventListener('click', () => ui.shop.classList.remove('show'));
+ui.shop.addEventListener('click', (e) => {
+  if (e.target === ui.shop) ui.shop.classList.remove('show');
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
+  if (t) { shopTab = t.dataset.tab as 'shop' | 'quests'; renderShop(); }
+});
+
+function grantChest(): void {
+  save.chestAt = Date.now() + CHEST_EVERY;
+  gainGems(3);
+  flyCoins(chestCoins(), player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 14);
+  toast(`🎁 Coffre : ${chestCoins()} pièces et 3 💎`);
+  persist();
+}
+
+function payGems(n: number): boolean {
+  if (save.gems < n) {
+    sfx.sfxNope();
+    toast('💎 Pas assez de gemmes');
+    return false;
+  }
+  save.gems -= n;
+  return true;
+}
+
+function grantProduct(p: Product): void {
+  if (p.once) save.owned.push(p.id);
+  if (p.id === 'starter') {
+    gainGems(150);
+    save.coins += 1500;
+    save.up.bag = Math.min(4, save.up.bag + 1);
+    applyUpgrades();
+  } else if (p.id === 'gems_s') gainGems(80);
+  else if (p.id === 'gems_m') gainGems(500);
+  else if (p.id === 'gems_l') gainGems(1200);
+  toast(`${p.icon} ${p.name} obtenu !`);
+  sfx.sfxVictory();
+  persist();
+}
+
+ui.shopBody.addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('button');
+  if (!el || (el as HTMLButtonElement).disabled) return;
+  const d = el.dataset;
+  if (d.claim !== undefined) {
+    const q = save.quests.list[Number(d.claim)]!;
+    if (q.claimed || questProgress(q) < q.goal) return;
+    q.claimed = true;
+    gainGems(QUESTS.find((x) => x.id === q.id)!.gems);
+    persist();
+  } else if (d.chest === 'free') grantChest();
+  else if (d.chest === 'ad') void showRewarded('le coffre du ravitailleur', owns('noads')).then((ok) => ok && grantChest());
+  else if (d.gemad !== undefined) {
+    void showRewarded('3 gemmes', owns('noads')).then((ok) => {
+      if (!ok) return;
+      ensureQuests();
+      save.gemAds.n++;
+      gainGems(3);
+      persist();
+      renderShop();
+    });
+  } else if (d.boost) {
+    const id = d.boost as BoostId;
+    const b = BOOSTS.find((x) => x.id === id)!;
+    if (d.pay === 'gem') { if (payGems(b.gems)) startBoost(id); }
+    else void showRewarded(b.name, owns('noads')).then((ok) => ok && startBoost(id));
+  } else if (d.coins) {
+    const big = d.coins === '2';
+    if (payGems(big ? 120 : 30)) {
+      const n = chestCoins() * (big ? 9 : 2);
+      flyCoins(n, player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 16);
+      persist();
+    }
+  } else if (d.buy) {
+    const p = PRODUCTS.find((x) => x.id === d.buy)!;
+    void purchase(p).then((ok) => ok && grantProduct(p));
+  }
+  renderShop();
+});
+
+/** K.O. avec un gros chargement : une pub pour le recuperer, au choix du joueur. */
+function offerKeepBag(lost: ItemType[]): void {
+  showModal(`<div class="modal-big">💫</div><h2>K.O. !</h2>
+    <p>Tu as lâché ton chargement (${lost.length} objets).</p>
+    <button class="btn ad" data-keep>📺 Le récupérer</button>`);
+  ui.modal.querySelector('[data-keep]')!.addEventListener('click', () => {
+    void showRewarded('ton chargement', owns('noads')).then((ok) => {
+      if (!ok) return;
+      ui.modal.classList.remove('show');
+      for (const t of lost) player.stack.add(t);
+      toast('🎒 Chargement récupéré');
+    });
+  }, { once: true });
 }
 
 // ---------------------------------------------------------------- menu
@@ -990,7 +1257,8 @@ function startDay(): void {
   save.phase = 'day';
   save.phaseT = 0;
   sfx.sfxToggle(false);
-  toast(`☀️ Jour ${save.day} : le camp a tenu !`);
+  save.gems += 2;
+  toast(`☀️ Jour ${save.day} : le camp a tenu ! +2 💎`);
   document.body.classList.remove('night');
   persist();
 }
@@ -1051,8 +1319,8 @@ function updateCombat(dt: number): void {
   if (night && isBuilt('tower') && towerClock <= 0) {
     const tz = horde.nearest(new THREE.Vector3(L.tower.x, 0, L.tower.z), 16);
     if (tz) {
-      towerClock = 0.7;
-      shoot(tz, tower.muzzle, 1 + Math.floor(save.day / 3), false);
+      towerClock = 0.7 / (1 + 0.08 * lv('tower'));
+      shoot(tz, tower.muzzle, 1 + Math.floor(save.day / 3) + lv('tower'), false);
     }
   }
 }
@@ -1078,8 +1346,9 @@ function hurt(dt: number, contacts: number): void {
       const lost = player.stack.clear();
       pendingIn = 0;
       document.body.classList.add('ko');
-      toast(lost.length ? '💫 K.O. ! Ton chargement est perdu' : '💫 K.O. !');
       buzz(120);
+      if (lost.length >= 3) offerKeepBag(lost);
+      else toast('💫 K.O. !');
     }
   } else if (contacts === 0) {
     player.hp = Math.min(player.maxHp, player.hp + dt * (save.phase === 'night' ? 4 : 20));
@@ -1136,9 +1405,17 @@ function offlineGains(): void {
     <div class="modal-big">⛺</div>
     <h2>Bon retour !</h2>
     <p>Pendant ton absence, tes survivants ont fait tourner le camp :</p>
-    <div class="modal-gain"><span class="coin big"></span>${gain}</div>`, () => {
+    <div class="modal-gain"><span class="coin big"></span>${gain}</div>
+    <button class="btn ad" data-double>📺 Doubler : ${gain * 2} pièces</button>`, () => {
     flyCoins(gain, player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 14);
   });
+  ui.modal.querySelector('[data-double]')?.addEventListener('click', () => {
+    void showRewarded('gains hors ligne doublés', owns('noads')).then((ok) => {
+      if (!ok) return;
+      ui.modal.classList.remove('show');
+      flyCoins(gain * 2, player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 16);
+    });
+  }, { once: true });
 }
 
 // ================================================================ sauvegarde
@@ -1259,6 +1536,8 @@ function renderHud(dt: number): void {
   shownCoins = Math.abs(save.coins - shownCoins) < 0.5 ? save.coins : damp(shownCoins, save.coins, 10, dt);
   setText(ui.money, String(Math.round(shownCoins)));
   setText(ui.bag, `${player.stack.count}/${player.stack.cap}`);
+  setText(ui.gems, String(save.gems));
+  renderMetaHud();
   ui.bagPill.classList.toggle('full', player.stack.count >= player.stack.cap);
   if (!save.cycle) {
     setText(ui.clockText, 'Jour 1');
@@ -1312,6 +1591,7 @@ function productsList(): ItemType[] {
 
 function step(dt: number, time: number): void {
   save.playTime += dt;
+  applyMeta(dt);
   readMove();
   player.update(dt, move, world.walls, world.solids, world.bounds, time);
   interact(dt);
@@ -1343,7 +1623,7 @@ function step(dt: number, time: number): void {
   for (const s of sales) {
     save.stats.sold++;
     sfx.sfxSell();
-    flyCoins(s.pay, s.at, () => market.cashWorld(), (n) => market.addCash(n), 6);
+    flyCoins(Math.round(s.pay * sellMul()), s.at, () => market.cashWorld(), (n) => market.addCash(n), 6);
   }
 
   nav.northOpen = isBuilt('gate');

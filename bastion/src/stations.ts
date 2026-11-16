@@ -79,6 +79,8 @@ export class Converter {
   built = false;
   progress = 0;
   busy = false;
+  /** Multiplicateur de cadence (niveau du batiment, boosts). */
+  speed = 1;
 
   constructor(
     scene: THREE.Scene,
@@ -110,7 +112,7 @@ export class Converter {
     this.output.update(dt, time);
     this.busy = this.built && this.input.count >= this.perOutput && !this.output.full;
     if (!this.busy) return false;
-    this.progress += dt / this.period;
+    this.progress += (dt * this.speed) / this.period;
     if (this.progress < 1) return false;
     this.progress = 0;
     for (let i = 0; i < this.perOutput; i++) this.input.take();
@@ -443,7 +445,7 @@ export class Reserve {
   /** Ou se tenir pour se servir (devant le coffre). */
   readonly zone: { x: number; z: number };
   private pop = 0;
-  readonly cap = 240;
+  cap = 240;
 
   constructor(scene: THREE.Scene, labels: HTMLElement) {
     const { x, z } = L.chest;

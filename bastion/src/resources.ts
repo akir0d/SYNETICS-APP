@@ -27,6 +27,8 @@ export class Bed {
   readonly walls: Segment[];
   unlocked = false;
   readonly growTime: number;
+  /** Multiplicateur de pousse (niveau des cultures, boosts). */
+  growMul = 1;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, readonly kind: Crop, readonly w = BED_W, readonly d = BED_D) {
     this.growTime = GROW[kind];
@@ -117,7 +119,7 @@ export class Bed {
   update(dt: number, time: number): void {
     if (!this.unlocked) return;
     for (const p of this.plants) {
-      if (p.g < 1) p.g = Math.min(1, p.g + dt / this.growTime);
+      if (p.g < 1) p.g = Math.min(1, p.g + (dt * this.growMul) / this.growTime);
       p.pop = Math.max(0, p.pop - dt * 3);
       const ripe = p.g >= 1;
       const s = 0.25 + p.g * 0.75;

@@ -43,16 +43,27 @@ export function todayKey(now = new Date()): string {
 
 /** Trois quetes tirees parmi celles deja accessibles, toujours les memes pour un jour donne. */
 export function rollQuests(key: string, obj: number, day: number, stats: Stats): QuestState[] {
+  // Chaque quete recoit une note tiree du jour et de son nom ; on garde les trois premieres.
+  // Pas de boucle « jusqu'a trouver » : l'ancienne version (generateur dont la multiplication
+  // depassait la precision des nombres JS) tournait a l'infini a certains objectifs et figeait
+  // le jeu des la premiere image.
   const pool = QUESTS.filter((q) => q.from <= obj);
-  let seed = 0;
-  for (const ch of key) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
-  const picked: QuestDef[] = [];
-  while (picked.length < Math.min(3, pool.length)) {
-    seed = (seed * 1103515245 + 12345) >>> 0;
-    const q = pool[seed % pool.length]!;
-    if (!picked.includes(q)) picked.push(q);
+  const picked = pool
+    .map((q) => ({ q, k: hash32(`${key}|${q.id}`) }))
+    .sort((a, b) => a.k - b.k)
+    .slice(0, 3)
+    .map((e) => e.q);
+  return picked.map((q) => ({ id: q.id, base: stats[q.stat] ?? 0, goal: q.goal(day), claimed: false }));
+}
+
+/** Empreinte 32 bits exacte (FNV-1a, Math.imul : pas de perte de precision). */
+function hash32(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
   }
-  return picked.map((q) => ({ id: q.id, base: stats[q.stat], goal: q.goal(day), claimed: false }));
+  return h >>> 0;
 }
 
 // ---------------------------------------------------------------- niveaux des batiments

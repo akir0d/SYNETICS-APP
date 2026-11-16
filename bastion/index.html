@@ -78,11 +78,9 @@
           show('Le jeu a planté à l\'étape « ' + cur.step + ' » :\n' + cur.err);
         });
         window.addEventListener('unhandledrejection', function (e) { show('Promesse rejetée : ' + String(e.reason)); });
-        if (prev && !prev.ok) {
-          window.addEventListener('DOMContentLoaded', function () {
-            show('Le lancement précédent s\'est arrêté à l\'étape « ' + prev.step + ' » après ' + Math.round(prev.t / 1000) + ' s.' + (prev.err ? '\nErreur : ' + prev.err : ''));
-          });
-        }
+        // Affiche tout de suite (pas a DOMContentLoaded : il attend le jeu, qui peut bloquer).
+        if (prev && !prev.ok) show('Le lancement précédent s\'est arrêté à l\'étape « ' + prev.step + ' » après ' + Math.round(prev.t / 1000) + ' s.' + (prev.err ? '\nErreur : ' + prev.err : ''));
+        save(cur);
         // Au bout de 25 s sans premiere image, on le dit (si la page repond encore).
         setTimeout(function () { if (document.getElementById('boot-load')) show('Toujours en chargement après 25 s, étape « ' + cur.step + ' ».'); }, 25000);
       })();

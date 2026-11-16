@@ -1674,10 +1674,8 @@ const SIM = { scale: 1 };
 
 let firstFrame = true;
 function frame(): void {
-  if (firstFrame) {
-    firstFrame = false;
-    (window as unknown as { __bootDone?: () => void }).__bootDone?.();
-  }
+  // La premiere image est notee comme une etape : si elle bloque, on le saura.
+  if (firstFrame) boot('premiere image');
   const dt = Math.min(0.05, clock.getDelta());
   const time = clock.elapsedTime;
   // Les tests automatiques peuvent accelerer la simulation.
@@ -1763,6 +1761,10 @@ function frame(): void {
 
   renderHud(dt);
   renderer.render(scene, camera);
+  if (firstFrame) {
+    firstFrame = false;
+    (window as unknown as { __bootDone?: () => void }).__bootDone?.();
+  }
 
   // Sauvegarde reguliere, en temps reel (independante de la fluidite).
   if (performance.now() - lastPersist > 4000) { lastPersist = performance.now(); persist(); }

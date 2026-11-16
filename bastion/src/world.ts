@@ -123,7 +123,8 @@ function ground(scene: THREE.Scene, r: () => number): void {
   const greens = [C.grassDark, C.leaf, C.grassLight, 0xb5a76a, 0x9c9a5c];
   const onRoad = (z: number) => Math.abs(z - ROAD_Z) < 3.4;
   let n = 0;
-  while (n < COUNT) {
+  let tries = 0;
+  while (n < COUNT && tries++ < COUNT * 20) {
     const x = (r() - 0.5) * 96;
     const z = (r() - 0.5) * 96;
     // Pas d'herbe dans le camp, sauf des mauvaises herbes au pied de la palissade.
@@ -140,6 +141,7 @@ function ground(scene: THREE.Scene, r: () => number): void {
     tufts.setColorAt(n, col.setHex(greens[Math.floor(r() * greens.length)]!));
     n++;
   }
+  tufts.count = n;
   tufts.receiveShadow = true;
   scene.add(tufts);
 

@@ -190,6 +190,14 @@ export class Horde {
     return best;
   }
 
+  /** Les n zombies les plus proches dans le rayon (fusil a pompe). */
+  nearestMany(p: THREE.Vector3, range: number, n: number): Zombie[] {
+    return this.zs
+      .filter((z) => z.state === 'walking' && z.root.position.distanceTo(p) < range)
+      .sort((a, b) => a.root.position.distanceTo(p) - b.root.position.distanceTo(p))
+      .slice(0, n);
+  }
+
   damage(z: Zombie, dmg: number, from: THREE.Vector3): Hit | null {
     if (z.state !== 'walking') return null;
     z.hp -= dmg;

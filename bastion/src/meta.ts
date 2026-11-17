@@ -112,3 +112,66 @@ export const BOOST_TIME = 180;
 export const CHEST_EVERY = 4 * 3600 * 1000;
 /** Pubs « gemmes » possibles par jour. */
 export const GEM_ADS_PER_DAY = 5;
+
+// ---------------------------------------------------------------- armes et tenues
+
+export type WeaponId = 'rifle' | 'shotgun' | 'crossbow';
+
+export interface WeaponDef {
+  id: WeaponId;
+  name: string;
+  icon: string;
+  desc: string;
+  /** Prix : en pieces, ou en gemmes pour aller plus vite. */
+  coins: number;
+  gems: number;
+  /** Caracteristiques selon le niveau « Fusil » de l'etabli. */
+  range: (lvl: number) => number;
+  interval: (lvl: number) => number;
+  damage: (lvl: number) => number;
+  /** Zombies touches par tir. */
+  targets: number;
+}
+
+export const WEAPONS: WeaponDef[] = [
+  { id: 'rifle', name: 'Fusil', icon: '🔫', desc: 'Précis, cadence rapide', coins: 0, gems: 0,
+    range: (l) => 10 + l, interval: (l) => 0.32 - 0.03 * l, damage: (l) => 1 + l, targets: 1 },
+  { id: 'shotgun', name: 'Fusil à pompe', icon: '💥', desc: 'Touche 4 zombies d’un coup, de près', coins: 1800, gems: 60,
+    range: (l) => 7 + 0.5 * l, interval: (l) => 0.62 - 0.03 * l, damage: (l) => 1 + l, targets: 4 },
+  { id: 'crossbow', name: 'Arbalète', icon: '🏹', desc: 'Très longue portée, carreaux dévastateurs', coins: 3500, gems: 120,
+    range: (l) => 16 + l, interval: (l) => 0.7 - 0.04 * l, damage: (l) => 3 + 2 * l, targets: 1 },
+];
+
+export interface OutfitDef { id: string; name: string; icon: string; gems: number; jacket: number; cap: number; pants: number }
+
+export const OUTFITS: OutfitDef[] = [
+  { id: 'base', name: 'Veste de route', icon: '🧥', gems: 0, jacket: 0x3d7fd6, cap: 0xe0443a, pants: 0x34495e },
+  { id: 'ranger', name: 'Garde forestier', icon: '🌲', gems: 40, jacket: 0x5a6e3a, cap: 0x3a4a2a, pants: 0x4a4030 },
+  { id: 'hunter', name: 'Chasseur', icon: '🦌', gems: 50, jacket: 0xd9762a, cap: 0xd9762a, pants: 0x3a3a3a },
+  { id: 'fire', name: 'Pompier', icon: '🚒', gems: 60, jacket: 0xc9412f, cap: 0xe8b84a, pants: 0x2e3439 },
+  { id: 'night', name: 'Rôdeur de nuit', icon: '🌑', gems: 80, jacket: 0x2a2a33, cap: 0x1a1a1a, pants: 0x2a2a2a },
+];
+
+// ---------------------------------------------------------------- personnages et radio
+
+/** Les survivants recrutes ont un nom et quelques repliques. */
+export const CREW: Record<string, { name: string; lines: string[] }> = {
+  farmer: { name: 'Rose', lines: ['Les tomates, c’est comme les gens : il faut leur parler.', 'Encore une rangée et je fais une pause.', 'Tu as vu ces carottes ? Magnifiques.'] },
+  lumber: { name: 'Gaston', lines: ['Un arbre, deux arbres… je compte plus.', 'La hache, c’est mieux qu’un fusil. Ça s’enraye pas.', 'Il en faut, du bois, pour tenir cette palissade.'] },
+  fisher: { name: 'Lino', lines: ['Ça mord mieux le matin.', 'Avant, je pêchais pour le plaisir.', 'Chut… tu vas faire fuir les poissons.'] },
+  scav: { name: 'Vic', lines: ['Tout se recycle. Même les voitures.', 'J’ai trouvé une clé de 12. Une vraie fête.', 'La station en a encore sous le capot.'] },
+  porter: { name: 'Momo', lines: ['Je porte, je porte, et je souris.', 'La réserve se vide, l’étal se remplit !', 'Mon dos me déteste.'] },
+  cashier: { name: 'Nadia', lines: ['Je compte tout, rien ne se perd.', 'Les clients adorent le pain, tu sais.', 'La caisse est pleine, chef !'] },
+};
+
+/** Messages radio : l'histoire se devoile au fil des objectifs. */
+export const RADIO: { at: number; from: string; text: string }[] = [
+  { at: 2, from: 'Radio Bastion', text: 'Si quelqu’un entend ce message… la route du sud est sûre le jour. La nuit, barricadez-vous. Ils ne s’arrêtent jamais.' },
+  { at: 7, from: 'Radio Bastion', text: 'La palissade, c’est votre vie. Réparez chaque brèche avant la tombée de la nuit.' },
+  { at: 11, from: 'Une voix inconnue', text: 'Ici la Ville. On reçoit votre feu de camp au loin. Un bus fonctionnait encore il y a peu… cherchez sur la route.' },
+  { at: 16, from: 'Radio Bastion', text: 'Des survivants errent dans la vallée. Un camp qui tient, ça attire du monde. Accueillez-les.' },
+  { at: 19, from: 'La Ville', text: 'La vieille ferme à l’ouest avait les meilleurs champs de la région. Et un moulin.' },
+  { at: 25, from: 'La Ville', text: 'Attention : on a vu des brutes. Énormes. Elles cassent le bois comme du papier.' },
+  { at: 28, from: 'Radio Bastion', text: 'La station-service de l’est… il reste du carburant au fond des cuves. Assez pour un bus.' },
+  { at: 34, from: 'La Ville', text: 'On vous attend. Réparez ce bus, faites le plein, et venez. Il y a de la place pour tout le monde.' },
+];

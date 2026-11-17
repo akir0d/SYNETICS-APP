@@ -31,6 +31,9 @@ export const PADS: PadDef[] = [
   { id: 'shelter', name: 'Retaper l’abri', icon: '🏠', ...L.pads.shelter, site: L.shelter, cost: { coins: 300, plank: 12 }, after: 15 },
   { id: 'farmer', name: 'Fermière', icon: '👩‍🌾', ...L.pads.farmer, cost: { coins: 250 }, after: 16 },
   { id: 'lumber', name: 'Bûcheron', icon: '🧔', ...L.pads.lumber, cost: { coins: 300 }, after: 18 },
+  // Automatisation : facultatifs, ils apparaissent quand la reserve se remplit.
+  { id: 'cashier', name: 'Caissière', icon: '👩‍💼', x: 0.6, z: 7.0, cost: { coins: 400 }, after: 17 },
+  { id: 'porter', name: 'Porteur', icon: '🧑‍🌾', x: 1.2, z: -5.4, cost: { coins: 550 }, after: 19 },
   // ---- la ferme
   { id: 'westRoad', name: 'Dégager l’entrée de la ferme', icon: '🚜', ...L.pads.westRoad, site: L.farmGate, cost: { coins: 350, plank: 10 }, after: 19 },
   { id: 'field1', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field1, site: L.fields[0]!, cost: { coins: 150, plank: 6 }, after: 20 },
@@ -109,6 +112,15 @@ export interface Save {
   fixPaid: Record<string, Cost>;
   /** Niveau du camp (tours d'angle, portes renforcees). */
   campLv: number;
+  // ---- armes, tenues, evenements, histoire
+  weapons: string[];
+  weapon: string;
+  outfits: string[];
+  outfit: string;
+  /** Date (ms) a laquelle chaque cache est de nouveau pleine. */
+  caches: Record<string, number>;
+  rescued: number;
+  radio: number[];
 }
 
 /** Nouvelle cle : la vallee est un nouveau niveau, l'ancienne partie du camp n'est pas reprise. */
@@ -123,6 +135,7 @@ export function freshSave(): Save {
     playTime: 0, lastSeen: Date.now(), muted: false,
     gems: 0, owned: [], lv: {}, boosts: {}, chestAt: 0, quests: { key: '', list: [] }, gemAds: { key: '', n: 0 },
     broken: [], fixPaid: {}, campLv: 1,
+    weapons: ['rifle'], weapon: 'rifle', outfits: ['base'], outfit: 'base', caches: {}, rescued: 0, radio: [],
   };
 }
 
@@ -147,6 +160,10 @@ export function loadSave(): Save {
       broken: Array.isArray(d.broken) ? d.broken : [],
       fixPaid: { ...(d.fixPaid ?? {}) },
       campLv: d.campLv ?? 1,
+      weapons: Array.isArray(d.weapons) ? d.weapons : ['rifle'],
+      outfits: Array.isArray(d.outfits) ? d.outfits : ['base'],
+      caches: { ...(d.caches ?? {}) },
+      radio: Array.isArray(d.radio) ? d.radio : [],
     };
     return s;
   } catch {

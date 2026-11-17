@@ -11,7 +11,7 @@ import { route, type Region } from './nav';
 import { collide, type Circle, type Segment } from './physics';
 import type { Bed, ChopTree, ScrapSource } from './resources';
 
-export type Job = 'farmer' | 'lumber' | 'scav' | 'fisher';
+export type Job = 'farmer' | 'lumber' | 'scav' | 'fisher' | 'porter' | 'cashier';
 
 export interface HelperCtx {
   beds: Bed[];
@@ -30,6 +30,16 @@ export interface HelperCtx {
   onChop: (tree: ChopTree, h: Helper) => void;
   onScrap: (src: ScrapSource, h: Helper) => void;
   onFish: (h: Helper) => void;
+  // ---- porteur : de la reserve (et des machines) vers l'etal et les machines
+  reserveCount: () => number;
+  reserveTake: () => ItemType | null;
+  /** Ou porter un objet (machine qui le transforme, sinon bac de l'etal) ; null : nulle part. */
+  porterDrop: (t: ItemType) => { at: { x: number; z: number }; put: (t: ItemType, from: THREE.Vector3) => void } | null;
+  /** Productions finies a emporter a l'etal (soupe, pain). */
+  outputs: () => { at: { x: number; z: number }; take: () => { type: ItemType; pos: THREE.Vector3 } | null }[];
+  // ---- caissiere
+  cashSpot: { x: number; z: number };
+  onCashier: (h: Helper) => void;
 }
 
 const LOOK: Record<Job, { shirt: number; pants: number; hair: number; hat?: number }> = {
@@ -37,8 +47,10 @@ const LOOK: Record<Job, { shirt: number; pants: number; hair: number; hat?: numb
   lumber: { shirt: 0xb83a3a, pants: 0x3a3a4a, hair: 0x2a1a10 },
   scav: { shirt: 0x5a6a7a, pants: 0x3a3a3a, hair: 0x1a1a1a, hat: 0x3a4a3a },
   fisher: { shirt: 0x3f7a8a, pants: 0x4a4a3a, hair: 0xc9a46a, hat: 0xd9b44a },
+  porter: { shirt: 0x9a7a4a, pants: 0x3a4a5a, hair: 0x1a1a1a },
+  cashier: { shirt: 0xd95a7a, pants: 0x2a2a3a, hair: 0x7a3a1a },
 };
-const REST: Record<Job, [number, number]> = { farmer: [-1.6, -1.4], lumber: [1.6, -1.4], scav: [-1.7, 1.9], fisher: [1.8, 2.0] };
+const REST: Record<Job, [number, number]> = { farmer: [-1.6, -1.4], lumber: [1.6, -1.4], scav: [-1.7, 1.9], fisher: [1.8, 2.0], porter: [0, -2.1], cashier: [0, 2.4] };
 
 export class Helper {
   readonly human: Human;
@@ -49,6 +61,8 @@ export class Helper {
   private side = 1;
   tree: ChopTree | null = null;
   private src: ScrapSource | null = null;
+  /** Porteur : d'ou il charge (la reserve, ou la sortie d'une machine). */
+  private load: { at: { x: number; z: number }; take: () => ItemType | null } | null = null;
   working = 0;
   private stuck = 0;
   /** Temps passe sans approcher du but : au-dela, on change de cible. */
@@ -63,7 +77,9 @@ export class Helper {
         ? group(cyl(0.04, 0.04, 0.8, C.woodLight, 6, 0, 0, 0.3), rbox(0.06, 0.28, 0.2, 0x9aa3ab, 0.02, 0, 0.1, 0.62))
         : job === 'scav'
           ? group(cyl(0.04, 0.04, 0.6, C.woodDark, 6, 0, 0, 0.25), rbox(0.14, 0.12, 0.3, 0x55595c, 0.02, 0, 0.05, 0.55))
-          : group(cyl(0.02, 0.025, 1.6, C.woodDark, 5, 0, 0, 0.7));
+          : job === 'fisher'
+            ? group(cyl(0.02, 0.025, 1.6, C.woodDark, 5, 0, 0, 0.7))
+            : group(cyl(0.01, 0.01, 0.01, C.woodDark, 3, 0, 0, 0));
     (tool.children[0] as THREE.Mesh).rotation.x = Math.PI / 2;
     this.human.hand.add(tool);
     this.stack.root.position.set(0, 1.32, -0.42);
@@ -127,7 +143,11 @@ export class Helper {
       if (this.job === 'farmer') this.farm(dt, ctx);
       else if (this.job === 'lumber') this.chop(dt, ctx);
       else if (this.job === 'scav') this.scavenge(dt, ctx);
+      else if (this.job === 'porter') this.haul(dt, ctx);
+      else if (this.job === 'cashier') this.cash(dt, ctx);
       else this.fish(dt, ctx);
+    } else if (this.state === 'deliver' && this.job === 'porter') {
+      this.dispatch(dt, ctx);
     } else if (this.state === 'deliver') {
       if (!this.stack.count) this.state = 'seek';
       else if (!ctx.reserve.room()) this.idle(dt, ctx);
@@ -181,7 +201,75 @@ export class Helper {
       this.src = best;
       return !!best;
     }
+    if (this.job === 'porter') {
+      if (ctx.reserveCount() > 0) {
+        this.load = { at: ctx.reserve.at, take: ctx.reserveTake };
+        return true;
+      }
+      const out = ctx.outputs()[0];
+      if (out) {
+        this.load = { at: out.at, take: () => out.take()?.type ?? null };
+        return true;
+      }
+      return false;
+    }
+    if (this.job === 'cashier') return true;
     return ctx.dockReady;
+  }
+
+  /** Porteur : il charge a la reserve (ou a la sortie d'une machine) jusqu'a avoir les bras pleins. */
+  private haul(dt: number, ctx: HelperCtx): void {
+    const l = this.load;
+    if (!l || this.stack.full) {
+      this.state = this.stack.count ? 'deliver' : 'seek';
+      return;
+    }
+    if (!this.go(new THREE.Vector3(l.at.x, 0, l.at.z), dt, ctx, 0.8)) return;
+    this.clock -= dt;
+    if (this.clock > 0) return;
+    this.clock = 0.12;
+    const t = l.take();
+    if (t) {
+      this.stack.add(t);
+      this.working = 0.5;
+    } else {
+      this.load = null;
+      this.state = this.stack.count ? 'deliver' : 'seek';
+    }
+  }
+
+  /** Porteur : chaque objet va la ou il sert (machine) ou se vend (etal). */
+  private dispatch(dt: number, ctx: HelperCtx): void {
+    const top = this.stack.slots[this.stack.count - 1]?.type;
+    if (!top) {
+      this.state = 'seek';
+      return;
+    }
+    const d = ctx.porterDrop(top);
+    if (!d) {
+      this.idle(dt, ctx);
+      return;
+    }
+    if (!this.go(new THREE.Vector3(d.at.x, 0, d.at.z), dt, ctx, 0.9)) return;
+    this.clock -= dt;
+    if (this.clock > 0) return;
+    this.clock = 0.14;
+    const item = this.stack.take((x) => x === top);
+    if (item) d.put(item.type, item.pos);
+    if (!this.stack.count) this.state = 'seek';
+  }
+
+  /** Caissiere : elle tient la caisse et rentre l'argent des ventes. */
+  private cash(dt: number, ctx: HelperCtx): void {
+    const p = this.human.root.position;
+    const spot = new THREE.Vector3(ctx.cashSpot.x, 0, ctx.cashSpot.z);
+    if (!this.go(spot, dt, ctx, 0.3)) return;
+    this.human.face(Math.atan2(L.cash.x - p.x, L.cash.z - p.z), dt);
+    this.clock -= dt;
+    if (this.clock <= 0) {
+      this.clock = 2.2;
+      ctx.onCashier(this);
+    }
   }
 
   private finish(dt: number): void {

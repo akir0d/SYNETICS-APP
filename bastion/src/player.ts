@@ -6,6 +6,7 @@ import { C, box, cone, cyl, damp, group, rbox, shadow, sphere } from './kit';
 import { collide, type Circle, type Segment } from './physics';
 
 export type Tool = 'none' | 'axe' | 'hammer' | 'gun';
+export type Weapon = 'rifle' | 'shotgun' | 'crossbow';
 
 export class Player {
   readonly root = new THREE.Group();
@@ -16,7 +17,14 @@ export class Player {
   private readonly legR: THREE.Object3D;
   private readonly armL: THREE.Object3D;
   private readonly armR: THREE.Object3D;
-  private readonly tools: Record<Exclude<Tool, 'none'>, THREE.Object3D>;
+  private readonly tools: Record<Exclude<Tool, 'none' | 'gun'>, THREE.Object3D>;
+  private readonly guns: Record<Weapon, THREE.Object3D>;
+  /** Arme en main quand on tire. */
+  weapon: Weapon = 'rifle';
+  // Materiaux propres au joueur : les tenues les recolorent.
+  private readonly jacketMat = new THREE.MeshLambertMaterial({ color: C.jacket, flatShading: true });
+  private readonly capMat = new THREE.MeshLambertMaterial({ color: C.cap, flatShading: true });
+  private readonly pantsMat = new THREE.MeshLambertMaterial({ color: C.jeans, flatShading: true });
   private walkPhase = 0;
   /** 0..1 pendant un coup de hache ou de marteau. */
   swing = 0;
@@ -31,23 +39,23 @@ export class Player {
 
   constructor() {
     const b = this.body;
-    this.legL = group(box(0.24, 0.6, 0.26, C.jeans, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
-    this.legR = group(box(0.24, 0.6, 0.26, C.jeans, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
+    this.legL = group(box(0.24, 0.6, 0.26, this.pantsMat, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
+    this.legR = group(box(0.24, 0.6, 0.26, this.pantsMat, 0, -0.3, 0), box(0.28, 0.14, 0.36, 0x5a3a22, 0, -0.62, 0.05));
     this.legL.position.set(-0.17, 0.7, 0);
     this.legR.position.set(0.17, 0.7, 0);
-    this.armL = group(rbox(0.2, 0.55, 0.22, C.jacket, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
-    this.armR = group(rbox(0.2, 0.55, 0.22, C.jacket, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
+    this.armL = group(rbox(0.2, 0.55, 0.22, this.jacketMat, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
+    this.armR = group(rbox(0.2, 0.55, 0.22, this.jacketMat, 0.08, 0, -0.26, 0), sphere(0.11, C.skin, 0, -0.58, 0, 8));
     this.armL.position.set(-0.42, 1.28, 0);
     this.armR.position.set(0.42, 1.28, 0);
 
-    const torso = rbox(0.68, 0.66, 0.42, C.jacket, 0.16, 0, 1.02, 0);
+    const torso = rbox(0.68, 0.66, 0.42, this.jacketMat, 0.16, 0, 1.02, 0);
     const zip = box(0.04, 0.5, 0.02, 0xdfe8f2, 0, 1.02, 0.215);
     const head = sphere(0.3, C.skin, 0, 1.62, 0, 14);
     const hair = sphere(0.31, 0x5a3420, 0, 1.66, -0.04, 12);
     hair.scale.set(1, 0.85, 1);
-    const cap = sphere(0.32, C.cap, 0, 1.7, 0, 12);
+    const cap = sphere(0.32, this.capMat, 0, 1.7, 0, 12);
     cap.scale.set(1, 0.62, 1);
-    const brim = cyl(0.26, 0.26, 0.05, C.cap, 10, 0, 1.68, 0.24);
+    const brim = cyl(0.26, 0.26, 0.05, this.capMat, 10, 0, 1.68, 0.24);
     brim.scale.z = 0.7;
     const eyes = group(sphere(0.04, 0x2a1a10, -0.1, 1.62, 0.27, 6), sphere(0.04, 0x2a1a10, 0.1, 1.62, 0.27, 6));
     const pack = rbox(0.5, 0.56, 0.24, 0x8a5a32, 0.1, 0, 1.05, -0.32);
@@ -65,9 +73,18 @@ export class Player {
     );
     (hammer.children[0] as THREE.Mesh).rotation.x = Math.PI / 2;
     (hammer.children[1] as THREE.Mesh).rotation.x = Math.PI / 2;
-    const gun = group(box(0.08, 0.1, 0.7, 0x3a3a3a, 0, 0, 0.3), box(0.1, 0.14, 0.32, 0x7a4a2a, 0, -0.03, -0.12), cone(0.03, 0.06, 0x222222, 5, 0, 0, 0.66));
-    this.tools = { axe, hammer, gun };
-    for (const t of [axe, hammer, gun]) {
+    const rifle = group(box(0.08, 0.1, 0.7, 0x3a3a3a, 0, 0, 0.3), box(0.1, 0.14, 0.32, 0x7a4a2a, 0, -0.03, -0.12), cone(0.03, 0.06, 0x222222, 5, 0, 0, 0.66));
+    const shotgun = group(
+      box(0.13, 0.12, 0.55, 0x2b2b2b, 0, 0, 0.26), box(0.12, 0.16, 0.36, 0x6a3a1a, 0, -0.04, -0.12),
+      box(0.12, 0.08, 0.22, 0x8a5a30, 0, -0.07, 0.28),
+    );
+    const crossbow = group(
+      box(0.08, 0.08, 0.66, 0x6a4a2a, 0, 0, 0.22), box(0.7, 0.05, 0.06, 0x3a3a3a, 0, 0, 0.48),
+      box(0.03, 0.03, 0.5, 0xd9b07a, 0, 0.05, 0.3),
+    );
+    this.tools = { axe, hammer };
+    this.guns = { rifle, shotgun, crossbow };
+    for (const t of [axe, hammer, rifle, shotgun, crossbow]) {
       t.position.set(0, -0.58, 0.05);
       t.visible = false;
       this.armR.add(t);
@@ -97,7 +114,24 @@ export class Player {
   setTool(t: Tool): void {
     if (t === this.tool) return;
     this.tool = t;
-    for (const [k, o] of Object.entries(this.tools)) o.visible = k === t;
+    this.refreshTools();
+  }
+
+  setWeapon(w: Weapon): void {
+    this.weapon = w;
+    this.refreshTools();
+  }
+
+  private refreshTools(): void {
+    for (const [k, o] of Object.entries(this.tools)) o.visible = k === this.tool;
+    for (const [k, o] of Object.entries(this.guns)) o.visible = this.tool === 'gun' && k === this.weapon;
+  }
+
+  /** Change de tenue : veste, casquette, pantalon. */
+  setOutfit(jacket: number, cap: number, pants: number): void {
+    this.jacketMat.color.setHex(jacket);
+    this.capMat.color.setHex(cap);
+    this.pantsMat.color.setHex(pants);
   }
 
   /** Lance un coup d'outil ; renvoie false s'il y en a deja un en cours. */

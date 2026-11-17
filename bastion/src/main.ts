@@ -705,7 +705,7 @@ const OBJECTIVES: Objective[] = [
   // ---- la ferme (19 a 24)
   { icon: '🚜', text: 'Dégage l’entrée de la ferme, à l’ouest', target: padPos('westRoad'), done: () => isBuilt('westRoad') },
   { icon: '🌾', text: 'Remets un champ de blé en culture', target: padPos('field1'), done: () => isBuilt('field1') },
-  { icon: '🌾', text: 'Récolte du blé', target: () => new THREE.Vector3(fields[0]!.x, 0, fields[0]!.z), done: stat('wheat') },
+  { icon: '🌾', text: 'Récolte du blé', target: () => new THREE.Vector3(fields[0]!.x, 0, fields[0]!.z), done: () => save.stats.wheat > 0 || player.stack.has('wheat') || (reserve.counts.get('wheat') ?? 0) > 0 },
   { icon: '🍞', text: 'Restaure le moulin', target: padPos('mill'), done: () => isBuilt('mill') },
   { icon: '🍞', text: 'Apporte du blé au moulin pour faire du pain', target: at(L.millIn), done: stat('bread') },
   { icon: '🌾', text: 'Remets un deuxième champ en culture', target: padPos('field2'), done: () => isBuilt('field2') },
@@ -1241,7 +1241,10 @@ function interact(dt: number): void {
       if (from) {
         harvestClock = 0.1;
         const kind: ItemType = b.kind;
-        giveToPlayer(kind, from, () => { save.stats.harvested++; });
+        giveToPlayer(kind, from, () => {
+          save.stats.harvested++;
+          if (kind === 'wheat') save.stats.wheat++;
+        });
         particles.burst(from, [0x7fdc5a, 0x5a3a20], 4, { speed: 2, up: 3, size: 0.08, life: 0.4 });
         break;
       }
@@ -1500,7 +1503,10 @@ const helperCtx: HelperCtx = {
   beds, trees, scraps, walls: world.walls, solids: world.solids, nav: navAll, night: false, dockReady: false,
   reachable: (x, z) => (!insideFarm(x, z) || nav.westOpen) && (!insideStation(x, z) || nav.eastOpen),
   reserve: { at: reserve.zone, room: () => reserve.total + reservePending < reserve.cap, put: putInReserve },
-  onHarvest: (from) => particles.burst(from, [0x7fdc5a, 0x5a3a20], 4, { speed: 2, up: 3, size: 0.08, life: 0.4 }),
+  onHarvest: (from, _to, t) => {
+    if (t === 'wheat') save.stats.wheat++;
+    particles.burst(from, [0x7fdc5a, 0x5a3a20], 4, { speed: 2, up: 3, size: 0.08, life: 0.4 });
+  },
   onChop: (tree, h) => {
     if (tree.chop(h.human.root.position.x, h.human.root.position.z, 3)) {
       h.stack.add('log');

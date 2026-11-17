@@ -41,19 +41,19 @@ export const PADS: PadDef[] = [
   { id: 'field2', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field2, site: L.fields[1]!, cost: { coins: 260, plank: 8 }, after: 24 },
   // ---- l'etang
   { id: 'dock', name: 'Réparer le ponton', icon: '🎣', ...L.pads.dock, site: L.dock, cost: { coins: 320, plank: 15 }, after: 25 },
-  { id: 'fisher', name: 'Pêcheur', icon: '🧑‍🦰', ...L.pads.fisher, cost: { coins: 450 }, after: 27 },
+  { id: 'fisher', name: 'Pêcheur', icon: '🧑‍🦰', ...L.pads.fisher, cost: { coins: 450 }, after: 28 },
   // ---- la station
-  { id: 'eastRoad', name: 'Dégager la route de l’est', icon: '⛽', ...L.pads.eastRoad, site: L.stationGate, cost: { coins: 500, scrap: 15 }, after: 28 },
-  { id: 'scav', name: 'Ferrailleur', icon: '🧑‍🔧', ...L.pads.scav, cost: { coins: 550 }, after: 30 },
+  { id: 'eastRoad', name: 'Dégager la route de l’est', icon: '⛽', ...L.pads.eastRoad, site: L.stationGate, cost: { coins: 500, scrap: 15 }, after: 29 },
+  { id: 'scav', name: 'Ferrailleur', icon: '🧑‍🔧', ...L.pads.scav, cost: { coins: 550 }, after: 32 },
   // ---- la fin
-  { id: 'bed4', name: 'Réparer le potager', icon: '🍅', ...L.pads.bed4, site: L.beds[3]!, cost: { coins: 260, plank: 6 }, after: 31 },
-  { id: 'field3', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field3, site: L.fields[2]!, cost: { coins: 420, plank: 10 }, after: 32 },
+  { id: 'bed4', name: 'Réparer le potager', icon: '🍅', ...L.pads.bed4, site: L.beds[3]!, cost: { coins: 260, plank: 6 }, after: 33 },
+  { id: 'field3', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field3, site: L.fields[2]!, cost: { coins: 420, plank: 10 }, after: 34 },
   // ---- materiaux : pierre et metal
-  { id: 'quarry', name: 'Ouvrir la carrière', icon: '⛏️', ...L.pads.quarry, site: L.quarryShed, cost: { coins: 600, plank: 15 }, after: 33 },
-  { id: 'foundry', name: 'Restaurer la fonderie', icon: '🔥', ...L.pads.foundry, site: L.foundry, cost: { coins: 1200, stone: 40, scrap: 20 }, after: 36 },
-  { id: 'bus1', name: 'Bus : moteur', icon: '🔧', ...L.busPad, site: L.bus, cost: { coins: 900, scrap: 30 }, after: 39 },
-  { id: 'bus2', name: 'Bus : carrosserie', icon: '🚌', ...L.busPad, site: L.bus, cost: { coins: 1400, plank: 30, scrap: 15 }, after: 40 },
-  { id: 'bus3', name: 'Bus : carburant', icon: '⛽', ...L.busPad, site: L.bus, cost: { coins: 2200, fuel: 12, metal: 10 }, after: 41 },
+  { id: 'quarry', name: 'Ouvrir la carrière', icon: '⛏️', ...L.pads.quarry, site: L.quarryShed, cost: { coins: 600, plank: 15 }, after: 35 },
+  { id: 'foundry', name: 'Restaurer la fonderie', icon: '🔥', ...L.pads.foundry, site: L.foundry, cost: { coins: 1200, stone: 40, scrap: 20 }, after: 38 },
+  { id: 'bus1', name: 'Bus : moteur', icon: '🔧', ...L.busPad, site: L.bus, cost: { coins: 900, scrap: 30 }, after: 42 },
+  { id: 'bus2', name: 'Bus : carrosserie', icon: '🚌', ...L.busPad, site: L.bus, cost: { coins: 1400, plank: 30, scrap: 15 }, after: 43 },
+  { id: 'bus3', name: 'Bus : carburant', icon: '⛽', ...L.busPad, site: L.bus, cost: { coins: 2200, fuel: 12, metal: 10 }, after: 44 },
 ];
 
 /** Objectif a partir duquel les nuits (et les hordes) commencent : apres la palissade. */
@@ -136,7 +136,7 @@ const KEY = 'dernier-bastion.vallee.v1';
 
 export function freshSave(): Save {
   return {
-    v: 4, coins: 0, built: [], paid: {}, up: { bag: 0, boots: 0, axe: 0, gun: 0, health: 0, wall: 0 },
+    v: 5, coins: 0, built: [], paid: {}, up: { bag: 0, boots: 0, axe: 0, gun: 0, health: 0, wall: 0 },
     obj: 0, day: 1, phase: 'day', phaseT: 0, cycle: false, won: false,
     stats: { harvested: 0, shelved: 0, cashed: 0, logs: 0, planks: 0, scrap: 0, sold: 0, earned: 0, kills: 0, nights: 0, repairs: 0,
       soup: 0, chest: 0, wheat: 0, bread: 0, fish: 0, fuel: 0, stone: 0, metal: 0 },
@@ -177,11 +177,14 @@ export function loadSave(): Save {
       // Les parties d'avant les materiaux avaient deja des pieux taillés.
       wallTier: d.wallTier ?? ((d.v ?? 3) < 4 ? 2 : 1),
     };
-    // Version 3 : cinq objectifs (carriere, pierre, palissade, fonderie, metal) inseres avant la fin.
-    if ((d.v ?? 3) < 4) {
-      if (s.obj >= 33) s.obj += 5;
-      s.v = 4;
+    // Version 4 : trois objectifs « agrandir le camp » inseres (avant le pecheur, le ferrailleur, le bus).
+    if ((d.v ?? 3) < 5) {
+      const o = s.obj + ((d.v ?? 3) < 4 && s.obj >= 33 ? 5 : 0);
+      s.obj = o + (o >= 27 ? 1 : 0) + (o >= 30 ? 1 : 0) + (o >= 39 ? 1 : 0);
+      s.v = 5;
     }
+    // Version 3 : cinq objectifs (carriere, pierre, palissade, fonderie, metal) inseres avant la fin.
+    // (v3 -> v4 deja comptee dans le calcul ci-dessus.)
     return s;
   } catch {
     return base;

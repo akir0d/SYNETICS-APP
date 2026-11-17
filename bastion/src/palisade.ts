@@ -352,6 +352,7 @@ export class Palisade {
   /** Segments des portes : ils ne bloquent que les zombies, et seulement fermees. */
   readonly gateWalls: Segment[] = [];
   readonly north: Section;
+  private readonly extras: THREE.Object3D[] = [];
   readonly south: Section;
 
   constructor(private readonly scene: THREE.Scene, private readonly labels: HTMLElement) {
@@ -389,7 +390,9 @@ export class Palisade {
     ];
     const pg = new THREE.Group();
     for (const [x, z, h] of posts) pg.add(pike(x, 0.3, h + 0.4, BARK[0]!, z));
-    scene.add(mergeColored(pg));
+    const postMesh = mergeColored(pg);
+    scene.add(postMesh);
+    this.extras.push(postMesh);
   }
 
   private frame(x1: number, z1: number, x2: number, z2: number) {
@@ -618,6 +621,16 @@ export class Palisade {
       s.hp = Math.round(max * k);
       this.refresh(s);
     }
+  }
+
+  /** Retire toute la palissade de la scene (le camp s'agrandit, on la reconstruit). */
+  dispose(): void {
+    for (const s of this.sections) {
+      this.scene.remove(s.root);
+      s.label.remove();
+      s.root.traverse((c) => { if ((c as THREE.Mesh).isMesh) (c as THREE.Mesh).geometry.dispose(); });
+    }
+    for (const e of this.extras) this.scene.remove(e);
   }
 
   hpList(): number[] {

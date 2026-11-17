@@ -291,6 +291,81 @@ export function foundry(): Building {
   };
 }
 
+// ---------------------------------------------------------------- batiments des extensions du camp
+
+/** Une maison d'artisan : cabane de rondins, toit de tole, fenetre allumee le soir. */
+export function cabin(x: number, z: number, ry: number, roofTone: number): Building {
+  const g = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const y = 0.18 + i * 0.32;
+    for (const s of [-1, 1]) {
+      const l = cyl(0.16, 0.16, 3.0, i % 2 ? LOG : LOG2, 6, 0, y, s * 1.1);
+      l.rotation.z = Math.PI / 2;
+      g.add(l);
+      const w = cyl(0.16, 0.16, 2.4, i % 2 ? LOG2 : LOG, 6, s * 1.45, y + 0.16, 0);
+      w.rotation.x = Math.PI / 2;
+      g.add(w);
+    }
+  }
+  for (const s of [-1, 1]) {
+    const r = roofSheet(3.4, 1.55, roofTone);
+    r.position.set(0, 2.45, s * 0.65);
+    r.rotation.x = -s * 0.55;
+    g.add(r);
+  }
+  g.add(rbox(0.7, 1.3, 0.08, C.woodDark, 0.03, 0.5, 0.65, 1.28));
+  const winMat = uniqueMat(0xfff0c0, 0xffc870);
+  winMat.emissiveIntensity = 0;
+  const win = mesh(new THREE.BoxGeometry(0.55, 0.45, 0.05), winMat, -0.7, 1.15, 1.29);
+  g.add(win, cyl(0.12, 0.12, 1.2, 0x55595c, 6, -0.9, 2.9, -0.4));
+  return { group: hidden(g, x, z, ry), glowMats: [winMat], live: [win] };
+}
+
+/** L'armurerie : un atelier blinde, ratelier d'armes, cible d'entrainement. */
+export function armory(x: number, z: number): Building {
+  const g = new THREE.Group();
+  g.add(box(3.4, 2.4, 2.4, 0x6f777e, 0, 1.2, 0), box(3.5, 0.15, 2.5, 0x55595c, 0, 2.45, 0));
+  for (let i = 0; i < 7; i++) g.add(box(0.05, 2.3, 0.05, 0x5a6066, -1.5 + i * 0.5, 1.2, 1.22));
+  g.add(box(1.4, 1.9, 0.06, 0x3a3d40, 0, 0.95, 1.24), box(1.6, 0.4, 0.06, 0xc9412f, 0, 2.15, 1.26));
+  // Ratelier : trois fusils contre le mur.
+  for (let i = 0; i < 3; i++) {
+    const gun = box(0.08, 1.1, 0.1, 0x2b2b2b, 1.9 + i * 0.25, 0.75, 0.6);
+    gun.rotation.z = -0.15;
+    g.add(gun);
+  }
+  g.add(box(0.9, 0.12, 0.3, C.woodDark, 2.15, 0.25, 0.6), box(0.9, 0.12, 0.3, C.woodDark, 2.15, 1.3, 0.6));
+  g.add(at(sandbags(1.6, 2, 41), -0.9, 0, 2.0));
+  const target = group(cyl(0.45, 0.45, 0.06, C.white, 14, 0, 0, 0), cyl(0.3, 0.3, 0.07, 0xc9412f, 14, 0, 0, 0), cyl(0.12, 0.12, 0.08, C.white, 10, 0, 0, 0));
+  target.rotation.x = Math.PI / 2;
+  target.position.set(-2.4, 1.1, -0.4);
+  g.add(target, box(0.08, 1.0, 0.08, C.woodDark, -2.4, 0.5, -0.45));
+  return { group: hidden(g, x, z, -Math.PI / 2) };
+}
+
+/** L'infirmerie : tente a croix rouge, lits de camp, caisses de soins. */
+export function infirmary(x: number, z: number): Building {
+  const g = new THREE.Group();
+  const tent = cone(2.2, 2.3, 0xe8e2d0, 4, 0, 1.15, 0);
+  tent.rotation.y = Math.PI / 4;
+  tent.scale.set(1.3, 1, 1);
+  g.add(tent, box(0.9, 0.22, 0.05, 0xc9412f, 0, 1.4, 1.55), box(0.22, 0.9, 0.05, 0xc9412f, 0, 1.4, 1.56));
+  for (let i = 0; i < 2; i++) g.add(box(0.7, 0.3, 1.6, 0x6f7a4a, 2.1, 0.35, -0.8 + i * 1.6), box(0.6, 0.12, 0.4, C.white, 2.1, 0.56, -1.4 + i * 1.6));
+  g.add(at(crate(0.5, C.white), -2.0, 0, 0.8), box(0.3, 0.08, 0.3, 0xc9412f, -2.0, 0.52, 0.8));
+  return { group: hidden(g, x, z, Math.PI / 2) };
+}
+
+/** L'entrepot : un grand hangar de tole plein de caisses. */
+export function warehouse(x: number, z: number): Building {
+  const g = new THREE.Group();
+  for (const s of [-1, 1]) for (const t of [-1, 1]) g.add(logPost(s * 2.2, t * 1.5, 2.8, 0.12));
+  const roof = roofSheet(5.0, 3.6, C.rust);
+  roof.position.y = 2.95;
+  g.add(roof);
+  for (let i = 0; i < 6; i++) g.add(at(crate(0.6, i % 2 ? C.wood : C.woodLight), -1.6 + (i % 3) * 1.1, Math.floor(i / 3) * 0.6, -0.6, i * 0.4));
+  g.add(at(drum(0x3f6a8a), 1.8, 0, 0.6), at(drum(0x8a3f30), 1.2, 0, 0.9));
+  return { group: hidden(g, x, z) };
+}
+
 /** Le bus : epave rouillee au depart, il se refait une beaute a chaque etape. */
 export class Bus {
   readonly root = new THREE.Group();

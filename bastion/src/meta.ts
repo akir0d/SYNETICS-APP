@@ -172,8 +172,8 @@ export const RADIO: { at: number; from: string; text: string }[] = [
   { at: 16, from: 'Radio Bastion', text: 'Des survivants errent dans la vallée. Un camp qui tient, ça attire du monde. Accueillez-les.' },
   { at: 19, from: 'La Ville', text: 'La vieille ferme à l’ouest avait les meilleurs champs de la région. Et un moulin.' },
   { at: 25, from: 'La Ville', text: 'Attention : on a vu des brutes. Énormes. Elles cassent le bois comme du papier.' },
-  { at: 28, from: 'Radio Bastion', text: 'La station-service de l’est… il reste du carburant au fond des cuves. Assez pour un bus.' },
-  { at: 33, from: 'Radio Bastion', text: 'Le bois ne suffira pas longtemps. Il y a une vieille carrière au nord-est : la pierre, elle, ne brûle pas.' },
-  { at: 36, from: 'La Ville', text: 'La station avait un atelier avec un four. Fondez la ferraille : un mur de fer, ça ne se défonce pas.' },
-  { at: 39, from: 'La Ville', text: 'On vous attend. Réparez ce bus, faites le plein, et venez. Il y a de la place pour tout le monde.' },
+  { at: 29, from: 'Radio Bastion', text: 'La station-service de l’est… il reste du carburant au fond des cuves. Assez pour un bus.' },
+  { at: 35, from: 'Radio Bastion', text: 'Le bois ne suffira pas longtemps. Il y a une vieille carrière au nord-est : la pierre, elle, ne brûle pas.' },
+  { at: 38, from: 'La Ville', text: 'La station avait un atelier avec un four. Fondez la ferraille : un mur de fer, ça ne se défonce pas.' },
+  { at: 42, from: 'La Ville', text: 'On vous attend. Réparez ce bus, faites le plein, et venez. Il y a de la place pour tout le monde.' },
 ];

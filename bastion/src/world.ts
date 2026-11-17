@@ -28,10 +28,11 @@ export interface World {
 
 /** Zones a garder libres de decor aleatoire (arbres, rochers). */
 function reserved(x: number, z: number): boolean {
-  const nearCamp = x > CAMP.minX - 3 && x < CAMP.maxX + 3 && z > CAMP.minZ - 3 && z < CAMP.maxZ + 3;
+  // Le camp peut s'etendre jusqu'a ±19 : on reserve sa taille maximale.
+  const nearCamp = x > -22 && x < 22 && z > CAMP.minZ - 3 && z < CAMP.maxZ + 3;
   const onRoad = Math.abs(z - ROAD_Z) < 4.5;
   const forest = x > L.forest.minX - 1 && x < L.forest.maxX + 1 && z > L.forest.minZ - 1 && z < L.forest.maxZ + 1.5;
-  const ruins = x > 16 && x < 30 && z > -12 && z < 12;
+  const ruins = x > 21 && x < 32 && z > -12 && z < 4;
   const pylon = Math.hypot(x + 21, z + 4) < 4;
   const south = z > 11 && z < 30 && x > -30 && x < 30;
   const scrap = L.scrap.some((s) => Math.hypot(x - s.x, z - s.z) < 5);
@@ -61,8 +62,6 @@ export function buildWorld(scene: THREE.Scene): World {
   fireBarrel(scene, w, 3.6, 9.7);
   campProps(scene, w);
   rainCollector(scene, w, -11.4, 9.9);
-  scene.add(shadow(at(wreck(0x8a5a3a, true), -18, 0, 5, 0.6)));
-  w.solids.push({ x: -18, z: 5, r: 1.6 }, { x: -18 + Math.cos(0.6) * 1.2, z: 5 - Math.sin(0.6) * 1.2, r: 1.1 }, { x: -18 - Math.cos(0.6) * 1.2, z: 5 + Math.sin(0.6) * 1.2, r: 1.1 });
   solarRig(scene, w, -10.6, -9.6);
   waterTank(scene, w, 11.6, -9.7);
   farmZone(scene, w, r);
@@ -130,8 +129,9 @@ function ground(scene: THREE.Scene, r: () => number): void {
     const x = (r() - 0.5) * 96;
     const z = (r() - 0.5) * 96;
     // Pas d'herbe dans le camp, sauf des mauvaises herbes au pied de la palissade.
-    const inCamp = insideCamp(x, z);
-    const atWall = inCamp && (x < CAMP.minX + 0.7 || x > CAMP.maxX - 0.7 || z < CAMP.minZ + 0.7);
+    // Pas d'herbe dans le camp, ni dans les bandes ou il s'agrandira (jusqu'a ±19).
+    const inCamp = x > -19.6 && x < 19.6 && z > CAMP.minZ && z < CAMP.maxZ;
+    const atWall = inCamp && (x < -18.9 || x > 18.9 || z < CAMP.minZ + 0.7);
     const wet = Math.hypot((x - POND.x) / (POND.rx + 0.4), (z - POND.z) / (POND.rz + 0.4)) < 1;
     const paved = Math.abs(x - 35) < 9.5 && Math.abs(z - 12) < 6.5;
     if ((inCamp && !atWall) || wet || paved || (onRoad(z) && r() < 0.85)) continue;
@@ -160,7 +160,7 @@ function ground(scene: THREE.Scene, r: () => number): void {
     for (let k = 0; k < 5 && n < FL; k++) {
       const x = cx + (r() - 0.5) * 2;
       const z = cz + (r() - 0.5) * 2;
-      if (insideCamp(x, z) || Math.abs(x) < 15 && Math.abs(z) < 13 || onRoad(z)) continue;
+      if (insideCamp(x, z) || Math.abs(x) < 21 && Math.abs(z) < 13 || onRoad(z)) continue;
       m4.compose(new THREE.Vector3(x, 0.16 + r() * 0.1, z), q.identity(), new THREE.Vector3(1, 0.7, 1));
       flowers.setMatrixAt(n, m4);
       flowers.setColorAt(n, col.setHex(c));
@@ -445,14 +445,14 @@ function surroundings(scene: THREE.Scene, w: World, r: () => number): void {
     scene.add(b);
   }
   // Herissons anti-vehicules devant le camp : on sait ce qui rode ici.
-  const hogs: [number, number][] = [[-9.6, 13.4], [-6.4, 14.0], [10.4, 13.6], [12.8, 13.2], [-16, 2], [-16.2, -6], [16, -3], [16.4, 6.5]];
+  const hogs: [number, number][] = [[-9.6, 13.4], [-6.4, 14.0], [10.4, 13.6], [12.8, 13.2], [22, -9], [22.4, 8.5], [-21.5, 9], [-20.5, -13]];
   for (const [x, z] of hogs) {
     scene.add(shadow(at(hedgehog(), x, 0, z, r() * 3)));
     w.solids.push({ x, z, r: 0.7 });
   }
-  scene.add(shadow(at(wreck(0x5f7a8a), 18.5, 0, -12, 1.2)));
-  w.solids.push({ x: 18.5, z: -12, r: 1.8 });
-  ruinsBlock(scene, w, r, 22, -2);
+  scene.add(shadow(at(wreck(0x5f7a8a), 19.6, 0, -16.2, 1.2)));
+  w.solids.push({ x: 19.6, z: -16.2, r: 1.8 });
+  ruinsBlock(scene, w, r, 26.5, -3);
   pylon(scene, w, -21, -4);
 }
 

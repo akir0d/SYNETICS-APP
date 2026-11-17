@@ -12,22 +12,22 @@ export interface Spot { x: number; z: number; zone: Zone }
 
 /** Les caches de la vallee : maisons pillees, ruines, sous-bois, bord de route. */
 export const CACHE_SPOTS: Spot[] = [
-  { x: 21, z: -3, zone: null }, { x: -19.6, z: -1.4, zone: null }, { x: -41, z: 8.6, zone: 'farm' },
+  { x: 25.5, z: -4.6, zone: null }, { x: -21.4, z: -0.6, zone: null }, { x: -41, z: 8.6, zone: 'farm' },
   { x: 41, z: 9.3, zone: 'station' }, { x: -9, z: -24, zone: null }, { x: 10, z: -32, zone: null },
   { x: -15, z: -37, zone: null }, { x: 9.5, z: 30.4, zone: null }, { x: -30, z: 22.8, zone: null },
-  { x: -12, z: 30, zone: null }, { x: 17.5, z: -9, zone: null }, { x: -17.5, z: 23.4, zone: null },
+  { x: -12, z: 30, zone: null }, { x: 23, z: -13.5, zone: null }, { x: -17.5, z: 23.4, zone: null },
   { x: 44, z: 28, zone: 'station' }, { x: -46, z: -7, zone: 'farm' },
 ];
 
 /** Ou un ravitaillement peut tomber : a decouvert, hors des enclos fermes. */
 export const DROP_SPOTS: Spot[] = [
-  { x: -6, z: 25.5, zone: null }, { x: 18.5, z: -8, zone: null }, { x: -19, z: 9.5, zone: null },
+  { x: -6, z: 25.5, zone: null }, { x: 23.5, z: -9.5, zone: null }, { x: -21, z: 15, zone: null },
   { x: 6, z: -17.5, zone: null }, { x: 19, z: 26, zone: null }, { x: -27, z: 25, zone: null },
 ];
 
 /** Ou un survivant peut etre coince. */
 export const RESCUE_SPOTS: Spot[] = [
-  { x: 24.5, z: 1.5, zone: null }, { x: -18.5, z: -9.5, zone: null }, { x: 15, z: 30.5, zone: null },
+  { x: 29, z: 2, zone: null }, { x: -22, z: -11, zone: null }, { x: 15, z: 30.5, zone: null },
   { x: -26, z: 28, zone: null }, { x: -36, z: -5, zone: 'farm' }, { x: 33, z: 25, zone: 'station' },
 ];
 

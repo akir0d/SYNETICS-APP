@@ -4,11 +4,14 @@ import './style.css';
 import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
-import { Bus, dock, foundry, kitchen, quarryShed, sawmill, shelter, watchTower, windmill, workbench, type Building } from './buildings';
+import {
+  Bus, armory, cabin, dock, foundry, infirmary, kitchen, quarryShed, sawmill, shelter, warehouse, watchTower, windmill, workbench,
+  type Building,
+} from './buildings';
 import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type HelperCtx, type Job } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
-import { box, damp, easeOutBack, glow, rbox } from './kit';
+import { C, box, damp, easeOutBack, glow, mat, rbox } from './kit';
 import { CAMP, L, insideFarm, insideStation } from './layout';
 import { regions, type NavState } from './nav';
 import { Palisade, TIERS, logsNeeded, stateOf, unitHp, type Section } from './palisade';
@@ -176,7 +179,7 @@ const navAll = [R.camp, R.farm, R.station];
 const navZombies = [R.farm, R.station];
 
 boot('palissade');
-const palisade = new Palisade(scene, labels);
+let palisade = new Palisade(scene, labels);
 world.walls.push(...palisade.walls);
 /** Les zombies butent aussi sur les portes fermees ; le joueur, jamais. */
 const zombieWalls: Segment[] = [...world.walls, ...palisade.gateWalls];
@@ -531,33 +534,96 @@ function placeWarnings(dt: number): void {
 
 // ---- tours d'angle (niveau du camp)
 
+// ---- agrandissement du camp : chaque niveau pousse la palissade et ajoute des batiments
+
+/** Largeur du camp a chaque niveau : il s'etend a l'est (niv. 2), puis a l'ouest (niv. 3). */
+const CAMP_SIZES = [{ minX: -13, maxX: 13 }, { minX: -13, maxX: 13 }, { minX: -13, maxX: 19 }, { minX: -19, maxX: 19 }, { minX: -19, maxX: 19 }];
+
 const corners = [
-  { x: -13.4, z: -11.4, from: 2 }, { x: 13.4, z: -11.4, from: 2 },
-  { x: -13.4, z: 11.4, from: 3 }, { x: 13.4, z: 11.4, from: 3 },
+  { x: 19.4, z: -11.4, from: 2 }, { x: 19.4, z: 11.4, from: 2 },
+  { x: -19.4, z: -11.4, from: 3 }, { x: -19.4, z: 11.4, from: 3 },
 ].map((c) => ({ ...c, tower: watchTower(scene, c.x, c.z, false) }));
-for (const c of corners) world.solids.push({ x: c.x, z: c.z, r: 1.2 });
 const cornerClock: number[] = [];
+
+/** Les batiments des extensions, et le niveau qui les apporte. */
+const EXT: { id: string; b: Building; lv: number; r: number }[] = [
+  { id: 'armory', b: armory(16.2, 4.5), lv: 2, r: 1.9 },
+  { id: 'house1', b: cabin(16, -2.6, -Math.PI / 2, 0x5f8a85), lv: 2, r: 1.7 },
+  { id: 'house2', b: cabin(16, -8.2, -Math.PI / 2, 0x9c4a3c), lv: 2, r: 1.7 },
+  { id: 'infirmary', b: infirmary(-16, 4), lv: 3, r: 2.4 },
+  { id: 'house3', b: cabin(-16, -2.6, Math.PI / 2, 0x6f7a4a), lv: 3, r: 1.7 },
+  { id: 'house4', b: cabin(-16, -8.2, Math.PI / 2, 0xb9874a), lv: 3, r: 1.7 },
+  { id: 'warehouse', b: warehouse(16, 9.0), lv: 4, r: 2.4 },
+];
+for (const e of EXT) scene.add(e.b.group);
+const extShown = new Set<string>();
+
+/** Les artisans qui ont besoin d'une maison (fermiere et bucheron logent a l'abri). */
+const HOUSED = ['fisher', 'scav', 'porter', 'cashier'];
+const houses = () => (save.campLv >= 2 ? 2 : 0) + (save.campLv >= 3 ? 2 : 0);
+const freeHouse = () => houses() - HOUSED.filter((id) => isBuilt(id)).length > 0;
 
 /** Les niveaux du camp : ce que chacun coute et apporte. */
 const CAMP_LEVELS: { cost: Cost; title: string; done: string }[] = [
   { cost: { coins: 0 }, title: '', done: '' },
-  { cost: { coins: 500, plank: 15 }, title: 'Camp niv. 2 : tours d’angle nord', done: 'Tours d’angle nord en place' },
-  { cost: { coins: 1100, plank: 25, scrap: 10 }, title: 'Camp niv. 3 : tours d’angle sud', done: 'Tours d’angle sud en place' },
-  { cost: { coins: 2500, plank: 40, scrap: 25 }, title: 'Camp niv. 4 : palissade renforcée', done: 'Palissade et portes renforcées' },
+  { cost: { coins: 0 }, title: '', done: '' },
+  { cost: { coins: 800, plank: 25, log: 20 }, title: 'Camp niv. 2 : extension est', done: 'Le camp s’agrandit : armurerie, 2 maisons, 2 tours' },
+  { cost: { coins: 2000, plank: 40, scrap: 20 }, title: 'Camp niv. 3 : extension ouest', done: 'Le camp s’agrandit : infirmerie, 2 maisons, 2 tours' },
+  { cost: { coins: 4500, stone: 60, metal: 15 }, title: 'Camp niv. 4 : bastion', done: 'Bastion : entrepôt et palissade renforcée' },
 ];
 const CAMP_PAD = { x: -3.6, z: 6.2 };
+const dirtStrips = new Set<number>();
 
+/** Reconstruit la palissade aux dimensions actuelles du camp (troncons neufs, intacts). */
+function rebuildPalisade(): void {
+  const northOn = palisade.north.enabled;
+  for (const sg of palisade.walls) {
+    const i = world.walls.indexOf(sg);
+    if (i >= 0) world.walls.splice(i, 1);
+  }
+  palisade.dispose();
+  palisade = new Palisade(scene, labels);
+  world.walls.push(...palisade.walls);
+  zombieWalls.length = 0;
+  zombieWalls.push(...world.walls, ...palisade.gateWalls);
+  palisade.setTier(save.wallTier);
+  palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
+  if (northOn) palisade.enableNorth();
+  repairTarget = null;
+}
+
+/** Applique le niveau du camp : taille, palissade, batiments et tours (`instant` au chargement). */
 function applyCampLevel(instant: boolean): void {
+  const size = CAMP_SIZES[Math.min(save.campLv, CAMP_SIZES.length - 1)]!;
+  if (size.minX !== CAMP.minX || size.maxX !== CAMP.maxX) {
+    CAMP.minX = size.minX;
+    CAMP.maxX = size.maxX;
+    rebuildPalisade();
+    // Terre battue sur les nouvelles bandes du camp.
+    for (const [x0, x1] of [[13, size.maxX], [size.minX, -13]] as const) {
+      if (x1 - x0 <= 0 || dirtStrips.has(x0)) continue;
+      dirtStrips.add(x0);
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 + 0.6, 22.6), mat(C.dirt, { flat: false }));
+      strip.rotation.x = -Math.PI / 2;
+      strip.position.set((x0 + x1) / 2, 0.014, 0);
+      strip.receiveShadow = true;
+      scene.add(strip);
+    }
+  }
+  for (const e of EXT) {
+    if (save.campLv < e.lv || extShown.has(e.id)) continue;
+    extShown.add(e.id);
+    world.solids.push({ x: e.b.group.position.x, z: e.b.group.position.z, r: e.r });
+    if (instant) { restorer.instant(null, e.b.group); consolidate(e.b.group, e.b.live); }
+    else restorer.run(null, e.b.group, () => consolidate(e.b.group, e.b.live));
+  }
   corners.forEach((c) => {
     if (save.campLv < c.from || c.tower.group.visible) return;
-    if (instant) restorer.instant(null, c.tower.group);
+    world.solids.push({ x: c.x, z: c.z, r: 1.2 });
+    if (instant) { restorer.instant(null, c.tower.group); consolidate(c.tower.group, c.tower.live); }
     else restorer.run(null, c.tower.group, () => consolidate(c.tower.group, c.tower.live));
-    if (instant) consolidate(c.tower.group, c.tower.live);
   });
-  if (save.cycle && save.phase === 'day') planDay(save.phaseT / dayLen(save.day));
-applyUpgrades();
-equipWeapon((WEAPONS.find((x) => x.id === save.weapon)?.id ?? 'rifle') as WeaponId);
-wearOutfit(save.outfit);
+  applyUpgrades();
 }
 
 // ---- zones dynamiques : reparations et niveau du camp
@@ -662,7 +728,8 @@ function syncDynPads(): void {
 
 // ---------------------------------------------------------------- objectifs
 
-interface Objective { icon: string; text: string; target: () => THREE.Vector3 | null; done: () => boolean }
+/** `house` : ce recrutement demande une maison libre (sinon on guide vers l'agrandissement). */
+interface Objective { icon: string; text: string; target: () => THREE.Vector3 | null; done: () => boolean; house?: string }
 
 const padPos = (id: string) => () => {
   const d = PADS.find((p) => p.id === id)!;
@@ -727,11 +794,13 @@ const OBJECTIVES: Objective[] = [
   // ---- l'etang (25 a 27)
   { icon: '🎣', text: 'Répare le ponton de l’étang, au sud', target: padPos('dock'), done: () => isBuilt('dock') },
   { icon: '🐟', text: 'Pêche au bout du ponton (reste immobile)', target: at(L.fishSpot), done: stat('fish') },
-  { icon: '🧑‍🦰', text: 'Recrute un pêcheur', target: padPos('fisher'), done: () => isBuilt('fisher') },
+  { icon: '🏰', text: 'Agrandis le camp vers l’est (niv. 2, près du feu)', target: () => new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z), done: () => save.campLv >= 2 },
+  { icon: '🧑‍🦰', text: 'Recrute un pêcheur', target: padPos('fisher'), done: () => isBuilt('fisher'), house: 'un pêcheur' },
   // ---- la station (28 a 30)
   { icon: '⛽', text: 'Dégage la route de l’est', target: padPos('eastRoad'), done: () => isBuilt('eastRoad') },
   { icon: '⛽', text: 'Siphonne du carburant à la station', target: nearestOf(pumps, (p) => p.amount > 0), done: stat('fuel') },
-  { icon: '🧑‍🔧', text: 'Recrute un ferrailleur', target: padPos('scav'), done: () => isBuilt('scav') },
+  { icon: '🏰', text: 'Agrandis le camp vers l’ouest (niv. 3)', target: () => new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z), done: () => save.campLv >= 3 },
+  { icon: '🧑‍🔧', text: 'Recrute un ferrailleur', target: padPos('scav'), done: () => isBuilt('scav'), house: 'un ferrailleur' },
   // ---- le depart (31 a 36)
   { icon: '🍅', text: 'Remets en état le dernier potager', target: padPos('bed4'), done: () => isBuilt('bed4') },
   { icon: '🌾', text: 'Remets le dernier champ en culture', target: padPos('field3'), done: () => isBuilt('field3') },
@@ -742,6 +811,7 @@ const OBJECTIVES: Objective[] = [
   { icon: '🔥', text: 'Restaure la fonderie de la station', target: padPos('foundry'), done: () => isBuilt('foundry') },
   { icon: '⚙️', text: 'Fonds du métal (ferraille à la fonderie)', target: at(L.foundryIn), done: stat('metal') },
   { icon: '🛡️', text: 'Renforce la palissade à l’établi', target: at(L.benchZone), done: () => save.up.wall > 0 },
+  { icon: '🏰', text: 'Fais du camp un bastion (niv. 4)', target: () => new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z), done: () => save.campLv >= 4 },
   { icon: '🔧', text: 'Répare le moteur du bus', target: padPos('bus1'), done: () => isBuilt('bus1') },
   { icon: '🚌', text: 'Retape la carrosserie du bus', target: padPos('bus2'), done: () => isBuilt('bus2') },
   { icon: '⛽', text: 'Fais le plein et quitte la vallée', target: padPos('bus3'), done: () => isBuilt('bus3') },
@@ -755,10 +825,13 @@ function renderObjective(): void {
   const o = currentObjective();
   ui.objective.classList.toggle('off', !o);
   if (!o) return;
-  ui.objIcon.textContent = o.icon;
-  ui.objText.textContent = o.text;
+  const blocked = !!o.house && !freeHouse();
+  ui.objIcon.textContent = blocked ? '🏠' : o.icon;
+  ui.objText.textContent = blocked ? `Agrandis le camp (🏰 près du feu) pour loger ${o.house}` : o.text;
+  objBlocked = blocked;
   bump(ui.objective);
 }
+let objBlocked = false;
 
 function advanceObjectives(): void {
   let moved = false;
@@ -808,7 +881,8 @@ scene.add(groundArrow);
 function applyUpgrades(): void {
   player.stack.cap = 8 + 4 * save.up.bag;
   player.speedMul = 1 + 0.12 * save.up.boots;
-  player.maxHp = 100 + 30 * save.up.health;
+  // L'infirmerie (niv. 3 du camp) : 40 points de vie de plus.
+  player.maxHp = 100 + 30 * save.up.health + (save.campLv >= 3 ? 40 : 0);
   player.hp = Math.min(player.hp, player.maxHp);
   // Portes renforcees (niveau 4 du camp) : un cran de solidite en plus pour toute la palissade.
   palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
@@ -950,7 +1024,7 @@ function applyMeta(dt: number): void {
   cook.speed = (1 + 0.15 * lv('cook')) * grow * tierK('kitchen');
   mill.speed = (1 + 0.15 * lv('mill')) * grow * tierK('mill');
   forge.speed = grow * tierK('foundry');
-  reserve.cap = 240 + 60 * lv('reserve') + 120 * (bt('shelter') - 1);
+  reserve.cap = 240 + 60 * lv('reserve') + 120 * (bt('shelter') - 1) + (save.campLv >= 4 ? 200 : 0);
   player.speedMul = (1 + 0.12 * save.up.boots) * (boostOn('speed') ? 1.4 : 1);
 }
 
@@ -1041,7 +1115,8 @@ function renderShop(): void {
     for (const wd of WEAPONS) {
       const owned = save.weapons.includes(wd.id);
       const on = save.weapon === wd.id;
-      const btns = on ? `<button class="btn" disabled>Équipée</button>`
+      const btns = !owned && save.campLv < 2 ? `<button class="btn" disabled>Armurerie requise</button>`
+        : on ? `<button class="btn" disabled>Équipée</button>`
         : owned ? `<button class="btn" data-equip="${wd.id}">Équiper</button>`
           : `<button class="btn" data-weapon="${wd.id}" data-pay="coin"><span class="coin"></span>${wd.coins}</button><button class="btn gem" data-weapon="${wd.id}" data-pay="gem">${wd.gems} 💎</button>`;
       h += card(wd.icon, wd.name, wd.desc, btns);
@@ -2160,7 +2235,7 @@ function hurt(dt: number, contacts: number): void {
       else toast('💫 K.O. !');
     }
   } else if (contacts === 0) {
-    player.hp = Math.min(player.maxHp, player.hp + dt * (save.phase === 'night' ? 4 : 20));
+    player.hp = Math.min(player.maxHp, player.hp + dt * (save.phase === 'night' ? 4 : 20) * (save.campLv >= 3 ? 2.5 : 1));
   }
 }
 
@@ -2453,7 +2528,14 @@ function step(dt: number, time: number): void {
   advanceObjectives();
 
   for (const pad of pads) {
-    const show = !isBuilt(pad.def.id) && save.obj >= pad.def.after;
+    const show = !isBuilt(pad.def.id) && save.obj >= pad.def.after && (!HOUSED.includes(pad.def.id) || freeHouse());
+    if (!show && pad.shown && !isBuilt(pad.def.id) && pad.inflight === 0) {
+      // Plus de maison libre : la zone disparait (ce qui a ete paye reste acquis).
+      pad.shown = false;
+      pad.ring.visible = false;
+      pad.fill.visible = false;
+      pad.label.classList.add('off');
+    }
     if (show && !pad.shown) {
       pad.shown = true;
       pad.appear = 0;
@@ -2500,7 +2582,10 @@ function frame(): void {
   }
 
   // Guidage vers l'objectif en cours.
-  const tgt = currentObjective()?.target() ?? null;
+  // Recrutement bloque faute de maison : on guide vers l'agrandissement du camp.
+  const blockedNow = !!currentObjective()?.house && !freeHouse();
+  if (blockedNow !== objBlocked) renderObjective();
+  const tgt = blockedNow ? new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z) : currentObjective()?.target() ?? null;
   guide.visible = !!tgt;
   groundArrow.visible = false;
   if (tgt) {
@@ -2584,16 +2669,18 @@ function frame(): void {
 
 boot('restauration de la partie');
 beds[0]!.unlock();
+// Le camp a sa taille avant qu'on relise l'etat de chaque troncon.
+applyCampLevel(true);
 {
   palisade.setTier(save.wallTier);
   palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
-  const hp = save.walls && save.walls.length === palisade.sections.length ? save.walls : palisade.initialHp();
+  const full = palisade.sections.map((s) => s.max);
+  const hp = save.walls && save.walls.length === palisade.sections.length ? save.walls : save.campLv > 1 ? full : palisade.initialHp();
   palisade.sections.forEach((s, i) => palisade.setHp(s, hp[i]!));
 }
 for (const id of save.built) applyBuild(id, true);
 // Ce que les zombies avaient demoli reste en ruine jusqu'a reparation.
 for (const id of [...save.broken]) wreck(id, true);
-applyCampLevel(true);
 for (const b of TIERABLE) if (isBuilt(b.id) && bt(b.id) > 1) applyBuildingTier(b.id);
 applyUpgrades();
 equipWeapon((WEAPONS.find((x) => x.id === save.weapon)?.id ?? 'rifle') as WeaponId);

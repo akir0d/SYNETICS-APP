@@ -298,3 +298,10 @@ body.night .chest-label { background: var(--night-bg); color: var(--night-ink); 
 .ad-big { font-size: 56px; margin: 6px 0; }
 .ad-count { font-size: 34px; font-weight: 800; color: #6a3ab9; }
 .modal-card .btn.ad { display: block; width: 100%; padding: 11px; font-size: 17px; margin-top: 10px; }
+
+/* Alerte : quelque chose se fait attaquer (palissade, batiment). */
+.warn-label {
+  font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,.5));
+  animation: warn-pulse .5s ease-in-out infinite alternate;
+}
+@keyframes warn-pulse { from { opacity: .55; } to { opacity: 1; } }

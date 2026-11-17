@@ -103,6 +103,12 @@ export interface Save {
   chestAt: number;
   quests: { key: string; list: { id: string; base: number; goal: number; claimed: boolean }[] };
   gemAds: { key: string; n: number };
+  /** Batiments demolis par les zombies, a reparer. */
+  broken: string[];
+  /** Ce qui a deja ete paye pour chaque reparation. */
+  fixPaid: Record<string, Cost>;
+  /** Niveau du camp (tours d'angle, portes renforcees). */
+  campLv: number;
 }
 
 /** Nouvelle cle : la vallee est un nouveau niveau, l'ancienne partie du camp n'est pas reprise. */
@@ -116,6 +122,7 @@ export function freshSave(): Save {
       soup: 0, chest: 0, wheat: 0, bread: 0, fish: 0, fuel: 0 },
     playTime: 0, lastSeen: Date.now(), muted: false,
     gems: 0, owned: [], lv: {}, boosts: {}, chestAt: 0, quests: { key: '', list: [] }, gemAds: { key: '', n: 0 },
+    broken: [], fixPaid: {}, campLv: 1,
   };
 }
 
@@ -137,6 +144,9 @@ export function loadSave(): Save {
       boosts: { ...(d.boosts ?? {}) },
       quests: d.quests && Array.isArray(d.quests.list) ? d.quests : base.quests,
       gemAds: d.gemAds ?? base.gemAds,
+      broken: Array.isArray(d.broken) ? d.broken : [],
+      fixPaid: { ...(d.fixPaid ?? {}) },
+      campLv: d.campLv ?? 1,
     };
     return s;
   } catch {
@@ -152,7 +162,11 @@ export function wipeSave(): void {
   try { localStorage.removeItem(KEY); } catch { /* rien */ }
 }
 
-export const DAY_LEN = 150;
+/** Duree d'une nuit (secondes) : elle s'allonge un peu chaque soir. */
 export function nightLen(day: number): number {
-  return Math.min(110, 60 + 8 * day);
+  return Math.min(100, 50 + 6 * day);
+}
+/** Le jour dure quatre fois la nuit : le temps de produire, vendre, reparer. */
+export function dayLen(day: number): number {
+  return 4 * nightLen(day);
 }

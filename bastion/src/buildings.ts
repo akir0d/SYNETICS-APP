@@ -122,7 +122,8 @@ export function kitchen(): Building {
 
 export interface Tower extends Building { light: THREE.SpotLight; muzzle: THREE.Vector3 }
 
-export function watchTower(scene: THREE.Scene): Tower {
+/** Tour de guet : la grande du camp (avec projecteur), ou une tour d'angle. */
+export function watchTower(scene: THREE.Scene, x: number = L.tower.x, z: number = L.tower.z, withLight = true): Tower {
   const g = new THREE.Group();
   const legH = 4.2;
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -174,9 +175,12 @@ export function watchTower(scene: THREE.Scene): Tower {
   light.position.set(-0.9, legH + 1.0, 1.3);
   light.target.position.set(-6, 0, 6);
   g.add(light, light.target);
-  const t = hidden(g, L.tower.x, L.tower.z);
+  if (!withLight) {
+    g.remove(light, light.target, lamp);
+  }
+  const t = hidden(g, x, z);
   scene.add(t);
-  return { group: t, light, glowMats: [lampMat], live: [lamp], muzzle: new THREE.Vector3(L.tower.x + 0.3, legH + 1.0, L.tower.z + 0.4) };
+  return { group: t, light, glowMats: withLight ? [lampMat] : [], live: withLight ? [lamp] : [], muzzle: new THREE.Vector3(x + 0.3, legH + 1.0, z + 0.4) };
 }
 
 export function shelter(): Building {

@@ -15,7 +15,7 @@ import { LOG_HP, Palisade, logsNeeded, stateOf, type Section } from './palisade'
 import type { Segment } from './physics';
 import { Player } from './player';
 import {
-  CYCLE_FROM, DAY_LEN, PADS, UPGRADES, freshSave, loadSave, nightLen, wipeSave, writeSave,
+  CYCLE_FROM, PADS, UPGRADES, dayLen, freshSave, loadSave, nightLen, wipeSave, writeSave,
   type Cost, type PadDef, type Save, type UpId,
 } from './progress';
 import { Bed, ChopTree, FIELD_D, FIELD_W, Pump, ScrapSource, plantForest } from './resources';
@@ -30,7 +30,7 @@ import {
 } from './ruins';
 import { BIN_CAP, CoinDrops, Converter, Market, Reserve } from './stations';
 import { buildWorld } from './world';
-import { Horde, type Zombie } from './zombies';
+import { Horde, type Structure, type Zombie } from './zombies';
 
 // ================================================================ rendu
 
@@ -398,6 +398,253 @@ const DONE: Record<string, string> = {
   bus1: 'Le moteur tousse', bus2: 'Carrosserie retapée', bus3: 'Plein fait',
 };
 
+// ---------------------------------------------------------------- demolitions, reparations, niveau du camp
+
+/** Le premier potager n'a pas de chantier : il lui faut sa ruine pour le jour ou on le demolit. */
+RUINS.bed1 = bedRuin(scene, beds[0]!.x, beds[0]!.z);
+RUINS.bed1.visible = false;
+
+/** Ce que coute la remise en etat d'un batiment demoli. Les potagers se reparent au bois. */
+const REPAIR: Record<string, Cost> = {
+  bed1: { coins: 0, log: 4 }, bed2: { coins: 0, log: 4 }, bed3: { coins: 0, log: 4 }, bed4: { coins: 0, log: 4 },
+  field1: { coins: 0, log: 6 }, field2: { coins: 0, log: 6 }, field3: { coins: 0, log: 6 },
+  bench: { coins: 40, log: 6 }, sawmill: { coins: 60, log: 10 }, kitchen: { coins: 80, plank: 6 },
+  tower: { coins: 100, plank: 8 }, shelter: { coins: 120, plank: 10 }, mill: { coins: 150, plank: 12 },
+};
+const STRUCT_HP: Record<string, number> = {
+  bed1: 30, bed2: 30, bed3: 30, bed4: 30, field1: 40, field2: 40, field3: 40,
+  bench: 50, sawmill: 60, kitchen: 60, tower: 80, shelter: 90, mill: 80,
+};
+const NAMES: Record<string, string> = {
+  bed1: 'Le potager', bed2: 'Le potager', bed3: 'Le potager', bed4: 'Le potager',
+  field1: 'Un champ', field2: 'Un champ', field3: 'Un champ', bench: 'L’établi', sawmill: 'La scierie',
+  kitchen: 'La cuisine', tower: 'La tour de guet', shelter: 'L’abri', mill: 'Le moulin',
+};
+
+const isBroken = (id: string) => save.broken.includes(id);
+const structBuilt = (id: string) => id === 'bed1' || isBuilt(id);
+/** Le batiment existe et tient debout. */
+function structAlive(id: string): boolean {
+  return structBuilt(id) && !isBroken(id);
+}
+
+function siteOf(id: string): { x: number; z: number; reach: number } {
+  const bed = { bed1: beds[0], bed2: beds[1], bed3: beds[2], bed4: beds[3], field1: fields[0], field2: fields[1], field3: fields[2] }[id];
+  if (bed) return { x: bed.x, z: bed.z, reach: Math.hypot(bed.w, bed.d) / 2 + 0.3 };
+  const p = { bench: L.bench, sawmill: L.sawmill, kitchen: L.kitchen, tower: L.tower, shelter: L.shelter, mill: L.mill }[id]!;
+  const r = { bench: 1.6, sawmill: 2.2, kitchen: 2.0, tower: 1.9, shelter: 2.6, mill: 2.4 }[id]!;
+  return { x: p.x, z: p.z, reach: r };
+}
+
+const STRUCTS: Structure[] = Object.keys(REPAIR).map((id) => {
+  const site = siteOf(id);
+  return { id, ...site, hp: STRUCT_HP[id]!, max: STRUCT_HP[id]!, alive: () => structAlive(id) };
+});
+
+/** Ce qui se voit d'un batiment debout (pour le cacher quand il tombe). */
+function builtOf(id: string): THREE.Object3D {
+  const bed = { bed1: beds[0], bed2: beds[1], bed3: beds[2], bed4: beds[3], field1: fields[0], field2: fields[1], field3: fields[2] }[id];
+  if (bed) return bed.group;
+  return id === 'tower' ? tower.group : B[id]!.group;
+}
+
+/** Allume ou eteint ce que fait le batiment (production, tir, ameliorations). */
+function setWorking(id: string, on: boolean): void {
+  const bed = { bed1: beds[0], bed2: beds[1], bed3: beds[2], bed4: beds[3], field1: fields[0], field2: fields[1], field3: fields[2] }[id];
+  if (bed) bed.unlocked = on;
+  if (id === 'sawmill') saw.built = on;
+  if (id === 'kitchen') cook.built = on;
+  if (id === 'mill') mill.built = on;
+}
+
+let wreckToast = 0;
+/** Les zombies ont eu raison d'un batiment : il redevient une ruine et s'arrete. */
+function wreck(id: string, instant: boolean): void {
+  if (!isBroken(id)) save.broken.push(id);
+  const ruin = RUINS[id];
+  const built = builtOf(id);
+  built.visible = false;
+  if (ruin) ruin.visible = true;
+  setWorking(id, false);
+  if (instant) return;
+  const site = siteOf(id);
+  particles.burst(new THREE.Vector3(site.x, 1.2, site.z), [0xb9a58a, 0x7a5a3a, 0x3a3a3a], 40, { speed: 6, up: 5, size: 0.28, life: 1.1 });
+  sfx.sfxSplat();
+  buzz(80);
+  if (Math.hypot(site.x - player.position.x, site.z - player.position.z) < 14) shake = Math.max(shake, 0.3);
+  if (performance.now() - wreckToast > 2500) {
+    wreckToast = performance.now();
+    toast(`💥 ${NAMES[id]} est détruit ! Répare-le`);
+  }
+  persist();
+}
+
+function onStructHit(st: Structure, at: THREE.Vector3, dmg: number): void {
+  st.hp -= dmg;
+  warn(`s${st.id}`, st.x, 2.6, st.z);
+  particles.burst(at, [0xc68a4f, 0x7a5a3a], 4, { speed: 3, up: 2, size: 0.1, life: 0.5 });
+  if (Math.hypot(at.x - player.position.x, at.z - player.position.z) < 14) sfx.sfxChop();
+  if (st.hp <= 0) {
+    st.hp = st.max;
+    wreck(st.id, false);
+  }
+}
+
+// ---- alertes : un ⚠️ au-dessus de ce qui se fait attaquer
+
+interface Warning { el: HTMLElement; t: number; x: number; y: number; z: number }
+const warnings = new Map<string, Warning>();
+function warn(key: string, x: number, y: number, z: number): void {
+  let w = warnings.get(key);
+  if (!w) {
+    const el = document.createElement('div');
+    el.className = 'warn-label off';
+    el.textContent = '⚠️';
+    labels.appendChild(el);
+    w = { el, t: 0, x, y, z };
+    warnings.set(key, w);
+  }
+  w.t = 1.6;
+  w.x = x;
+  w.y = y;
+  w.z = z;
+}
+function placeWarnings(dt: number): void {
+  for (const w of warnings.values()) {
+    w.t -= dt;
+    if (w.t <= 0) { w.el.classList.add('off'); continue; }
+    placeLabel(w.el, w.x, w.y, w.z);
+  }
+}
+
+// ---- tours d'angle (niveau du camp)
+
+const corners = [
+  { x: -13.4, z: -11.4, from: 2 }, { x: 13.4, z: -11.4, from: 2 },
+  { x: -13.4, z: 11.4, from: 3 }, { x: 13.4, z: 11.4, from: 3 },
+].map((c) => ({ ...c, tower: watchTower(scene, c.x, c.z, false) }));
+for (const c of corners) world.solids.push({ x: c.x, z: c.z, r: 1.2 });
+const cornerClock: number[] = [];
+
+/** Les niveaux du camp : ce que chacun coute et apporte. */
+const CAMP_LEVELS: { cost: Cost; title: string; done: string }[] = [
+  { cost: { coins: 0 }, title: '', done: '' },
+  { cost: { coins: 500, plank: 15 }, title: 'Camp niv. 2 : tours d’angle nord', done: 'Tours d’angle nord en place' },
+  { cost: { coins: 1100, plank: 25, scrap: 10 }, title: 'Camp niv. 3 : tours d’angle sud', done: 'Tours d’angle sud en place' },
+  { cost: { coins: 2500, plank: 40, scrap: 25 }, title: 'Camp niv. 4 : palissade renforcée', done: 'Palissade et portes renforcées' },
+];
+const CAMP_PAD = { x: -3.6, z: 6.2 };
+
+function applyCampLevel(instant: boolean): void {
+  corners.forEach((c) => {
+    if (save.campLv < c.from || c.tower.group.visible) return;
+    if (instant) restorer.instant(null, c.tower.group);
+    else restorer.run(null, c.tower.group, () => consolidate(c.tower.group, c.tower.live));
+    if (instant) consolidate(c.tower.group, c.tower.live);
+  });
+  applyUpgrades();
+}
+
+// ---- zones dynamiques : reparations et niveau du camp
+
+interface DynPad {
+  key: string; x: number; z: number; cost: Cost; icon: string; title: string;
+  ring: THREE.Mesh; fill: THREE.Mesh; label: HTMLElement; inflight: number; done: () => void;
+}
+const dynPads = new Map<string, DynPad>();
+const repairMat = new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.85, depthWrite: false });
+
+function makeDyn(key: string, x: number, z: number, cost: Cost, icon: string, title: string, done: () => void): DynPad {
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.4, 48), key.startsWith('fix') ? repairMat : ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(x, 0.05, z);
+  scene.add(ring);
+  const fill = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), fillMat);
+  fill.rotation.x = -Math.PI / 2;
+  fill.position.set(x, 0.045, z);
+  scene.add(fill);
+  const label = document.createElement('div');
+  label.className = 'pad-label';
+  labels.appendChild(label);
+  save.fixPaid[key] ??= { coins: 0 };
+  const dp: DynPad = { key, x, z, cost, icon, title, ring, fill, label, inflight: 0, done };
+  renderDyn(dp);
+  return dp;
+}
+
+function dropDyn(dp: DynPad): void {
+  scene.remove(dp.ring, dp.fill);
+  dp.label.remove();
+  dynPads.delete(dp.key);
+  delete save.fixPaid[dp.key];
+}
+
+function dynRemaining(dp: DynPad): Cost {
+  const paid = save.fixPaid[dp.key]!;
+  const r: Cost = { coins: Math.max(0, dp.cost.coins - paid.coins) };
+  for (const t of Object.keys(ITEMS) as ItemType[]) {
+    const need = dp.cost[t];
+    if (need) r[t] = Math.max(0, need - (paid[t] ?? 0));
+  }
+  return r;
+}
+
+function renderDyn(dp: DynPad): void {
+  const rem = dynRemaining(dp);
+  const html = `<span class="pl-icon">${dp.icon}</span><span class="pl-name">${dp.title}</span><span class="pl-cost">${costIcons(rem)}</span>`;
+  if (dp.label.innerHTML !== html) dp.label.innerHTML = html;
+  dp.fill.scale.setScalar(Math.max(0.001, 1 - totalCost(rem) / Math.max(1, totalCost(dp.cost))));
+}
+
+function dynLanded(dp: DynPad): void {
+  dp.inflight--;
+  sfx.sfxDrop(4);
+  if (dp.inflight === 0 && totalCost(dynRemaining(dp)) === 0 && dynPads.has(dp.key)) {
+    dropDyn(dp);
+    dp.done();
+    persist();
+  }
+}
+
+/** Ou se tenir pour reparer : la zone du chantier d'origine, ou pres du premier potager. */
+function repairSpot(id: string): { x: number; z: number } {
+  if (id === 'bed1') return { x: -7.8, z: -8.9 };
+  const d = PADS.find((p) => p.id === id)!;
+  return { x: d.x, z: d.z };
+}
+
+function repaired(id: string): void {
+  save.broken = save.broken.filter((b) => b !== id);
+  const st = STRUCTS.find((s) => s.id === id);
+  if (st) st.hp = st.max;
+  setWorking(id, true);
+  restorer.run(RUINS[id] ?? null, builtOf(id));
+  toast(`🔨 ${NAMES[id]} est réparé`);
+  sfx.sfxBuild();
+}
+
+/** Fait correspondre les zones affichees a l'etat : une par batiment demoli, une pour le camp. */
+function syncDynPads(): void {
+  for (const id of save.broken) {
+    const key = `fix:${id}`;
+    if (dynPads.has(key)) continue;
+    const at = repairSpot(id);
+    dynPads.set(key, makeDyn(key, at.x, at.z, REPAIR[id]!, '🔨', `Réparer : ${NAMES[id]!.toLowerCase()}`, () => repaired(id)));
+  }
+  const next = save.campLv + 1;
+  const key = `camp:${next}`;
+  const want = save.obj >= 11 && next < CAMP_LEVELS.length;
+  if (want && !dynPads.has(key)) {
+    const lvl = CAMP_LEVELS[next]!;
+    dynPads.set(key, makeDyn(key, CAMP_PAD.x, CAMP_PAD.z, lvl.cost, '🏰', lvl.title, () => {
+      save.campLv = next;
+      applyCampLevel(false);
+      toast(`🏰 ${lvl.done} !`);
+      sfx.sfxVictory();
+    }));
+  }
+}
+
 // ---------------------------------------------------------------- objectifs
 
 interface Objective { icon: string; text: string; target: () => THREE.Vector3 | null; done: () => boolean }
@@ -532,7 +779,8 @@ function applyUpgrades(): void {
   player.speedMul = 1 + 0.12 * save.up.boots;
   player.maxHp = 100 + 30 * save.up.health;
   player.hp = Math.min(player.hp, player.maxHp);
-  palisade.setLevel(save.up.wall);
+  // Portes renforcees (niveau 4 du camp) : un cran de solidite en plus pour toute la palissade.
+  palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
 }
 
 let sheetOpen = false;
@@ -1160,8 +1408,36 @@ function interact(dt: number): void {
     }
   }
 
+  // Reparations et niveau du camp : memes regles que les chantiers.
+  syncDynPads();
+  for (const dp of dynPads.values()) {
+    if (!settled || payClock > 0 || !near(dp.x, dp.z, 1.45)) continue;
+    const rem = dynRemaining(dp);
+    const paid = save.fixPaid[dp.key]!;
+    const target = () => new THREE.Vector3(dp.x, 0.2, dp.z);
+    if (rem.coins > 0 && save.coins > 0) {
+      const chunk = Math.min(save.coins, rem.coins, Math.max(1, Math.ceil(dp.cost.coins / 25)));
+      save.coins -= chunk;
+      paid.coins += chunk;
+      dp.inflight++;
+      const m = coinMesh();
+      m.rotation.x = Math.PI / 2;
+      flyers.launch(m, playerChest(), target, () => dynLanded(dp), 0.25, 1.0);
+      payClock = 0.05;
+    } else {
+      const item = player.stack.take((t) => (rem[t] ?? 0) > 0);
+      if (item) {
+        paid[item.type] = (paid[item.type] ?? 0) + 1;
+        dp.inflight++;
+        flyers.launch(itemMesh(item.type), item.pos, target, () => dynLanded(dp), 0.26, 1.0);
+        payClock = 0.06;
+      }
+    }
+    renderDyn(dp);
+  }
+
   // Etabli : le panneau d'ameliorations s'ouvre quand on se tient devant.
-  setSheet(isBuilt('bench') && near(L.benchZone.x, L.benchZone.z, 1.5));
+  setSheet(structAlive('bench') && near(L.benchZone.x, L.benchZone.z, 1.5));
 }
 
 /** Le troncon que le joueur est en train de reparer (pour son etiquette). */
@@ -1190,6 +1466,7 @@ let wallToast = 0;
 /** Un coup de zombie sur la palissade : eclats de bois, et alerte si elle cede. */
 function onWallHit(s: Section, at: THREE.Vector3): void {
   particles.burst(at, [0xc68a4f, 0x7a5a3a, 0xd9b07a], 5, { speed: 3, up: 2, size: 0.1, life: 0.5 });
+  warn(`w${s.id}`, s.x, s.z > CAMP.maxZ - 0.5 ? 2.4 : 3.6, s.z);
   const near0 = Math.hypot(at.x - player.position.x, at.z - player.position.z) < 14;
   if (near0) sfx.sfxChop();
   if (s.hp <= 0 && performance.now() - wallToast > 4000) {
@@ -1285,7 +1562,7 @@ function updateCycle(dt: number): void {
   }
   if (save.won && save.phase === 'day') return;
   save.phaseT += dt;
-  if (save.phase === 'day' && save.phaseT >= DAY_LEN) startNight();
+  if (save.phase === 'day' && save.phaseT >= dayLen(save.day)) startNight();
   else if (save.phase === 'night') {
     const cleared = horde.remaining === 0 && save.phaseT > 10;
     if (save.phaseT >= nightLen(save.day) || cleared) startDay();
@@ -1307,7 +1584,9 @@ function shoot(z: Zombie, from: THREE.Vector3, dmg: number, light = true): void 
     sfx.sfxSplat();
     buzz(20);
     save.stats.kills++;
-    drops.spawn(hit.pos, 2 + Math.floor(Math.random() * 3), 2 + save.day);
+    // Hordes nombreuses : un zombie sur deux lache une piece, les brutes un vrai butin.
+    if (z.brute) drops.spawn(hit.pos, 10, 2 + save.day);
+    else if (Math.random() < 0.5) drops.spawn(hit.pos, 1, 1 + Math.floor(save.day / 3));
   } else {
     particles.burst(hit.pos, hit.colors, 5, { speed: 3, up: 2, size: 0.12, life: 0.5 });
   }
@@ -1327,12 +1606,24 @@ function updateCombat(dt: number): void {
     const fwd = new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
     shoot(z, player.position.clone().addScaledVector(fwd, 0.9).setY(1.2), 1 + save.up.gun);
   }
-  if (night && isBuilt('tower') && towerClock <= 0) {
+  if (night && structAlive('tower') && towerClock <= 0) {
     const tz = horde.nearest(new THREE.Vector3(L.tower.x, 0, L.tower.z), 16);
     if (tz) {
       towerClock = 0.7 / (1 + 0.08 * lv('tower'));
       shoot(tz, tower.muzzle, 1 + Math.floor(save.day / 3) + lv('tower'), false);
     }
+  }
+  // Tours d'angle (niveau du camp) : elles couvrent les flancs.
+  if (night) {
+    corners.forEach((c, i) => {
+      if (save.campLv < c.from) return;
+      cornerClock[i] = (cornerClock[i] ?? 0) - dt;
+      if (cornerClock[i]! > 0) return;
+      const cz = horde.nearest(new THREE.Vector3(c.x, 0, c.z), 15);
+      if (!cz) return;
+      cornerClock[i] = 0.9 / (1 + 0.08 * lv('tower'));
+      shoot(cz, c.tower.muzzle, 1 + lv('tower'), false);
+    });
   }
 }
 
@@ -1527,7 +1818,7 @@ function applyLighting(t: number, dusk: number, time: number): void {
     if (id === 'kitchen') continue;
     for (const m of b.glowMats ?? []) m.emissiveIntensity = t * 2;
   }
-  tower.light.intensity = isBuilt('tower') ? t * 45 : 0;
+  tower.light.intensity = structAlive('tower') ? t * 45 : 0;
   player.flashlight.intensity = t * 48;
   fireflies.forEach((f) => {
     const d = f.userData as { x: number; z: number; ph: number };
@@ -1557,7 +1848,7 @@ function renderHud(dt: number): void {
   } else if (save.phase === 'day') {
     setText(ui.clockIcon, '☀️');
     setText(ui.clockText, `Jour ${save.day}`);
-    ui.clockBar.style.width = `${Math.min(100, (save.phaseT / DAY_LEN) * 100)}%`;
+    ui.clockBar.style.width = `${Math.min(100, (save.phaseT / dayLen(save.day)) * 100)}%`;
   } else {
     setText(ui.clockIcon, '🌙');
     setText(ui.clockText, `Nuit ${save.day} · 🧟 ${horde.remaining}`);
@@ -1608,7 +1899,7 @@ function step(dt: number, time: number): void {
   interact(dt);
   updateCycle(dt);
   updateCombat(dt);
-  const contacts = horde.update(dt, player.position, zombieWalls, world.solids, nightK, palisade, onWallHit, navZombies);
+  const contacts = horde.update(dt, player.position, zombieWalls, world.solids, nightK, palisade, onWallHit, navZombies, STRUCTS, onStructHit);
   palisade.update(dt, save.cycle && save.phase === 'night', time);
   hurt(dt, contacts);
   drops.update(dt, player.position, (v) => earn(v));
@@ -1639,7 +1930,8 @@ function step(dt: number, time: number): void {
 
   nav.northOpen = isBuilt('gate');
   helperCtx.dockReady = isBuilt('dock');
-  helperCtx.night = save.cycle && save.phase === 'night';
+  // Abri demoli : les survivants n'ont plus de toit et restent pres du feu.
+  helperCtx.night = (save.cycle && save.phase === 'night') || isBroken('shelter');
   for (const h of helpers) h.update(dt, helperCtx);
 
   flyers.update(dt);
@@ -1682,7 +1974,7 @@ function frame(): void {
   for (let i = 0; i < SIM.scale; i++) step(dt, time);
 
   nightK = damp(nightK, save.cycle && save.phase === 'night' ? 1 : 0, 1.6, dt * SIM.scale);
-  const dusk = save.cycle && save.phase === 'day' ? Math.max(0, (save.phaseT - (DAY_LEN - 20)) / 20) : 0;
+  const dusk = save.cycle && save.phase === 'day' ? Math.max(0, (save.phaseT - (dayLen(save.day) - 20)) / 20) : 0;
   applyLighting(nightK, dusk, time);
 
   for (const s of world.swayers) {
@@ -1733,6 +2025,8 @@ function frame(): void {
   // Reserve : son contenu, quand on passe a cote.
   if (Math.hypot(L.chest.x - player.position.x, L.chest.z - player.position.z) < 9) placeLabel(reserve.label, L.chest.x, 1.6, L.chest.z);
   else reserve.label.classList.add('off');
+  placeWarnings(dt);
+  for (const dp of dynPads.values()) placeLabel(dp.label, dp.x, 0.3, dp.z - 1.4);
   // Palissade : une seule etiquette, celle du troncon abime le plus proche.
   let wallLabel: Section | null = repairTarget;
   if (!wallLabel) {
@@ -1780,6 +2074,9 @@ beds[0]!.unlock();
   palisade.sections.forEach((s, i) => palisade.setHp(s, hp[i]!));
 }
 for (const id of save.built) applyBuild(id, true);
+// Ce que les zombies avaient demoli reste en ruine jusqu'a reparation.
+for (const id of [...save.broken]) wreck(id, true);
+applyCampLevel(true);
 applyUpgrades();
 player.hp = player.maxHp;
 player.position.set(L.spawn.x, 0, L.spawn.z);
@@ -1805,5 +2102,5 @@ requestAnimationFrame(frame);
   give: (n: number) => { save.coins += n; },
   build: (id: string) => { const p = pads.find((x) => x.def.id === id); if (p) { save.paid[id] = { ...p.def.cost }; build(p); } },
   setObj: (n: number) => { save.obj = n; renderObjective(); },
-  night: () => { save.cycle = true; save.phase = 'day'; save.phaseT = DAY_LEN; },
+  night: () => { save.cycle = true; save.phase = 'day'; save.phaseT = dayLen(save.day); },
 };

@@ -238,3 +238,36 @@ export function gateJunk(scene: THREE.Scene): THREE.Group {
   g.add(cone(0.17, 0.4, 0xd9b07a, 6, -2.2, 0.2, 1.0));
   return finish(scene, g, L.northGate.x, L.northGate.z);
 }
+
+/** La cabane de carrier effondree, son treuil au sol. */
+export function quarryRuin(scene: THREE.Scene, x: number, z: number): THREE.Group {
+  const r = rng(31);
+  const g = new THREE.Group();
+  for (let i = 0; i < 5; i++) g.add(plank(1.2 + r() * 1.0, C.woodDark, -2.4 + (r() - 0.5) * 2, 0.06 + i * 0.03, 0.6 + (r() - 0.5) * 1.4, r() * 3));
+  const leg = cyl(0.1, 0.12, 3.4, 0x7a5a3a, 6, 0.4, 0.15, 0);
+  leg.rotation.z = Math.PI / 2 - 0.1;
+  g.add(leg);
+  const roof = roofSheet(2.6, 2.0, C.rust);
+  roof.position.set(-2.2, 0.4, 0.8);
+  roof.rotation.set(0.3, 0.2, 0.4);
+  g.add(roof);
+  weeds(g, r, 6, 3.0);
+  return finish(scene, g, x, z, 0.4);
+}
+
+/** Le four de la fonderie, ecroule. */
+export function foundryRuin(scene: THREE.Scene, x: number, z: number): THREE.Group {
+  const r = rng(37);
+  const g = new THREE.Group();
+  g.add(cyl(0.95, 1.15, 0.8, 0x8a4a32, 10, -0.6, 0.4, 0));
+  for (let i = 0; i < 9; i++) {
+    const b = box(0.35, 0.2, 0.2, r() < 0.5 ? 0xa8553a : 0x8a4a32, -0.6 + (r() - 0.5) * 3, 0.1, (r() - 0.5) * 2.4);
+    b.rotation.y = r() * 3;
+    g.add(b);
+  }
+  const chimney = cyl(0.3, 0.38, 2.6, 0x6a3a2a, 8, 0.8, 0.35, 0.8);
+  chimney.rotation.z = Math.PI / 2 - 0.15;
+  g.add(chimney);
+  weeds(g, r, 5, 3.4);
+  return finish(scene, g, x, z);
+}

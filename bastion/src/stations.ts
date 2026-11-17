@@ -124,7 +124,7 @@ export class Converter {
 // ---------------------------------------------------------------- etal et clients
 
 /** L'ordre des bacs sur le comptoir, de gauche a droite. */
-export const BIN_TYPES: ItemType[] = ['carrot', 'tomato', 'wheat', 'soup', 'bread', 'fish', 'log', 'plank', 'scrap', 'fuel'];
+export const BIN_TYPES: ItemType[] = ['carrot', 'tomato', 'wheat', 'soup', 'bread', 'fish', 'log', 'plank', 'stone', 'scrap', 'metal', 'fuel'];
 /** Contenance d'un bac : on peut deposer enormement avant qu'il deborde. */
 export const BIN_CAP = 99;
 /** Objets visibles dans un bac (le reste est compte, pas dessine). */

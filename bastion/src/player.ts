@@ -5,7 +5,7 @@ import { Stack } from './carry';
 import { C, box, cone, cyl, damp, group, rbox, shadow, sphere } from './kit';
 import { collide, type Circle, type Segment } from './physics';
 
-export type Tool = 'none' | 'axe' | 'hammer' | 'gun';
+export type Tool = 'none' | 'axe' | 'hammer' | 'pick' | 'gun';
 export type Weapon = 'rifle' | 'shotgun' | 'crossbow';
 
 export class Player {
@@ -82,9 +82,15 @@ export class Player {
       box(0.08, 0.08, 0.66, 0x6a4a2a, 0, 0, 0.22), box(0.7, 0.05, 0.06, 0x3a3a3a, 0, 0, 0.48),
       box(0.03, 0.03, 0.5, 0xd9b07a, 0, 0.05, 0.3),
     );
-    this.tools = { axe, hammer };
+    const pick = group(
+      cyl(0.035, 0.035, 0.75, C.woodDark, 6, 0, 0, 0.28),
+      rbox(0.07, 0.07, 0.6, 0x7a8288, 0.02, 0, 0, 0.6),
+    );
+    (pick.children[0] as THREE.Mesh).rotation.x = Math.PI / 2;
+    (pick.children[1] as THREE.Mesh).rotation.y = Math.PI / 2;
+    this.tools = { axe, hammer, pick };
     this.guns = { rifle, shotgun, crossbow };
-    for (const t of [axe, hammer, rifle, shotgun, crossbow]) {
+    for (const t of [axe, hammer, pick, rifle, shotgun, crossbow]) {
       t.position.set(0, -0.58, 0.05);
       t.visible = false;
       this.armR.add(t);

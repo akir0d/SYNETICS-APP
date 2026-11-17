@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { C, blob, box, cone, cyl, group, rbox, shadow, sphere } from './kit';
 
-export type ItemType = 'carrot' | 'tomato' | 'log' | 'plank' | 'soup' | 'scrap' | 'wheat' | 'bread' | 'fish' | 'fuel';
+export type ItemType = 'carrot' | 'tomato' | 'log' | 'plank' | 'soup' | 'scrap' | 'wheat' | 'bread' | 'fish' | 'fuel' | 'stone' | 'metal';
 
 export interface ItemDef {
   name: string;
@@ -26,6 +26,8 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   bread: { name: 'Pain', icon: '🍞', price: 16, h: 0.2 },
   fish: { name: 'Poisson', icon: '🐟', price: 8, h: 0.16 },
   fuel: { name: 'Carburant', icon: '⛽', price: 10, h: 0.5 },
+  stone: { name: 'Pierre', icon: '🧱', price: 2, h: 0.24 },
+  metal: { name: 'Métal', icon: '⚙️', price: 14, h: 0.16 },
 };
 
 export function itemMesh(t: ItemType): THREE.Group {
@@ -107,6 +109,16 @@ export function itemMesh(t: ItemType): THREE.Group {
       g = group(body, tail, sphere(0.025, 0x1a1a1a, 0.2, 0.12, 0.08, 5));
       break;
     }
+    case 'stone': {
+      const a = blob(0.17, 0x9a9890, -0.08, 0.13, 0);
+      const b = blob(0.14, 0x85837b, 0.12, 0.11, 0.06);
+      a.scale.y = 0.8;
+      g = group(a, b, blob(0.11, 0xb0aea6, 0.02, 0.24, -0.06));
+      break;
+    }
+    case 'metal':
+      g = group(rbox(0.5, 0.13, 0.24, 0x9aa3ab, 0.03, 0, 0.07, 0), box(0.4, 0.02, 0.16, 0xc9d1d8, 0, 0.145, 0));
+      break;
     case 'fuel':
       g = group(rbox(0.34, 0.46, 0.18, 0xc9412f, 0.04, 0, 0.23, 0), box(0.14, 0.07, 0.07, 0x8a2a20, 0.07, 0.5, 0), box(0.2, 0.04, 0.2, 0x8a2a20, -0.05, 0.42, 0));
       break;

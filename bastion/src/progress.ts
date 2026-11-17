@@ -48,9 +48,12 @@ export const PADS: PadDef[] = [
   // ---- la fin
   { id: 'bed4', name: 'Réparer le potager', icon: '🍅', ...L.pads.bed4, site: L.beds[3]!, cost: { coins: 260, plank: 6 }, after: 31 },
   { id: 'field3', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field3, site: L.fields[2]!, cost: { coins: 420, plank: 10 }, after: 32 },
-  { id: 'bus1', name: 'Bus : moteur', icon: '🔧', ...L.busPad, site: L.bus, cost: { coins: 900, scrap: 30 }, after: 34 },
-  { id: 'bus2', name: 'Bus : carrosserie', icon: '🚌', ...L.busPad, site: L.bus, cost: { coins: 1400, plank: 30, scrap: 15 }, after: 35 },
-  { id: 'bus3', name: 'Bus : carburant', icon: '⛽', ...L.busPad, site: L.bus, cost: { coins: 2200, fuel: 12 }, after: 36 },
+  // ---- materiaux : pierre et metal
+  { id: 'quarry', name: 'Ouvrir la carrière', icon: '⛏️', ...L.pads.quarry, site: L.quarryShed, cost: { coins: 600, plank: 15 }, after: 33 },
+  { id: 'foundry', name: 'Restaurer la fonderie', icon: '🔥', ...L.pads.foundry, site: L.foundry, cost: { coins: 1200, stone: 40, scrap: 20 }, after: 36 },
+  { id: 'bus1', name: 'Bus : moteur', icon: '🔧', ...L.busPad, site: L.bus, cost: { coins: 900, scrap: 30 }, after: 39 },
+  { id: 'bus2', name: 'Bus : carrosserie', icon: '🚌', ...L.busPad, site: L.bus, cost: { coins: 1400, plank: 30, scrap: 15 }, after: 40 },
+  { id: 'bus3', name: 'Bus : carburant', icon: '⛽', ...L.busPad, site: L.bus, cost: { coins: 2200, fuel: 12, metal: 10 }, after: 41 },
 ];
 
 /** Objectif a partir duquel les nuits (et les hordes) commencent : apres la palissade. */
@@ -73,6 +76,7 @@ export interface Stats {
   harvested: number; shelved: number; cashed: number; logs: number; planks: number; scrap: number;
   sold: number; earned: number; kills: number; nights: number; repairs: number;
   soup: number; chest: number; wheat: number; bread: number; fish: number; fuel: number;
+  stone: number; metal: number;
 }
 
 export interface Save {
@@ -121,6 +125,10 @@ export interface Save {
   caches: Record<string, number>;
   rescued: number;
   radio: number[];
+  /** Materiau de la palissade : 1 bois simple, 2 pieux, 3 pierre, 4 ferraille, 5 fer fondu. */
+  wallTier: number;
+  /** Niveau de construction des batiments : 1 bois, 2 pierre, 3 metal. */
+  bt: Record<string, number>;
 }
 
 /** Nouvelle cle : la vallee est un nouveau niveau, l'ancienne partie du camp n'est pas reprise. */
@@ -128,14 +136,15 @@ const KEY = 'dernier-bastion.vallee.v1';
 
 export function freshSave(): Save {
   return {
-    v: 3, coins: 0, built: [], paid: {}, up: { bag: 0, boots: 0, axe: 0, gun: 0, health: 0, wall: 0 },
+    v: 4, coins: 0, built: [], paid: {}, up: { bag: 0, boots: 0, axe: 0, gun: 0, health: 0, wall: 0 },
     obj: 0, day: 1, phase: 'day', phaseT: 0, cycle: false, won: false,
     stats: { harvested: 0, shelved: 0, cashed: 0, logs: 0, planks: 0, scrap: 0, sold: 0, earned: 0, kills: 0, nights: 0, repairs: 0,
-      soup: 0, chest: 0, wheat: 0, bread: 0, fish: 0, fuel: 0 },
+      soup: 0, chest: 0, wheat: 0, bread: 0, fish: 0, fuel: 0, stone: 0, metal: 0 },
     playTime: 0, lastSeen: Date.now(), muted: false,
     gems: 0, owned: [], lv: {}, boosts: {}, chestAt: 0, quests: { key: '', list: [] }, gemAds: { key: '', n: 0 },
     broken: [], fixPaid: {}, campLv: 1,
     weapons: ['rifle'], weapon: 'rifle', outfits: ['base'], outfit: 'base', caches: {}, rescued: 0, radio: [],
+    wallTier: 1, bt: {},
   };
 }
 
@@ -164,7 +173,15 @@ export function loadSave(): Save {
       outfits: Array.isArray(d.outfits) ? d.outfits : ['base'],
       caches: { ...(d.caches ?? {}) },
       radio: Array.isArray(d.radio) ? d.radio : [],
+      bt: { ...(d.bt ?? {}) },
+      // Les parties d'avant les materiaux avaient deja des pieux taillés.
+      wallTier: d.wallTier ?? ((d.v ?? 3) < 4 ? 2 : 1),
     };
+    // Version 3 : cinq objectifs (carriere, pierre, palissade, fonderie, metal) inseres avant la fin.
+    if ((d.v ?? 3) < 4) {
+      if (s.obj >= 33) s.obj += 5;
+      s.v = 4;
+    }
     return s;
   } catch {
     return base;

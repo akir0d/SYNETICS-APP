@@ -311,6 +311,55 @@ export class ScrapSource {
   }
 }
 
+/** Affleurement rocheux de la carriere : on le casse a la pioche, il se reconstitue lentement. */
+export class StoneSource {
+  readonly root = new THREE.Group();
+  amount = 8;
+  readonly max = 8;
+  private regen = 0;
+  private shake = 0;
+
+  constructor(scene: THREE.Scene, readonly x: number, readonly z: number, solids: Circle[]) {
+    const r = rng(Math.round(x * 17 + z * 5));
+    for (let i = 0; i < 6; i++) {
+      const b = blob(0.6 + r() * 0.5, [0x9a9890, 0x85837b, 0xa8a59b][i % 3]!, (r() - 0.5) * 1.6, 0.35 + r() * 0.4, (r() - 0.5) * 1.4, 0);
+      b.scale.y = 0.7 + r() * 0.5;
+      b.rotation.y = r() * 3;
+      this.root.add(b);
+    }
+    shadow(this.root);
+    this.root.position.set(x, 0, z);
+    scene.add(this.root);
+    solids.push({ x, z, r: 1.3 });
+  }
+
+  get radius(): number {
+    return 2.4;
+  }
+
+  hit(): boolean {
+    if (this.amount <= 0) return false;
+    this.amount -= 1;
+    this.shake = 1;
+    return true;
+  }
+
+  update(dt: number): void {
+    if (this.amount < this.max) {
+      this.regen += dt;
+      if (this.regen > 6) {
+        this.regen = 0;
+        this.amount += 1;
+      }
+    }
+    this.shake = Math.max(0, this.shake - dt * 6);
+    this.root.position.x = this.x + Math.sin(this.shake * 40) * this.shake * 0.05;
+    // Plus il est entame, plus il est petit.
+    const k = 0.55 + 0.45 * (this.amount / this.max);
+    this.root.scale.set(1, k, 1);
+  }
+}
+
 /** Pompe de la station : il reste du carburant au fond des cuves, on le siphonne en bidons. */
 export class Pump {
   readonly root: THREE.Group;

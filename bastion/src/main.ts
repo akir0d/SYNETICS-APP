@@ -4,21 +4,21 @@ import './style.css';
 import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
-import { Bus, dock, kitchen, sawmill, shelter, watchTower, windmill, workbench, type Building } from './buildings';
+import { Bus, dock, foundry, kitchen, quarryShed, sawmill, shelter, watchTower, windmill, workbench, type Building } from './buildings';
 import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type HelperCtx, type Job } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
-import { damp, easeOutBack, glow } from './kit';
+import { box, damp, easeOutBack, glow, rbox } from './kit';
 import { CAMP, L, insideFarm, insideStation } from './layout';
 import { regions, type NavState } from './nav';
-import { LOG_HP, Palisade, logsNeeded, stateOf, type Section } from './palisade';
+import { Palisade, TIERS, logsNeeded, stateOf, unitHp, type Section } from './palisade';
 import type { Segment } from './physics';
 import { Player } from './player';
 import {
   CYCLE_FROM, PADS, UPGRADES, dayLen, freshSave, loadSave, nightLen, wipeSave, writeSave,
   type Cost, type PadDef, type Save, type UpId,
 } from './progress';
-import { Bed, ChopTree, FIELD_D, FIELD_W, Pump, ScrapSource, plantForest } from './resources';
+import { Bed, ChopTree, FIELD_D, FIELD_W, Pump, ScrapSource, StoneSource, plantForest } from './resources';
 import { Restorer } from './restore';
 import {
   BOOSTS, BOOST_TIME, CHEST_EVERY, GEM_ADS_PER_DAY, LEVELS, MAX_LEVEL, QUESTS, levelCost, rollQuests, todayKey,
@@ -28,7 +28,7 @@ import { PRODUCTS, SIMULATED, purchase, showRewarded, type Product } from './mon
 import { CREW, OUTFITS, RADIO, WEAPONS, type WeaponId } from './meta';
 import { Airdrop, CACHE_SPOTS, Cache, Caravan, DROP_SPOTS, RESCUE_SPOTS, Rescue, type Spot } from './events';
 import {
-  bedRuin, benchRuin, dockRuin, fieldRuin, gateJunk, junkPile, kitchenRuin, millRuin, sawmillRuin, shelterRuin, towerRuin,
+  bedRuin, benchRuin, dockRuin, fieldRuin, foundryRuin, gateJunk, junkPile, kitchenRuin, millRuin, quarryRuin, sawmillRuin, shelterRuin, towerRuin,
 } from './ruins';
 import { BIN_CAP, CoinDrops, Converter, Market, Reserve } from './stations';
 import { buildWorld } from './world';
@@ -88,6 +88,7 @@ const fields = L.fields.map((f) => new Bed(scene, f.x, f.z, 'wheat', FIELD_W, FI
 beds.push(...fields);
 for (const b of beds) world.walls.push(...b.walls);
 const pumps = L.pumps.map((p) => new Pump(scene, p.x, p.z, world.solids));
+const rocks = L.rocks.map((p) => new StoneSource(scene, p.x, p.z, world.solids));
 const trees = plantForest(scene);
 for (const t of trees) world.solids.push(t.solid);
 const scraps = L.scrap.map((s) => new ScrapSource(scene, s.x, s.z, s.ry, s.kind, world.solids));
@@ -96,6 +97,7 @@ boot('batiments');
 const tower = watchTower(scene);
 const B: Record<string, Building> = {
   bench: workbench(), sawmill: sawmill(), kitchen: kitchen(), shelter: shelter(), mill: windmill(), dock: dock(),
+  quarry: quarryShed(), foundry: foundry(),
 };
 for (const b of Object.values(B)) scene.add(b.group);
 B.tower = tower;
@@ -112,6 +114,8 @@ const SOLIDS: Record<string, { x: number; z: number; r: number }[]> = {
   shelter: [{ x: L.shelter.x, z: L.shelter.z, r: 2.0 }],
   mill: [{ x: L.mill.x, z: L.mill.z, r: 1.9 }, { x: L.mill.x + 2.0, z: L.mill.z + 0.8, r: 0.9 }],
   chest: [{ x: L.chest.x, z: L.chest.z, r: 0.9 }],
+  foundry: [{ x: L.foundry.x - 0.6, z: L.foundry.z, r: 1.3 }, { x: L.foundry.x + 1.2, z: L.foundry.z + 0.2, r: 0.6 }],
+  quarry: [{ x: L.quarryShed.x - 2.2, z: L.quarryShed.z + 0.4, r: 1.3 }],
 };
 for (const list of Object.values(SOLIDS)) for (const s of list) world.solids.push({ ...s });
 boot('ruines');
@@ -132,6 +136,8 @@ const RUINS: Record<string, THREE.Object3D> = {
   dock: dockRuin(scene, L.dock.x, L.dock.z),
   westRoad: junkPile(scene, L.farmGate.x, L.farmGate.z + 0.3, 0, 21),
   eastRoad: junkPile(scene, L.stationGate.x - 0.3, L.stationGate.z, Math.PI / 2, 23),
+  quarry: quarryRuin(scene, L.quarryShed.x, L.quarryShed.z),
+  foundry: foundryRuin(scene, L.foundry.x, L.foundry.z),
 };
 /** Le ponton : une fois repare, on peut s'avancer sur l'eau (mais pas tomber dedans). */
 const dockWalls: Segment[] = [
@@ -161,6 +167,7 @@ const market = new Market(scene, labels);
 const saw = new Converter(scene, L.sawIn, L.sawOut, ['log'], 1, 'plank', 1.6);
 const cook = new Converter(scene, L.kitchenIn, L.kitchenOut, ['carrot', 'tomato'], 2, 'soup', 2.4);
 const mill = new Converter(scene, L.millIn, L.millOut, ['wheat'], 2, 'bread', 2.8);
+const forge = new Converter(scene, L.foundryIn, L.foundryOut, ['scrap'], 2, 'metal', 3.2);
 const reserve = new Reserve(scene, labels);
 const helpers: Helper[] = [];
 const nav: NavState = { northOpen: false, westOpen: false, eastOpen: false };
@@ -361,6 +368,8 @@ function applyBuild(id: string, instant: boolean): void {
       restore(id, new THREE.Group(), instant);
       break;
     case 'mill': restoreBuilding(id, B.mill!, instant, () => { mill.built = true; mill.setVisible(true); }); break;
+    case 'quarry': restoreBuilding(id, B.quarry!, instant); break;
+    case 'foundry': restoreBuilding(id, B.foundry!, instant, () => { forge.built = true; forge.setVisible(true); }); break;
     case 'dock':
       world.locks.dock.off = true;
       for (const w of dockWalls) w.off = false;
@@ -726,6 +735,12 @@ const OBJECTIVES: Objective[] = [
   // ---- le depart (31 a 36)
   { icon: '🍅', text: 'Remets en état le dernier potager', target: padPos('bed4'), done: () => isBuilt('bed4') },
   { icon: '🌾', text: 'Remets le dernier champ en culture', target: padPos('field3'), done: () => isBuilt('field3') },
+  // ---- les materiaux (33 a 37)
+  { icon: '⛏️', text: 'Ouvre la carrière, au nord-est', target: padPos('quarry'), done: () => isBuilt('quarry') },
+  { icon: '🧱', text: 'Extrais de la pierre à la pioche', target: nearestOf(rocks, (r) => r.amount > 0), done: stat('stone') },
+  { icon: '🧱', text: 'Monte la palissade en pierre (établi)', target: at(L.benchZone), done: () => save.wallTier >= 3 },
+  { icon: '🔥', text: 'Restaure la fonderie de la station', target: padPos('foundry'), done: () => isBuilt('foundry') },
+  { icon: '⚙️', text: 'Fonds du métal (ferraille à la fonderie)', target: at(L.foundryIn), done: stat('metal') },
   { icon: '🛡️', text: 'Renforce la palissade à l’établi', target: at(L.benchZone), done: () => save.up.wall > 0 },
   { icon: '🔧', text: 'Répare le moteur du bus', target: padPos('bus1'), done: () => isBuilt('bus1') },
   { icon: '🚌', text: 'Retape la carrosserie du bus', target: padPos('bus2'), done: () => isBuilt('bus2') },
@@ -812,7 +827,7 @@ function renderSheet(): void {
       <button class="btn ${!max && save.coins < cost ? 'poor' : ''}" data-lv="${d.id}" ${max ? 'disabled' : ''}>${max ? 'MAX' : `<span class="coin"></span>${cost}`}</button>
     </div>`;
   }).join('');
-  ui.sheetBody.innerHTML = `<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + UPGRADES.map((u) => {
+  ui.sheetBody.innerHTML = `<h2>🧱 Matériaux</h2>${materialCards()}<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + UPGRADES.map((u) => {
     const lvl = save.up[u.id];
     const max = lvl >= u.costs.length;
     const cost = u.costs[lvl] ?? 0;
@@ -826,6 +841,25 @@ function renderSheet(): void {
 }
 
 ui.sheetBody.addEventListener('click', (e) => {
+  const mb = (e.target as HTMLElement).closest<HTMLElement>('[data-mat]');
+  if (mb) {
+    const up = materialUpgrades().find((u) => u.key === mb.dataset.mat);
+    if (!up || !up.ready || !canAfford(up.cost)) {
+      sfx.sfxNope();
+      mb.classList.remove('shake');
+      void mb.offsetWidth;
+      mb.classList.add('shake');
+      return;
+    }
+    spend(up.cost);
+    up.apply();
+    sfx.sfxBuild();
+    buzz(40);
+    particles.burst(player.position.clone().setY(2), [0xffd84a, 0xffffff, 0x9a9890], 40, { speed: 5, up: 6, size: 0.16 });
+    renderSheet();
+    persist();
+    return;
+  }
   const lb = (e.target as HTMLElement).closest<HTMLElement>('[data-lv]');
   if (lb) {
     const d = LEVELS.find((x) => x.id === lb.dataset.lv)!;
@@ -910,10 +944,13 @@ function applyMeta(dt: number): void {
   for (const b of BOOSTS) if ((save.boosts[b.id] ?? 0) > 0) save.boosts[b.id] = Math.max(0, save.boosts[b.id]! - dt);
   const grow = boostOn('grow') ? 2 : 1;
   for (const b of beds) b.growMul = (1 + 0.12 * lv('crops')) * grow;
-  saw.speed = (1 + 0.15 * lv('saw')) * grow;
-  cook.speed = (1 + 0.15 * lv('cook')) * grow;
-  mill.speed = (1 + 0.15 * lv('mill')) * grow;
-  reserve.cap = 240 + 60 * lv('reserve');
+  // Batiments en pierre puis en metal : +50 % de cadence a chaque palier.
+  const tierK = (id: string) => 1 + 0.5 * (bt(id) - 1);
+  saw.speed = (1 + 0.15 * lv('saw')) * grow * tierK('sawmill');
+  cook.speed = (1 + 0.15 * lv('cook')) * grow * tierK('kitchen');
+  mill.speed = (1 + 0.15 * lv('mill')) * grow * tierK('mill');
+  forge.speed = grow * tierK('foundry');
+  reserve.cap = 240 + 60 * lv('reserve') + 120 * (bt('shelter') - 1);
   player.speedMul = (1 + 0.12 * save.up.boots) * (boostOn('speed') ? 1.4 : 1);
 }
 
@@ -1185,6 +1222,120 @@ function offerKeepBag(lost: ItemType[]): void {
   }, { once: true });
 }
 
+// ---------------------------------------------------------------- materiaux : palissade et batiments
+
+const bt = (id: string) => save.bt[id] ?? 1;
+const BT_NAMES = ['Bois', 'Pierre', 'Métal'];
+/** Batiments qu'on peut construire en dur, et leur « poids » dans le cout. */
+const TIERABLE: { id: string; name: string; icon: string; w: number }[] = [
+  { id: 'sawmill', name: 'Scierie', icon: '🪚', w: 1 },
+  { id: 'kitchen', name: 'Cuisine', icon: '🍲', w: 1.2 },
+  { id: 'tower', name: 'Tour de guet', icon: '🗼', w: 1.4 },
+  { id: 'shelter', name: 'Abri', icon: '🏠', w: 1.5 },
+  { id: 'mill', name: 'Moulin', icon: '🍞', w: 1.6 },
+  { id: 'foundry', name: 'Fonderie', icon: '🔥', w: 1.8 },
+];
+const WALL_COSTS: Cost[] = [
+  { coins: 0 },
+  { coins: 300, log: 40 },
+  { coins: 800, stone: 120 },
+  { coins: 1800, scrap: 120, stone: 30 },
+  { coins: 3500, metal: 60 },
+];
+
+/** On paie avec ce qu'on porte et ce qui est dans la reserve. */
+function have(t: ItemType): number {
+  return player.stack.countOf(t) + (reserve.counts.get(t) ?? 0);
+}
+function canAfford(c: Cost): boolean {
+  if (save.coins < c.coins) return false;
+  return (Object.keys(ITEMS) as ItemType[]).every((t) => have(t) >= (c[t] ?? 0));
+}
+function spend(c: Cost): void {
+  save.coins -= c.coins;
+  for (const t of Object.keys(ITEMS) as ItemType[]) {
+    let n = c[t] ?? 0;
+    while (n > 0 && player.stack.take((x) => x === t)) n--;
+    while (n > 0 && reserve.take((x) => x === t)) n--;
+  }
+}
+
+interface MatUp { key: string; icon: string; title: string; desc: string; cost: Cost; ready: boolean; why: string; apply: () => void }
+
+function materialUpgrades(): MatUp[] {
+  const out: MatUp[] = [];
+  const t = save.wallTier;
+  if (t < 5) {
+    const next = TIERS[t]!;
+    const ready = t + 1 === 3 ? isBuilt('quarry') : t + 1 === 5 ? isBuilt('foundry') : true;
+    out.push({
+      key: 'wall', icon: next.icon, title: `Palissade : ${next.name}`,
+      desc: `Actuelle : ${TIERS[t - 1]!.name} · solidité ×${(next.mul / TIERS[t - 1]!.mul).toFixed(1)}, se répare en ${ITEMS[next.item].icon}`,
+      cost: WALL_COSTS[t]!, ready, why: t + 1 === 3 ? 'Il faut la carrière' : 'Il faut la fonderie',
+      apply: () => {
+        save.wallTier = t + 1;
+        palisade.setTier(save.wallTier);
+        toast(`${next.icon} Palissade en ${next.name.toLowerCase()} !`);
+      },
+    });
+  }
+  for (const b of TIERABLE) {
+    if (!isBuilt(b.id) || isBroken(b.id)) continue;
+    const cur = bt(b.id);
+    if (cur >= 3) continue;
+    const toStone = cur === 1;
+    const cost: Cost = toStone
+      ? { coins: Math.round(250 * b.w / 10) * 10, stone: Math.round(25 * b.w) }
+      : { coins: Math.round(800 * b.w / 10) * 10, metal: Math.round(15 * b.w) };
+    out.push({
+      key: b.id, icon: b.icon, title: `${b.name} en ${BT_NAMES[cur]!.toLowerCase()}`,
+      desc: `Plus grand, deux fois plus solide, cadence +50 %`,
+      cost, ready: toStone ? isBuilt('quarry') : isBuilt('foundry'), why: toStone ? 'Il faut la carrière' : 'Il faut la fonderie',
+      apply: () => {
+        save.bt[b.id] = cur + 1;
+        applyBuildingTier(b.id);
+        toast(`${b.icon} ${b.name} reconstruite en ${BT_NAMES[cur]!.toLowerCase()} !`);
+      },
+    });
+  }
+  return out;
+}
+
+function materialCards(): string {
+  const ups = materialUpgrades();
+  if (!ups.length) return `<p class="note">Tout est construit en dur.</p>`;
+  return ups.map((u) => {
+    const ok = u.ready && canAfford(u.cost);
+    return `<div class="card"><div class="card-icon">${u.icon}</div>
+      <div class="card-main"><div class="card-title">${u.title}</div><div class="card-desc">${u.ready ? u.desc : u.why}</div>
+      <div class="card-desc">${costIcons(u.cost)}</div></div>
+      <button class="btn ${ok ? '' : 'poor'}" data-mat="${u.key}">Bâtir</button></div>`;
+  }).join('') + `<p class="note">Les matériaux se prennent dans ton sac puis dans la réserve.</p>`;
+}
+
+/** Un batiment en dur : un peu plus grand, sur un socle de pierre ou de fer, et plus solide. */
+function applyBuildingTier(id: string): void {
+  const t = bt(id);
+  const g = builtOf(id);
+  g.scale.setScalar(1 + 0.12 * (t - 1));
+  const old = g.getObjectByName('plinth');
+  if (old) g.remove(old);
+  if (t > 1) {
+    const r = siteOf(id).reach;
+    const plinth = new THREE.Group();
+    plinth.name = 'plinth';
+    plinth.add(rbox(r * 1.5, 0.22, r * 1.5, t === 2 ? 0x9a9890 : 0x55595c, 0.05, 0, 0.11, 0));
+    if (t === 3) for (const sx of [-1, 1]) for (const sz of [-1, 1]) plinth.add(box(0.18, 1.6, 0.18, 0x3a3d40, sx * r * 0.7, 0.8, sz * r * 0.7));
+    plinth.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+    g.add(plinth);
+  }
+  const st = STRUCTS.find((x) => x.id === id);
+  if (st) {
+    st.max = STRUCT_HP[id]! * t;
+    st.hp = st.max;
+  }
+}
+
 // ---------------------------------------------------------------- menu
 
 ui.menuBtn.addEventListener('click', () => ui.menu.classList.toggle('on'));
@@ -1252,7 +1403,7 @@ const playerChest = () => player.position.clone().setY(1.3);
 
 /** Objets en vol vers chaque bac de l'etal. */
 const shelfPending = new Map<ItemType, number>();
-const convPending = new Map<Converter, number>([[saw, 0], [cook, 0], [mill, 0]]);
+const convPending = new Map<Converter, number>([[saw, 0], [cook, 0], [mill, 0], [forge, 0]]);
 
 function putOnShelf(t: ItemType, from: THREE.Vector3): void {
   shelfPending.set(t, (shelfPending.get(t) ?? 0) + 1);
@@ -1335,9 +1486,10 @@ function interact(dt: number): void {
   }
 
   // Outils : hache pres d'un arbre, marteau pres d'une epave, fusil face a un zombie.
-  let tool: 'axe' | 'hammer' | null = null;
+  let tool: 'axe' | 'hammer' | 'pick' | null = null;
   let tree: ChopTree | null = null;
   let src: ScrapSource | null = null;
+  let rock: StoneSource | null = null;
   if (freeSpace() > 0) {
     let bd = 1.75;
     for (const t of trees) {
@@ -1350,10 +1502,15 @@ function interact(dt: number): void {
       for (const s of scraps) {
         if (s.amount > 0 && Math.hypot(s.x - p.x, s.z - p.z) < s.radius) { src = s; tool = 'hammer'; break; }
       }
+      if (!src && isBuilt('quarry')) {
+        for (const r of rocks) {
+          if (r.amount > 0 && Math.hypot(r.x - p.x, r.z - p.z) < r.radius) { rock = r; tool = 'pick'; break; }
+        }
+      }
     }
   }
   player.setTool(aimTarget ? 'gun' : tool ?? 'none');
-  const toolTarget = tree ?? src;
+  const toolTarget = tree ?? src ?? rock;
   if (toolTarget && !aimTarget) {
     player.faceTowards(toolTarget.x, toolTarget.z, dt);
     const interval = tool === 'axe' ? 0.5 - 0.06 * save.up.axe : 0.45;
@@ -1361,6 +1518,7 @@ function interact(dt: number): void {
       actClock = interval;
       const tt = tree;
       const ss = src;
+      const rr = rock;
       // L'impact arrive au milieu du geste.
       setTimeout(() => {
         if (tt && tt.chop(p.x, p.z, 3 + save.up.axe)) {
@@ -1376,6 +1534,12 @@ function interact(dt: number): void {
           const at = new THREE.Vector3(ss.x, 1.0, ss.z);
           particles.burst(at, [0xfff1a8, 0x9aa3ab, 0xb8653a], 10, { speed: 4, up: 3, size: 0.08, life: 0.4 });
           if (freeSpace() > 0) giveToPlayer('scrap', at, () => { save.stats.scrap++; });
+        } else if (rr && rr.hit()) {
+          sfx.sfxClang();
+          buzz(12);
+          const at = new THREE.Vector3(rr.x, 0.9, rr.z);
+          particles.burst(at, [0x9a9890, 0xb0aea6, 0x6f6c66], 12, { speed: 4, up: 3, size: 0.12, life: 0.5 });
+          if (freeSpace() > 0) giveToPlayer('stone', at, () => { save.stats.stone++; });
         }
       }, 140);
     }
@@ -1427,20 +1591,21 @@ function interact(dt: number): void {
   // le bois va la ou on l'a voulu.
   const busyZone = near(L.shelf.x, L.shelf.z, 1.8) || near(reserve.zone.x, reserve.zone.z, 1.3)
     || pads.some((q) => q.shown && !isBuilt(q.def.id) && near(q.def.x, q.def.z, 1.6))
-    || [saw, cook, mill].some((c) => c.built && near(c.input.x, c.input.z, 1.5));
-  repairTarget = !busyZone && player.stack.has('log') ? palisade.repairable(p.x, p.z) : null;
+    || [saw, cook, mill, forge].some((c) => c.built && near(c.input.x, c.input.z, 1.5));
+  const wallItem = palisade.repairItem;
+  repairTarget = !busyZone && player.stack.has(wallItem) ? palisade.repairable(p.x, p.z) : null;
   if (settled && dropClock <= 0 && repairTarget) {
     const s = repairTarget;
-    const item = player.stack.take((t) => t === 'log');
+    const item = player.stack.take((t) => t === wallItem);
     if (item) {
       dropClock = 0.16;
       s.inflight++;
       const to = new THREE.Vector3(s.x, 1.1, s.z);
-      flyers.launch(itemMesh('log'), item.pos, () => to, () => repairLanded(s), 0.3, 1.3);
+      flyers.launch(itemMesh(item.type), item.pos, () => to, () => repairLanded(s), 0.3, 1.3);
     }
   }
   // Nourrir les machines, ramasser ce qu'elles produisent.
-  for (const c of [saw, cook, mill]) {
+  for (const c of [saw, cook, mill, forge]) {
     if (!c.built) continue;
     if (settled && dropClock <= 0 && near(c.input.x, c.input.z, 1.35) && convRoom(c) > 0) {
       const item = player.stack.take((t) => c.accepts.includes(t));
@@ -1533,7 +1698,7 @@ let repairTarget: Section | null = null;
 function repairLanded(s: Section): void {
   s.inflight = Math.max(0, s.inflight - 1);
   const before = stateOf(s);
-  palisade.setHp(s, s.hp + LOG_HP);
+  palisade.setHp(s, s.hp + unitHp(s));
   save.stats.repairs++;
   sfx.sfxChop();
   buzz(10);
@@ -1611,7 +1776,7 @@ const helperCtx: HelperCtx = {
   reserveTake: () => reserve.take(),
   porterDrop: (t) => {
     // D'abord la machine qui transforme, sinon le bac de l'etal.
-    const conv = t === 'log' ? saw : t === 'carrot' || t === 'tomato' ? cook : t === 'wheat' ? mill : null;
+    const conv = t === 'log' ? saw : t === 'carrot' || t === 'tomato' ? cook : t === 'wheat' ? mill : t === 'scrap' ? forge : null;
     if (conv && conv.built && convRoom(conv) > 0) return { at: { x: conv.input.x, z: conv.input.z }, put: (x, from) => putInConverter(conv, x, from) };
     if (shelfRoom(t) > 0) return { at: L.shelf, put: (x, from) => putOnShelf(x, from) };
     return null;
@@ -1952,7 +2117,7 @@ function updateCombat(dt: number): void {
     const tz = horde.nearest(new THREE.Vector3(L.tower.x, 0, L.tower.z), 16);
     if (tz) {
       towerClock = 0.7 / (1 + 0.08 * lv('tower'));
-      shoot(tz, tower.muzzle, 1 + Math.floor(save.day / 3) + lv('tower'), false);
+      shoot(tz, tower.muzzle, 1 + Math.floor(save.day / 3) + lv('tower') + 2 * (bt('tower') - 1), false);
     }
   }
   // Tours d'angle (niveau du camp) : elles couvrent les flancs.
@@ -2230,6 +2395,8 @@ function productsList(): ItemType[] {
   if (isBuilt('mill')) list.push('bread');
   if (isBuilt('dock')) list.push('fish');
   if (isBuilt('eastRoad')) list.push('fuel');
+  if (isBuilt('quarry')) list.push('stone');
+  if (isBuilt('foundry')) list.push('metal');
   return list;
 }
 
@@ -2251,6 +2418,9 @@ function step(dt: number, time: number): void {
   for (const t of trees) t.update(dt);
   for (const s of scraps) s.update(dt);
   for (const u of pumps) u.update(dt);
+  for (const r of rocks) r.update(dt);
+  if (forge.update(dt, time)) save.stats.metal++;
+  B.foundry!.anim?.(dt, time, forge.busy);
   if (saw.update(dt, time)) save.stats.planks++;
   if (cook.update(dt, time)) save.stats.soup++;
   if (mill.update(dt, time)) save.stats.bread++;
@@ -2384,7 +2554,7 @@ function frame(): void {
   }
   for (const s of palisade.sections) {
     if (s !== wallLabel) { s.label.classList.add('off'); continue; }
-    const html = `🪵 ${logsNeeded(s)}`;
+    const html = `${ITEMS[palisade.repairItem].icon} ${logsNeeded(s)}`;
     if (s.label.innerHTML !== html) s.label.innerHTML = html;
     s.label.classList.toggle('broken', s.hp <= 0);
     s.label.classList.toggle('active', s === repairTarget);
@@ -2415,6 +2585,8 @@ function frame(): void {
 boot('restauration de la partie');
 beds[0]!.unlock();
 {
+  palisade.setTier(save.wallTier);
+  palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
   const hp = save.walls && save.walls.length === palisade.sections.length ? save.walls : palisade.initialHp();
   palisade.sections.forEach((s, i) => palisade.setHp(s, hp[i]!));
 }
@@ -2422,6 +2594,7 @@ for (const id of save.built) applyBuild(id, true);
 // Ce que les zombies avaient demoli reste en ruine jusqu'a reparation.
 for (const id of [...save.broken]) wreck(id, true);
 applyCampLevel(true);
+for (const b of TIERABLE) if (isBuilt(b.id) && bt(b.id) > 1) applyBuildingTier(b.id);
 applyUpgrades();
 equipWeapon((WEAPONS.find((x) => x.id === save.weapon)?.id ?? 'rifle') as WeaponId);
 wearOutfit(save.outfit);

@@ -53,6 +53,14 @@ export const L = {
   canopy: { x: 34.7, z: 12.6 },
   shop: { x: 41, z: 9.5 },
 
+  // ---- la carriere (nord-est) et la fonderie (station)
+  quarry: { x: 31, z: -24 },
+  quarryShed: { x: 25.5, z: -17 },
+  rocks: [{ x: 27, z: -21 }, { x: 31.5, z: -26.5 }, { x: 35.5, z: -21.5 }, { x: 29, z: -31 }, { x: 36.5, z: -29 }],
+  foundry: { x: 36.5, z: 27 },
+  foundryIn: { x: 33.2, z: 24.6 },
+  foundryOut: { x: 39.8, z: 24.6 },
+
   // ---- l'etang (sud)
   dock: { x: 2, z: 29.2 },
   fishSpot: { x: 2, z: 30.5 },
@@ -82,6 +90,8 @@ export const L = {
     fisher: { x: -1.8, z: 26.4 },
     eastRoad: { x: 20.8, z: 19 },
     scav: { x: 29, z: 9 },
+    quarry: { x: 23, z: -14.6 },
+    foundry: { x: 36.5, z: 22.4 },
   },
   bus: { x: -14, z: 19.4 },
   busPad: { x: -14, z: 15.7 },

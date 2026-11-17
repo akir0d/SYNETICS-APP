@@ -250,6 +250,47 @@ export function dock(): Building {
   return { group: hidden(g, L.dock.x, L.dock.z) };
 }
 
+/** La cabane de la carriere : treuil en bois, outils, brouette. */
+export function quarryShed(): Building {
+  const g = new THREE.Group();
+  for (const s of [-1, 1]) {
+    const leg = cyl(0.1, 0.12, 3.6, LOG, 6, s * 0.9, 1.7, 0);
+    leg.rotation.z = -s * 0.25;
+    g.add(leg);
+  }
+  const top = cyl(0.12, 0.12, 0.6, LOG2, 6, 0, 3.4, 0);
+  top.rotation.x = Math.PI / 2;
+  g.add(top, cyl(0.02, 0.02, 2.4, 0x3a3a3a, 3, 0, 2.2, 0), rbox(0.4, 0.3, 0.4, 0x7a8288, 0.04, 0, 1.0, 0));
+  g.add(box(2.2, 1.8, 1.6, C.woodDark, -2.4, 0.9, 0.6), at(roofSheet(2.6, 2.0, C.rust), -2.4, 1.95, 0.6));
+  g.add(rbox(0.9, 0.35, 0.6, 0x5a6e3a, 0.06, 1.8, 0.45, 1.2), cyl(0.18, 0.18, 0.1, 0x2b2b2b, 8, 2.3, 0.2, 1.2));
+  (g.children[g.children.length - 1] as THREE.Mesh).rotation.x = Math.PI / 2;
+  return { group: hidden(g, L.quarryShed.x, L.quarryShed.z, 0.4) };
+}
+
+/** La fonderie : un four de briques, un creuset rougeoyant, une cheminee. */
+export function foundry(): Building {
+  const g = new THREE.Group();
+  for (const s of [-1, 1]) for (const t of [-1, 1]) g.add(logPost(s * 1.9, t * 1.3, 2.8, 0.1, 0x55595c));
+  const roof = roofSheet(4.4, 3.2, 0x55595c);
+  roof.position.y = 2.9;
+  roof.rotation.x = 0.1;
+  g.add(roof);
+  g.add(cyl(0.95, 1.15, 1.8, 0xa8553a, 10, -0.6, 0.9, 0), cyl(0.3, 0.38, 3.0, 0x6a3a2a, 8, -0.6, 3.1, -0.3));
+  const fireMat = uniqueMat(0xff8a2a, 0xff5a10);
+  const mouth = mesh(new THREE.BoxGeometry(0.6, 0.45, 0.06), fireMat, -0.6, 0.6, 1.08);
+  g.add(mouth);
+  g.add(rbox(0.7, 0.45, 0.4, 0x3a3a3a, 0.05, 1.2, 0.75, 0.2), box(0.3, 0.55, 0.3, 0x3a3a3a, 1.2, 0.27, 0.2));
+  const coal = blob(0.6, 0x2b2b2b, 1.4, 0.15, -0.9);
+  coal.scale.y = 0.4;
+  g.add(coal);
+  return {
+    group: hidden(g, L.foundry.x, L.foundry.z),
+    glowMats: [fireMat],
+    live: [mouth],
+    anim: (_dt, t, busy) => { fireMat.emissiveIntensity = busy ? 1.2 + Math.sin(t * 16) * 0.3 : 0.25; },
+  };
+}
+
 /** Le bus : epave rouillee au depart, il se refait une beaute a chaque etape. */
 export class Bus {
   readonly root = new THREE.Group();

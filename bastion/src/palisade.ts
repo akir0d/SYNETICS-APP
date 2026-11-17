@@ -4,15 +4,25 @@
 
 import * as THREE from 'three';
 import { mergeColored } from './bake';
-import { cone, cyl, group, rng } from './kit';
+import { blob, box, cone, cyl, group, rbox, rng, sphere } from './kit';
 import { CAMP, L } from './layout';
 import type { Segment } from './physics';
-import { stake } from './props';
+import { SCRAP_TONES, sheet, stake } from './props';
 
 export const WALL_HP = 30;
 export const GATE_HP = 60;
 /** Points de vie rendus par chaque rondin. */
 export const LOG_HP = 10;
+
+/** Les cinq palissades, de la cloture de planches au fer fondu. */
+export const TIERS = [
+  { name: 'Bois simple', icon: '🪵', item: 'log', mul: 1 },
+  { name: 'Pieux taillés', icon: '🪓', item: 'log', mul: 1.8 },
+  { name: 'Pierre', icon: '🧱', item: 'stone', mul: 3 },
+  { name: 'Ferraille', icon: '🔩', item: 'scrap', mul: 4.2 },
+  { name: 'Fer fondu', icon: '⚙️', item: 'metal', mul: 6 },
+] as const;
+export type TierItem = (typeof TIERS)[number]['item'];
 
 const HIGH = 2.9;
 const LOW = 1.6;
@@ -29,6 +39,8 @@ export interface Section {
   nx: number;
   nz: number;
   len: number;
+  /** Hauteur de reference du troncon (haut au nord, bas au sud). */
+  h: number;
   seg: Segment;
   hp: number;
   max: number;
@@ -64,8 +76,13 @@ export function stateOf(s: Section): number {
   return k > 0.66 ? 3 : k > 0.33 ? 2 : 1;
 }
 
+/** Chaque unite de materiau rend un tiers de la solidite : trois pour un troncon a terre. */
+export function unitHp(s: Section): number {
+  return s.max / 3;
+}
+
 export function logsNeeded(s: Section): number {
-  return Math.ceil(Math.max(0, s.max - s.hp) / LOG_HP);
+  return Math.ceil(Math.max(0, s.max - s.hp) / unitHp(s) - 1e-6);
 }
 
 interface LogProfile { x: number; r: number; h: number; tone: number; roll: number; lean: number }
@@ -94,8 +111,152 @@ function beam(len: number, y: number, z: number): THREE.Mesh {
   return b;
 }
 
+/** Les quatre etats d'un troncon (0 a terre .. 3 intact), selon le materiau. */
+function wallStates(len: number, H: number, seed: number, tier: number): THREE.Group[] {
+  if (tier === 1) return plankStates(len, H, seed);
+  if (tier === 3) return stoneStates(len, H, seed);
+  if (tier === 4) return scrapStates(len, H, seed);
+  if (tier === 5) return metalStates(len, H, seed);
+  return pikeStates(len, H, seed);
+}
+
+/** Niveau 1 : une cloture de planches clouees sur deux traverses, sans pointe. */
+function plankStates(len: number, H: number, seed: number): THREE.Group[] {
+  const r = rng(seed);
+  const h = H * 0.72;
+  const n = Math.max(3, Math.round(len / 0.3));
+  const boards = Array.from({ length: n }, (_, i) => ({ x: -len / 2 + (i + 0.5) * (len / n), h: h * (0.92 + r() * 0.12), roll: r(), tone: [0xb98a55, 0xa87a48, 0xc69a62][i % 3]! }));
+  const rails = (top: boolean) => group(beam(len, h * 0.3, 0.12), ...(top ? [beam(len, h * 0.8, 0.12)] : []));
+  const build = (keep: (b: { roll: number }) => number) => {
+    const g = new THREE.Group();
+    for (const b of boards) {
+      const k = keep(b);
+      if (k <= 0) continue;
+      g.add(box(len / n - 0.03, b.h * k, 0.06, b.tone, b.x, (b.h * k) / 2, 0));
+    }
+    return g;
+  };
+  const intact = group(rails(true), build(() => 1));
+  const damaged = group(rails(true), build((b) => (b.roll < 0.25 ? 0 : b.roll < 0.4 ? 0.6 : 1)));
+  const heavy = group(rails(false), build((b) => (b.roll < 0.55 ? 0 : 0.7)));
+  const broken = group(build((b) => (b.roll < 0.7 ? 0.15 : 0.3)));
+  for (let i = 0; i < 3; i++) {
+    const p = box(len / n, h * 0.8, 0.06, boards[i]!.tone, (i - 1) * len * 0.3, 0.04, 0.7 + (i % 2) * 0.4);
+    p.rotation.x = Math.PI / 2;
+    p.rotation.z = r() * 2;
+    broken.add(p);
+  }
+  return [broken, heavy, damaged, intact];
+}
+
+/** Niveau 3 : un mur de moellons, assises decalees et chaperon. */
+function stoneStates(len: number, H: number, seed: number): THREE.Group[] {
+  const r = rng(seed);
+  const rows = Math.max(3, Math.round((H * 0.92) / 0.4));
+  const cols = Math.max(3, Math.round(len / 0.6));
+  const w = len / cols;
+  const blocks: { x: number; y: number; row: number; roll: number; tone: number; w: number }[] = [];
+  for (let j = 0; j < rows; j++) {
+    const off = j % 2 ? w / 2 : 0;
+    for (let i = 0; i < cols; i++) {
+      const x = -len / 2 + w / 2 + i * w + off;
+      if (x > len / 2 - w * 0.25) continue;
+      blocks.push({ x, y: 0.2 + j * 0.4, row: j, roll: r(), tone: [0x9a9890, 0x85837b, 0xa8a59b, 0x8f8a80][Math.floor(r() * 4)]!, w: w - 0.04 });
+    }
+  }
+  const build = (keepRow: (row: number, roll: number) => boolean, cap: boolean) => {
+    const g = new THREE.Group();
+    for (const b of blocks) if (keepRow(b.row, b.roll)) g.add(rbox(b.w, 0.38, 0.6, b.tone, 0.05, b.x, b.y, 0));
+    if (cap) g.add(box(len + 0.05, 0.12, 0.7, 0x77746c, 0, rows * 0.4 + 0.06, 0));
+    return g;
+  };
+  const intact = build(() => true, true);
+  const damaged = build((row, roll) => row < rows - 1 || roll > 0.35, false);
+  const heavy = build((row, roll) => row < Math.ceil(rows / 2) || (row < rows - 1 && roll > 0.7), false);
+  const broken = build((row) => row === 0, false);
+  for (let i = 0; i < 5; i++) {
+    const b = blob(0.2 + r() * 0.2, 0x85837b, (r() - 0.5) * len, 0.15, (r() < 0.5 ? -1 : 1) * (0.5 + r() * 0.5));
+    b.scale.y = 0.6;
+    broken.add(b);
+    if (i < 3) heavy.add(b.clone());
+  }
+  return [broken, heavy, damaged, intact];
+}
+
+/** Niveau 4 : des toles de recuperation sur des poteaux, pointes de fer au sommet. */
+function scrapStates(len: number, H: number, seed: number): THREE.Group[] {
+  const r = rng(seed);
+  const n = Math.max(2, Math.round(len / 0.95));
+  const w = len / n;
+  const sheets = Array.from({ length: n }, (_, i) => ({ x: -len / 2 + w / 2 + i * w, roll: r(), tone: SCRAP_TONES[Math.floor(r() * SCRAP_TONES.length)]!, h: H * (0.9 + r() * 0.12) }));
+  const posts = () => {
+    const g = new THREE.Group();
+    for (let i = 0; i <= n; i++) g.add(box(0.12, H * 1.02, 0.12, 0x55595c, -len / 2 + i * w, (H * 1.02) / 2, 0.1));
+    return g;
+  };
+  const spikes = (keep: number) => {
+    const g = new THREE.Group();
+    for (let i = 0; i < n * 3; i++) if (r() < keep) g.add(cone(0.05, 0.35, 0x7a8288, 4, -len / 2 + (i + 0.5) * (len / (n * 3)), H + 0.12, 0));
+    return g;
+  };
+  const build = (mode: (sh: { roll: number }) => 'up' | 'bent' | 'down' | 'gone') => {
+    const g = new THREE.Group();
+    for (const sh of sheets) {
+      const m = mode(sh);
+      if (m === 'gone') continue;
+      const panel = sheet(w + 0.06, sh.h, sh.tone);
+      panel.position.x = sh.x;
+      if (m === 'bent') panel.rotation.x = -0.35;
+      if (m === 'down') { panel.rotation.x = -Math.PI / 2 + 0.1; panel.position.z = -0.2; }
+      g.add(panel);
+    }
+    return g;
+  };
+  const intact = group(posts(), build(() => 'up'), spikes(1));
+  const damaged = group(posts(), build((sh) => (sh.roll < 0.3 ? 'bent' : 'up')), spikes(0.7));
+  const heavy = group(posts(), build((sh) => (sh.roll < 0.5 ? 'down' : sh.roll < 0.7 ? 'bent' : 'up')));
+  const broken = group(build((sh) => (sh.roll < 0.6 ? 'down' : 'gone')));
+  for (let i = 0; i <= n; i++) broken.add(box(0.12, 0.4, 0.12, 0x55595c, -len / 2 + i * w, 0.2, 0.1));
+  return [broken, heavy, damaged, intact];
+}
+
+/** Niveau 5 : des plaques de fer fondu rivetees, herissees de pointes. */
+function metalStates(len: number, H: number, seed: number): THREE.Group[] {
+  const r = rng(seed);
+  const n = Math.max(2, Math.round(len / 1.3));
+  const w = len / n;
+  const h = H * 1.05;
+  const plates = Array.from({ length: n }, (_, i) => ({ x: -len / 2 + w / 2 + i * w, roll: r() }));
+  const frame = () => group(
+    box(len + 0.1, 0.16, 0.22, 0x3a3d40, 0, h, 0), box(len + 0.1, 0.16, 0.22, 0x3a3d40, 0, 0.1, 0),
+    ...Array.from({ length: n + 1 }, (_, i) => box(0.16, h, 0.24, 0x3a3d40, -len / 2 + i * w, h / 2, 0)),
+  );
+  const plate = (x: number, k: number, tilt: number) => {
+    const g = group(box(w - 0.08, (h - 0.2) * k, 0.1, 0x6f777e, 0, ((h - 0.2) * k) / 2 + 0.1, 0));
+    for (const yy of [0.3, 0.7]) for (const xx of [-0.35, 0.35]) if (yy * h < (h - 0.2) * k) g.add(sphere(0.035, 0xb0b8bf, xx * w, yy * h, 0.07, 4));
+    g.position.x = x;
+    g.rotation.x = tilt;
+    return g;
+  };
+  const spikes = () => {
+    const g = new THREE.Group();
+    for (let i = 0; i < n * 4; i++) g.add(cone(0.05, 0.4, 0x2b2e31, 4, -len / 2 + (i + 0.5) * (len / (n * 4)), h + 0.28, 0));
+    return g;
+  };
+  const intact = group(frame(), ...plates.map((p) => plate(p.x, 1, 0)), spikes());
+  const damaged = group(frame(), ...plates.map((p) => plate(p.x, 1, p.roll < 0.35 ? -0.12 : 0)));
+  const heavy = group(frame(), ...plates.filter((p) => p.roll > 0.45).map((p) => plate(p.x, 0.6, -0.08)));
+  const broken = group(box(len + 0.1, 0.16, 0.22, 0x3a3d40, 0, 0.1, 0), ...plates.filter((p) => p.roll > 0.6).map((p) => plate(p.x, 0.25, 0)));
+  for (const p of plates.filter((q) => q.roll <= 0.6)) {
+    const down = plate(p.x, 1, -Math.PI / 2 + 0.08);
+    down.position.z = -0.4;
+    broken.add(down);
+  }
+  return [broken, heavy, damaged, intact];
+}
+
 /** Les quatre etats d'un troncon de mur, du plus casse au plus solide. */
-function wallStates(len: number, H: number, seed: number): THREE.Group[] {
+function pikeStates(len: number, H: number, seed: number): THREE.Group[] {
   const r = rng(seed);
   const n = Math.max(3, Math.round(len / SPACING));
   const logs: LogProfile[] = [];
@@ -251,7 +412,7 @@ export class Palisade {
     this.labels.appendChild(label);
     const s: Section = {
       id: this.sections.length, kind, x: f.x, z: f.z, nx: f.nx, nz: f.nz, len: f.len,
-      seg: { x1, z1, x2, z2 }, hp: max, max, root, states: [], shake: 0, pop: 0, repair, label, inflight: 0, enabled: true,
+      seg: { x1, z1, x2, z2 }, h: 0, hp: max, max, root, states: [], shake: 0, pop: 0, repair, label, inflight: 0, enabled: true,
     };
     this.sections.push(s);
     return s;
@@ -259,14 +420,41 @@ export class Palisade {
 
   private addWall(x1: number, z1: number, x2: number, z2: number, h: number): void {
     const s = this.base('wall', x1, z1, x2, z2, WALL_HP);
-    for (const st of wallStates(s.len, h, 100 + s.id * 7)) {
+    s.h = h;
+    this.buildStates(s);
+    this.walls.push(s.seg);
+    this.refresh(s);
+  }
+
+  /** Niveau de materiau de la palissade (1 a 5). */
+  tier = 1;
+  private lvl = 0;
+
+  private buildStates(s: Section): void {
+    for (const o of s.states) {
+      s.root.remove(o);
+      o.traverse((c) => { if ((c as THREE.Mesh).isMesh) (c as THREE.Mesh).geometry.dispose(); });
+    }
+    s.states = [];
+    for (const st of wallStates(s.len, s.h, 100 + s.id * 7, this.tier)) {
       const m = mergeColored(st);
       m.visible = false;
       s.root.add(m);
       s.states.push(m);
     }
-    this.walls.push(s.seg);
-    this.refresh(s);
+  }
+
+  /** Change de materiau : tous les troncons sont reconstruits, solidite proportionnelle gardee. */
+  setTier(tier: number): void {
+    if (tier === this.tier) return;
+    this.tier = tier;
+    for (const s of this.sections) if (s.kind === 'wall') this.buildStates(s);
+    this.applyMax();
+  }
+
+  /** Materiau qui repare la palissade a son niveau actuel. */
+  get repairItem(): TierItem {
+    return TIERS[this.tier - 1]!.item;
   }
 
   private addGate(x1: number, z1: number, x2: number, z2: number, h: number, swing: number): Section {
@@ -406,7 +594,7 @@ export class Palisade {
     let best: Section | null = null;
     let bd = reach;
     for (const s of this.sections) {
-      if (!s.enabled || s.hp + s.inflight * LOG_HP >= s.max) continue;
+      if (!s.enabled || s.hp + s.inflight * unitHp(s) >= s.max - 0.01) continue;
       const d = this.distanceTo(s, x, z);
       if (d < bd) { bd = d; best = s; }
     }
@@ -415,9 +603,15 @@ export class Palisade {
 
   /** Palissade renforcee (etabli) : chaque niveau ajoute la moitie de la solidite de base. */
   setLevel(lvl: number): void {
+    this.lvl = lvl;
+    this.applyMax();
+  }
+
+  private applyMax(): void {
+    const mul = TIERS[this.tier - 1]!.mul;
     for (const s of this.sections) {
       const base = s.kind === 'gate' ? GATE_HP : WALL_HP;
-      const max = Math.round(base * (1 + 0.5 * lvl));
+      const max = Math.round(base * mul * (1 + 0.5 * this.lvl));
       if (max === s.max) continue;
       const k = s.hp / s.max;
       s.max = max;

@@ -38,7 +38,8 @@ function reserved(x: number, z: number): boolean {
   const farm = x > FARM.minX - 2 && x < FARM.maxX + 2 && z > FARM.minZ - 2 && z < FARM.maxZ + 3;
   const station = x > STATION.minX - 2 && x < STATION.maxX + 2 && z > STATION.minZ - 2 && z < STATION.maxZ + 2;
   const pond = Math.hypot((x - POND.x) / (POND.rx + 3), (z - POND.z) / (POND.rz + 3)) < 1;
-  return nearCamp || onRoad || forest || ruins || pylon || south || scrap || farm || station || pond;
+  const quarry = x > 20 && x < 44 && z > -38 && z < -11;
+  return nearCamp || onRoad || forest || ruins || pylon || south || scrap || farm || station || pond || quarry;
 }
 
 export function buildWorld(scene: THREE.Scene): World {
@@ -67,6 +68,7 @@ export function buildWorld(scene: THREE.Scene): World {
   farmZone(scene, w, r);
   stationZone(scene, w, r);
   pondZone(scene, w, r);
+  quarryZone(scene, w, r);
   surroundings(scene, w, r);
   return w;
 }
@@ -681,4 +683,26 @@ function pondZone(scene: THREE.Scene, w: World, r: () => number): void {
   const boat = group(rbox(2.2, 0.4, 0.9, 0x6e5034, 0.15, 0, 0.1, 0), box(0.9, 0.06, 0.85, 0x5e452c, 0.2, 0.25, 0));
   boat.rotation.z = 0.25;
   scene.add(shadow(at(boat, P.x + 5.2, 0, P.z + 1.4, 0.7)));
+}
+
+/** La carriere au nord-est : gravier, falaises entaillees, blocs epars. */
+function quarryZone(scene: THREE.Scene, w: World, r: () => number): void {
+  const { x, z } = L.quarry;
+  patch(scene, x, z, 10, 9, 0x9a9488, 0.013, r, 0.2);
+  // Falaises au nord et a l'est : la ou l'on a taille la roche.
+  for (let i = 0; i < 16; i++) {
+    const a = -Math.PI * 0.95 + (i / 15) * Math.PI * 1.15;
+    const cx = x + Math.cos(a) * (10 + r() * 1.5);
+    const cz = z + Math.sin(a) * (9 + r() * 1.5);
+    const b = blob(1.6 + r() * 1.2, [0x9a9890, 0x85837b, 0xa8a59b][i % 3]!, cx, 1.2 + r() * 0.8, cz);
+    b.scale.y = 1.2 + r() * 0.8;
+    scene.add(shadow(b));
+    w.solids.push({ x: cx, z: cz, r: 1.8 });
+  }
+  for (let i = 0; i < 12; i++) {
+    const b = blob(0.25 + r() * 0.3, 0x85837b, x + (r() - 0.5) * 14, 0.15, z + (r() - 0.5) * 12);
+    b.scale.y = 0.6;
+    scene.add(b);
+  }
+  scene.add(shadow(at(group(box(1.6, 0.6, 0.9, 0x55595c, 0, 0.5, 0), at(tire(), -0.6, 0.3, 0.5), at(tire(), 0.6, 0.3, 0.5)), x - 6, 0, z + 5, 0.5)));
 }

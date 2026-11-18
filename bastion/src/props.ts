@@ -175,20 +175,6 @@ export function wreck(color: number, burnt = false): THREE.Group {
 }
 
 /** Arbre mort : tronc gris et quelques branches nues. */
-export function deadTree(r: () => number): THREE.Group {
-  const wood = 0x6e6259;
-  const g = group(cyl(0.12, 0.2, 2.6, wood, 5, 0, 1.3, 0));
-  for (let i = 0; i < 4; i++) {
-    const b = cyl(0.04, 0.07, 1.0 + r() * 0.6, wood, 4, 0, 0, 0);
-    b.position.y = 0.45;
-    const h = group(b);
-    h.position.y = 1.2 + i * 0.4;
-    h.rotation.set(0.7 + r() * 0.4, i * 2.1 + r(), 0);
-    g.add(h);
-  }
-  return g;
-}
-
 /** Panneau de contreplaque peint a la bombe (une fleche, une croix). */
 export function paintedBoard(symbol: 'arrow' | 'cross' | 'coin'): THREE.Group {
   const g = group(

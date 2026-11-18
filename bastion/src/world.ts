@@ -6,9 +6,10 @@ import { C, at, blob, box, cone, cyl, glow, group, mat, rbox, rng, shadow, uniqu
 import { CAMP, FARM, L, POND, ROAD_Z, STATION, insideCamp } from './layout';
 import type { Circle, Segment } from './physics';
 import {
-  crate, deadTree, drum, floodlight, gasBottle, hedgehog, jerrycan, jersey, paintedBoard, roofSheet, sandbags, sheet,
+  crate, drum, floodlight, gasBottle, hedgehog, jerrycan, jersey, paintedBoard, roofSheet, sandbags, sheet,
   tire, tireStack, wreck,
 } from './props';
+import { boulder, bush, deadTree, leafy, pine } from './flora';
 import { campDirt, grassTexture, planarUV, rippleTexture } from './textures';
 
 export interface NightLight { light: THREE.Light; night: number; day: number; flicker?: number }
@@ -463,11 +464,7 @@ function surroundings(scene: THREE.Scene, w: World, r: () => number): void {
     const x = (r() - 0.5) * 94;
     const z = (r() - 0.5) * 94;
     if (reserved(x, z)) continue;
-    const b = r() < 0.5
-      ? blob(0.5 + r() * 0.5, r() < 0.5 ? C.leaf : C.leafDark, x, 0.35, z)
-      : blob(0.4 + r() * 0.5, r() < 0.5 ? C.stone : 0xa8a59b, x, 0.2, z);
-    b.scale.y = 0.75;
-    scene.add(b);
+    scene.add(r() < 0.5 ? bush(r, 0.5 + r() * 0.5, x, z) : boulder(r, 0.4 + r() * 0.5, x, z));
   }
   // Herissons anti-vehicules devant le camp : on sait ce qui rode ici.
   const hogs: [number, number][] = [[-9.6, 13.4], [-6.4, 14.0], [10.4, 13.6], [12.8, 13.2], [22, -9], [22.4, 8.5], [-21.5, 9], [-20.5, -13]];
@@ -479,22 +476,6 @@ function surroundings(scene: THREE.Scene, w: World, r: () => number): void {
   w.solids.push({ x: 19.6, z: -16.2, r: 1.8 });
   ruinsBlock(scene, w, r, 26.5, -3);
   pylon(scene, w, -21, -4);
-}
-
-export function pine(r: () => number): THREE.Group {
-  const g = group(cyl(0.16, 0.22, 1.2, C.woodDark, 6, 0, 0.6, 0));
-  const shade = r() < 0.5 ? C.pine : 0x4a7552;
-  for (let i = 0; i < 3; i++) g.add(cone(1.3 - i * 0.32, 1.6, shade, 7, 0, 1.4 + i * 0.85, 0));
-  return shadow(g);
-}
-
-export function leafy(r: () => number): THREE.Group {
-  const g = group(cyl(0.18, 0.26, 1.8, C.woodDark, 6, 0, 0.9, 0));
-  const shades = [C.leaf, C.leafLight, C.leafDark];
-  g.add(blob(1.1, shades[Math.floor(r() * 3)]!, 0, 2.4, 0));
-  g.add(blob(0.8, shades[Math.floor(r() * 3)]!, 0.6, 2.0, 0.3));
-  g.add(blob(0.75, shades[Math.floor(r() * 3)]!, -0.5, 2.2, -0.3));
-  return shadow(g);
 }
 
 function ruinsBlock(scene: THREE.Scene, w: World, r: () => number, x: number, z: number): void {

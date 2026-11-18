@@ -6,7 +6,7 @@ import { L } from './layout';
 import type { Circle, Segment } from './physics';
 import { mergeColored } from './bake';
 import { wreck } from './props';
-import { leafy, pine } from './world';
+import { leafy, pine } from './flora';
 
 // ---------------------------------------------------------------- potagers et champs
 

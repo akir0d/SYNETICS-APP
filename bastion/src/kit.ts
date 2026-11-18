@@ -96,7 +96,16 @@ const LOOK_FRAG = /* glsl */`#include <aomap_fragment>
 		reflectedLight.indirectDiffuse += lookRim * diffuseColor.rgb * lkF * saturate( lkN.y + 0.35 );
 	}`;
 
+/** Coupe si un programme « look » n'a pas compile sur l'appareil (voir guardShaders). */
+let lookOff = false;
+
+/** Faux si l'ombrage d'ambiance a ete coupe apres un echec de compilation. */
+export function lookActive(): boolean {
+  return !lookOff;
+}
+
 function lookCompile(shader: THREE.WebGLProgramParametersWithUniforms): void {
+  if (lookOff) return;
   shader.uniforms.lookRim = LOOK.rim;
   shader.uniforms.lookAO = LOOK.ao;
   shader.vertexShader = 'varying float vLookY;\n' + shader.vertexShader.replace('#include <project_vertex>', LOOK_VERT);
@@ -104,7 +113,40 @@ function lookCompile(shader: THREE.WebGLProgramParametersWithUniforms): void {
     .replace('#include <lights_lambert_pars_fragment>', SOFT_LAMBERT)
     .replace('#include <aomap_fragment>', LOOK_FRAG);
 }
-const lookKey = (): string => 'bastion-look-1';
+// La cle change quand l'ombrage est coupe : three recompile alors en Lambert simple.
+const lookKey = (): string => (lookOff ? 'bastion-look-off' : 'bastion-look-1');
+
+/**
+ * Filet de securite : si un shader ne compile pas sur l'appareil (WebView ancienne, pilote
+ * capricieux), on journalise l'erreur puis on coupe l'ombrage d'ambiance et on recompile
+ * tous les materiaux de la scene (Lambert lisse simple). Si l'echec vient d'un programme sans
+ * « look » (ou persiste), on appelle une seule fois fallback (ex. courbe de tons d'origine).
+ */
+export function guardShaders(renderer: THREE.WebGLRenderer, scene: THREE.Scene, fallback?: () => void): void {
+  let spare = fallback;
+  renderer.debug.checkShaderErrors = true;
+  renderer.debug.onShaderError = (gl, program, vs, fs) => {
+    const src = gl.getShaderSource(fs) || '';
+    console.error('Bastion : shader en echec' + (src.indexOf('lookRim') >= 0 ? ' (look)' : ''),
+      '\nprogramme : ' + (gl.getProgramInfoLog(program) || '').trim(),
+      '\nvertex : ' + (gl.getShaderInfoLog(vs) || '').trim(),
+      '\nfragment : ' + (gl.getShaderInfoLog(fs) || '').trim());
+    if (!lookOff && src.indexOf('lookRim') >= 0) {
+      lookOff = true;
+      console.error('Bastion : ombrage d\'ambiance coupe, rendu en Lambert simple.');
+    } else if (spare) {
+      const f = spare;
+      spare = undefined;
+      f();
+    } else return;
+    scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (!m) return;
+      if (Array.isArray(m)) for (const x of m) x.needsUpdate = true;
+      else m.needsUpdate = true;
+    });
+  };
+}
 
 /**
  * Donne l'ombrage d'ambiance a un MeshLambertMaterial (le programme est partage entre tous

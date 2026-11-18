@@ -11,7 +11,7 @@ import {
 import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type HelperCtx, type Job } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
-import { LOOK, box, damp, easeOutBack, glow, rbox } from './kit';
+import { LOOK, box, damp, easeOutBack, glow, guardShaders, rbox } from './kit';
 import { CAMP, L, insideFarm, insideStation } from './layout';
 import { regions, type NavState } from './nav';
 import { Palisade, TIERS, logsNeeded, stateOf, unitHp, type Section } from './palisade';
@@ -53,7 +53,8 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // Courbe de tons maison (la Neutral de Khronos sans son ecrasement des noirs) : les teintes
 // des modeles restent franches et fideles, l'epaule n'adoucit que les hautes lumieres, les
 // ombres et la nuit restent lisibles. Calculee dans chaque shader : aucun post-traitement.
-THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
+const TONE_CHUNK = THREE.ShaderChunk.tonemapping_pars_fragment;
+THREE.ShaderChunk.tonemapping_pars_fragment = TONE_CHUNK.replace(
   'vec3 CustomToneMapping( vec3 color ) { return color; }',
   `vec3 CustomToneMapping( vec3 color ) {
 	color *= toneMappingExposure;
@@ -69,6 +70,13 @@ renderer.toneMapping = THREE.CustomToneMapping;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+// Shader en echec sur l'appareil : on coupe l'ombrage d'ambiance, puis au besoin la courbe
+// de tons maison (retour a la Neutral de three) pour que le jeu s'affiche quand meme.
+guardShaders(renderer, scene, () => {
+  THREE.ShaderChunk.tonemapping_pars_fragment = TONE_CHUNK;
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  console.error('Bastion : courbe de tons maison coupee.');
+});
 const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 220);
 
 // Jour : soleil chaud et ciel de remplissage frais (ombres douces, jamais bouchees), sol qui

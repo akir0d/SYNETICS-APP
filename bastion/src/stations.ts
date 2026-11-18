@@ -3,11 +3,74 @@
 import * as THREE from 'three';
 import { Human } from './humans';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
-import { C, box, damp, rbox, shadow } from './kit';
+import { C, box, damp, group, plank, rbox, shadow } from './kit';
+import { merged } from './props';
 import { L, ROAD_Z } from './layout';
 import { pileSlot, zoneRing } from './resources';
 
 interface Piece { type: ItemType; obj: THREE.Object3D }
+
+// ---------------------------------------------------------------- modeles (fusionnes une fois)
+
+/** Palette de chantier : trois longerons et sept lattes, posee au sol, le dessus a y = 0.05 (sous les objets). */
+function palletModel(): THREE.Object3D {
+  const g = new THREE.Group();
+  for (const z of [-0.46, 0, 0.46]) g.add(plank(1.6, 0.1, 0.16, C.wood, 0, -0.05, z));
+  for (let i = 0; i < 7; i++) {
+    const tone = i % 3 === 0 ? 0xd6a46a : i % 3 === 1 ? C.woodLight : 0xe8bd85;
+    g.add(plank(0.2, 0.05, 1.1, tone, -0.69 + i * 0.23, 0.025, 0));
+  }
+  // Planches du dessous (on les voit a peine, mais la palette ne flotte pas).
+  for (const x of [-0.69, 0, 0.69]) g.add(plank(0.2, 0.04, 1.1, C.woodDark, x, -0.12, 0));
+  return g;
+}
+
+/** Bac de l'etal : caisse ouverte (fond, quatre bords, coins renforces). */
+function binCrate(w: number): THREE.Object3D {
+  return group(
+    plank(w, 0.06, 0.82, C.woodDark, 0, 0.03, 0),
+    plank(w, 0.2, 0.06, C.wood, 0, 0.12, 0.38), plank(w, 0.2, 0.06, C.wood, 0, 0.12, -0.38),
+    plank(0.06, 0.2, 0.82, 0xb07a44, -w / 2, 0.12, 0), plank(0.06, 0.2, 0.82, 0xb07a44, w / 2, 0.12, 0),
+    // Lisere clair sur le bord avant : il accroche la lumiere.
+    box(w + 0.02, 0.035, 0.08, C.woodLight, 0, 0.225, 0.38),
+    plank(0.08, 0.24, 0.08, C.woodDark, -w / 2, 0.12, 0.38), plank(0.08, 0.24, 0.08, C.woodDark, w / 2, 0.12, 0.38),
+    plank(0.08, 0.24, 0.08, C.woodDark, -w / 2, 0.12, -0.38), plank(0.08, 0.24, 0.08, C.woodDark, w / 2, 0.12, -0.38),
+  );
+}
+
+/** Plateau de la caisse : planche, tapis vert et rebord bas, le dessus du tapis a y = 0.08. */
+function cashTray(): THREE.Object3D {
+  return group(
+    plank(1.1, 0.07, 1.1, C.woodDark, 0, 0.035, 0),
+    box(0.98, 0.012, 0.98, 0x3f7a4a, 0, 0.074, 0),
+    plank(1.22, 0.11, 0.06, C.wood, 0, 0.055, 0.58), plank(1.22, 0.11, 0.06, C.wood, 0, 0.055, -0.58),
+    plank(0.06, 0.11, 1.1, C.wood, 0.58, 0.055, 0), plank(0.06, 0.11, 1.1, C.wood, -0.58, 0.055, 0),
+    box(0.14, 0.03, 0.14, 0xe8b84a, 0.5, 0.115, 0.5),
+  );
+}
+
+/** Coffre de reserve (sans le couvercle) : planches, cerclages et coins de metal, fond sombre. */
+function chestBody(): THREE.Object3D {
+  const g = group(
+    rbox(1.7, 0.85, 1.05, C.wood, 0.05, 0, 0.45, 0),
+    plank(1.74, 0.09, 1.09, 0x55595c, 0, 0.25, 0), plank(1.74, 0.09, 1.09, 0x55595c, 0, 0.7, 0),
+    box(1.55, 0.05, 0.9, 0x3a2a1a, 0, 0.86, 0),
+    plank(1.74, 0.08, 1.09, C.woodDark, 0, 0.05, 0),
+  );
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(plank(0.1, 0.87, 0.1, 0x4a4d50, sx * 0.83, 0.455, sz * 0.5));
+  // Poignees de corde sur les cotes.
+  for (const sx of [-1, 1]) g.add(box(0.05, 0.06, 0.3, C.rope, sx * 0.88, 0.55, 0));
+  return g;
+}
+
+/** Couvercle du coffre, dans le repere de sa charniere. */
+function chestLid(): THREE.Object3D {
+  return group(
+    rbox(1.7, 0.16, 1.05, C.woodDark, 0.05, 0, 0, 0),
+    plank(0.1, 0.18, 1.08, 0x55595c, -0.55, 0, 0), plank(0.1, 0.18, 1.08, 0x55595c, 0.55, 0, 0),
+    box(0.2, 0.06, 0.16, 0xd9b44a, 0, -0.02, 0.53),
+  );
+}
 
 /** Une pile d'objets posee au sol, sur une palette. */
 export class Pile {
@@ -18,10 +81,7 @@ export class Pile {
   itemScale = 1.2;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, readonly cap: number, private readonly perRow = 3, pallet = true) {
-    if (pallet) {
-      const p = shadow(rbox(1.6, 0.14, 1.1, C.woodLight, 0.03, 0, 0.07, 0));
-      this.root.add(p);
-    }
+    if (pallet) this.root.add(merged('pallet', palletModel));
     this.root.position.set(x, pallet ? 0.14 : 0, z);
     scene.add(this.root);
     this.ring = zoneRing(scene, x, z, 1.25);
@@ -149,12 +209,8 @@ export class Bins {
       const w = step - 0.08;
       const root = new THREE.Group();
       root.position.x = x;
-      // Une caisse ouverte : fond et quatre bords bas.
-      root.add(
-        box(w, 0.06, 0.82, C.woodDark, 0, 0.03, 0),
-        box(w, 0.2, 0.06, C.wood, 0, 0.12, 0.38), box(w, 0.2, 0.06, C.wood, 0, 0.12, -0.38),
-        box(0.06, 0.2, 0.82, C.wood, -w / 2, 0.12, 0), box(0.06, 0.2, 0.82, C.wood, w / 2, 0.12, 0),
-      );
+      // Une caisse ouverte : fond et quatre bords bas (un maillage partage par tous les bacs).
+      root.add(merged(`bin${w.toFixed(4)}`, () => binCrate(w)));
       const items: THREE.Object3D[] = [];
       for (let k = 0; k < SHOWN; k++) {
         const o = itemMesh(type);
@@ -258,7 +314,9 @@ export class Market {
   readonly customers: Customer[] = [];
   cash = 0;
   private readonly cashRoot = new THREE.Group();
-  private readonly cashCoins: THREE.Mesh[] = [];
+  /** Les pieces du plateau : un seul maillage instancie (un appel de dessin pour 60 pieces). */
+  private readonly cashCoins: THREE.InstancedMesh;
+  private cashShown = 0;
   readonly cashRing: THREE.Mesh;
   readonly dropRing: THREE.Mesh;
   private spawnClock = 2;
@@ -269,7 +327,13 @@ export class Market {
     this.bins = new Bins(scene, labels);
     this.dropRing = zoneRing(scene, L.shelf.x, L.shelf.z, 1.25);
     this.cashRoot.position.set(L.cash.x, 0, L.cash.z);
-    this.cashRoot.add(shadow(box(1.1, 0.08, 1.1, C.woodDark, 0, 0.04, 0)));
+    this.cashRoot.add(merged('cash-tray', cashTray));
+    const coin = coinMesh();
+    this.cashCoins = new THREE.InstancedMesh(coin.geometry, coin.material, 60);
+    this.cashCoins.count = 0;
+    this.cashCoins.castShadow = true;
+    this.cashCoins.receiveShadow = true;
+    this.cashRoot.add(this.cashCoins);
     scene.add(this.cashRoot);
     this.cashRing = zoneRing(scene, L.cash.x, L.cash.z, 1.1, 0xffd84a);
   }
@@ -288,20 +352,26 @@ export class Market {
 
   private refreshCash(): void {
     const want = Math.min(60, Math.ceil(this.cash / 2));
-    while (this.cashCoins.length < want) {
-      const i = this.cashCoins.length;
-      const c = coinMesh();
-      const col = i % 6;
-      c.position.set((col % 3 - 1) * 0.36, 0.11 + Math.floor(i / 6) * 0.065, (Math.floor(col / 3) - 0.5) * 0.36);
-      c.rotation.y = Math.random();
-      this.cashRoot.add(c);
-      this.cashCoins.push(c);
+    if (want > this.cashShown) {
+      const o = new THREE.Object3D();
+      for (let i = this.cashShown; i < want; i++) {
+        const col = i % 6;
+        // Piles un peu de travers : leger decalage et rotation reproductibles par etage.
+        const wob = Math.sin(i * 12.9898) * 0.5;
+        o.position.set((col % 3 - 1) * 0.36 + wob * 0.03, 0.11 + Math.floor(i / 6) * 0.065, (Math.floor(col / 3) - 0.5) * 0.36 + wob * 0.02);
+        o.rotation.set(wob * 0.06, (i * 0.618) % 1, 0);
+        o.updateMatrix();
+        this.cashCoins.setMatrixAt(i, o.matrix);
+      }
+      this.cashCoins.instanceMatrix.needsUpdate = true;
     }
-    while (this.cashCoins.length > want) this.cashRoot.remove(this.cashCoins.pop()!);
+    this.cashShown = want;
+    this.cashCoins.count = want;
+    this.cashCoins.computeBoundingSphere();
   }
 
   cashWorld(): THREE.Vector3 {
-    return new THREE.Vector3(L.cash.x, 0.3 + Math.min(10, this.cashCoins.length / 6) * 0.065, L.cash.z);
+    return new THREE.Vector3(L.cash.x, 0.3 + Math.min(10, this.cashShown / 6) * 0.065, L.cash.z);
   }
 
   private waitingIn(lane: number): Customer[] {
@@ -450,18 +520,13 @@ export class Reserve {
 
   constructor(scene: THREE.Scene, labels: HTMLElement) {
     const { x, z } = L.chest;
-    const lid = rbox(1.7, 0.16, 1.05, C.woodDark, 0.04, 0, 0, -0.5);
+    const lid = merged('chest-lid', chestLid);
     const lidG = new THREE.Group();
     lidG.add(lid);
     lidG.position.set(0, 0.92, -0.5);
     lid.position.z = 0.5;
     lidG.rotation.x = -1.1;
-    this.root.add(
-      rbox(1.7, 0.85, 1.05, C.wood, 0.05, 0, 0.45, 0),
-      box(1.74, 0.08, 1.09, 0x55595c, 0, 0.25, 0), box(1.74, 0.08, 1.09, 0x55595c, 0, 0.7, 0),
-      box(1.55, 0.05, 0.9, 0x3a2a1a, 0, 0.86, 0),
-      lidG,
-    );
+    this.root.add(merged('chest-body', chestBody), lidG);
     shadow(this.root);
     this.root.position.set(x, 0, z);
     scene.add(this.root);

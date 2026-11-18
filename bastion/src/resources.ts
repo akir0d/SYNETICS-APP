@@ -508,7 +508,10 @@ export class ScrapSource {
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, ry: number, kind: 'car' | 'heap', solids: Circle[]) {
     if (kind === 'car') {
-      this.root = shadow(at(wreck(x > 0 ? 0x8a5a3a : 0x5f7a8a), x, 0, z, ry));
+      // Carcasse fusionnee une fois par couleur (une vingtaine de maillages sinon) ; le groupe
+      // garde l'inclinaison propre a wreck().
+      const tone = x > 0 ? 0x8a5a3a : 0x5f7a8a;
+      this.root = shadow(at(shared(`wreck${tone}`, () => mergeColored(group(wreck(tone)))), x, 0, z, ry));
       scene.add(this.root);
     } else {
       const g = shared('heap', scrapHeap);

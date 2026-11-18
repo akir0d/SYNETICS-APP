@@ -323,3 +323,50 @@ body.night .chest-label { background: var(--night-bg); color: var(--night-ink); 
 }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin-left: 4px; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.2); }
 .modal-card .radio { font-style: italic; font-size: 15px; line-height: 1.4; }
+
+/* ---- refonte : boutique, calendrier, contrats, retour hors ligne */
+.shop-btn.off { display: none; }
+.shop-tabs button { padding: 6px 9px; font-size: 14px; }
+.card.gold { border-color: var(--gold-dark); background: linear-gradient(180deg, #fff3c9, #ffe9a6); }
+.tag {
+  display: inline-block; padding: 0 7px; border-radius: 8px; font-size: 11px; font-weight: 800; vertical-align: middle;
+  color: #fff; background: #e0443a; margin-left: 4px;
+}
+.btn.wide { width: 100%; }
+.calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 4px 0 8px; }
+.cal {
+  display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 2px; border-radius: 10px;
+  background: #fff; border: 2px solid #ead7b4; text-align: center; min-width: 0;
+}
+.cal b { font-size: 11px; opacity: .6; }
+.cal span { font-size: 20px; line-height: 1.1; }
+.cal small { font-size: 9px; line-height: 1.1; opacity: .75; word-break: break-word; }
+.cal.done { opacity: .45; background: #e8f6dc; border-color: #9fd36a; }
+.cal.today { border-color: var(--gold-dark); background: #fff3c9; box-shadow: 0 0 0 2px var(--gold); }
+.ad-pill {
+  position: fixed; z-index: 6; right: max(14px, var(--safe-right)); bottom: calc(150px + var(--safe-bottom));
+  padding: 6px 12px; border-radius: 16px; font-size: 14px; font-weight: 800; color: #fff; border: 0;
+  background: linear-gradient(180deg, #8a5ad9, #6a3ab9); box-shadow: 0 3px 0 #4a2a89;
+  animation: pill 1.6s ease-in-out infinite;
+}
+.ad-pill.off { display: none; }
+@keyframes pill { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+.offline-items { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 4px 0 8px; }
+.offline-items span { padding: 2px 8px; border-radius: 10px; background: #fff; border: 2px solid #ead7b4; font-size: 15px; }
+.offline-items b { margin-left: 2px; }
+.modal-card .tip { padding: 8px 10px; border-radius: 12px; background: #fff3c9; border: 2px solid var(--gold); font-size: 13.5px; }
+
+/* ---- rendu : vignette douce et chiffres de gains */
+.vignette {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 58%, rgba(45,28,10,.26) 100%);
+  transition: background 1.5s;
+}
+body.night .vignette { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 45%, rgba(5,10,30,.5) 100%); }
+.float-num {
+  font-weight: 800; font-size: 21px; color: #ffd84a; white-space: nowrap; pointer-events: none;
+  text-shadow: 0 2px 0 #8a5a10, 0 0 6px rgba(0,0,0,.35);
+}
+.float-num.small { font-size: 15px; }
+.float-num.gem { color: #9fe6ff; text-shadow: 0 2px 0 #2a6a86, 0 0 6px rgba(0,0,0,.35); }
+.boost-bar span.convoy { background: linear-gradient(180deg, #d9a43a, #b07a1a); box-shadow: 0 2px 0 #7a5208; }

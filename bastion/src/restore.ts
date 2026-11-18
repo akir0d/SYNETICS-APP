@@ -70,6 +70,24 @@ export class Restorer {
     this.fx.dust(this.tmp.clone().setY(0.6), true);
   }
 
+  /** Le batiment tombe pendant qu'on le remonte : on arrete tout, pieces remises en place. */
+  cancel(built: THREE.Object3D): void {
+    for (let j = this.jobs.length - 1; j >= 0; j--) {
+      const job = this.jobs[j]!;
+      if (job.built !== built) continue;
+      for (const p of job.parts) {
+        p.o.position.copy(p.pos);
+        p.o.scale.copy(p.scale);
+      }
+      if (job.ruin) {
+        job.ruin.position.copy(job.ruinPos);
+        job.ruin.scale.copy(job.ruinScale);
+      }
+      this.jobs.splice(j, 1);
+      job.done?.();
+    }
+  }
+
   update(dt: number): void {
     this.tickClock -= dt;
     for (let j = this.jobs.length - 1; j >= 0; j--) {

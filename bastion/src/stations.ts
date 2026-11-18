@@ -325,10 +325,11 @@ export class Market {
     // qui rapportent plus, sont un peu plus demandes.
     const onShelf = products.filter((t) => this.bins.countOf(t) > 0);
     let want = products[0]!;
-    if (onShelf.length && Math.random() < 0.7) {
+    if (onShelf.length && Math.random() < 0.9) {
       want = onShelf[Math.floor(Math.random() * onShelf.length)]!;
     } else {
-      const weights = products.map((_, i) => 1 + i * 0.6);
+      // Les materiaux de construction se demandent peu : on les vend surtout s'ils sont en bac.
+      const weights = products.map((t, i) => (['log', 'scrap', 'stone', 'metal', 'fuel'].includes(t) ? 0.25 : 1 + i * 0.3));
       let roll = Math.random() * weights.reduce((a, b) => a + b, 0);
       for (let i = 0; i < products.length; i++) {
         roll -= weights[i]!;
@@ -394,7 +395,7 @@ export class Market {
               sales.push({ pay, at: h.root.position.clone().setY(1.6) });
               c.happy = 1;
               this.leave(c);
-            } else if (c.wait > 25) {
+            } else if (c.wait > (c.got === 0 && this.bins.countOf(c.want) === 0 ? 8 : 25)) {
               // Lasse d'attendre : il paie ce qu'il a deja pris et s'en va.
               if (c.got > 0) sales.push({ pay: c.got * ITEMS[c.want].price, at: h.root.position.clone().setY(1.6) });
               c.sad = true;

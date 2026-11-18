@@ -9,6 +9,7 @@ import {
   crate, deadTree, drum, floodlight, gasBottle, hedgehog, jerrycan, jersey, paintedBoard, roofSheet, sandbags, sheet,
   tire, tireStack, wreck,
 } from './props';
+import { campDirt, grassTexture, planarUV, rippleTexture } from './textures';
 
 export interface NightLight { light: THREE.Light; night: number; day: number; flicker?: number }
 
@@ -24,6 +25,8 @@ export interface World {
   bounds: number;
   /** Passages bloques tant qu'on ne les a pas degages (ou construits). */
   locks: { west: Segment; east: Segment; dock: Segment };
+  /** Materiau de l'etang (ses vaguelettes s'animent). */
+  water: THREE.MeshPhongMaterial | null;
 }
 
 /** Zones a garder libres de decor aleatoire (arbres, rochers). */
@@ -49,6 +52,7 @@ export function buildWorld(scene: THREE.Scene): World {
     keep: new Set(),
     bounds: 54,
     locks: { west: { x1: 0, z1: 0, x2: 0, z2: 0 }, east: { x1: 0, z1: 0, x2: 0, z2: 0 }, dock: { x1: 0, z1: 0, x2: 0, z2: 0 } },
+    water: null,
   };
   const r = rng(7);
 
@@ -96,13 +100,34 @@ function patch(scene: THREE.Scene, x: number, z: number, rx: number, rz: number,
 }
 
 function ground(scene: THREE.Scene, r: () => number): void {
-  const g = new THREE.Mesh(new THREE.PlaneGeometry(170, 170), mat(C.grass, { flat: false }));
+  // Herbe texturee (grain, plaques seches), et de grandes variations de teinte par sommet
+  // pour qu'aucune repetition ne se voie de haut.
+  const geo = new THREE.PlaneGeometry(170, 170, 34, 34);
+  const pos = geo.getAttribute('position');
+  const cols = new Float32Array(pos.count * 3);
+  const tint = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const n = Math.sin(x * 0.11 + 1.3) * Math.cos(y * 0.09 - 0.7) * 0.5 + Math.sin((x + y) * 0.05) * 0.5;
+    tint.setRGB(1 + n * 0.07, 1 + n * 0.04, 1 - n * 0.05);
+    cols.set([tint.r, tint.g, tint.b], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  const grassMat = new THREE.MeshLambertMaterial({ color: 0x98aa5c, map: grassTexture(30), vertexColors: true });
+  const g = new THREE.Mesh(geo, grassMat);
   g.rotation.x = -Math.PI / 2;
   g.receiveShadow = true;
   scene.add(g);
 
   // Le camp est de la terre battue ; quelques flaques de boue et du gravier.
-  patch(scene, 0, 0, CAMP.maxX + 0.6, CAMP.maxZ + 0.6, C.dirt, 0.01, r, 0.1);
+  const campGeo = new THREE.ShapeGeometry(blobShape(CAMP.maxX + 0.6, CAMP.maxZ + 0.6, r, 0.1));
+  planarUV(campGeo, 1 / 6);
+  const camp = new THREE.Mesh(campGeo, campDirt(0xc9a57a));
+  camp.rotation.x = -Math.PI / 2;
+  camp.position.set(0, 0.01, 0);
+  camp.receiveShadow = true;
+  scene.add(camp);
   const mud: [number, number, number, number, number][] = [
     [0, 0.5, 3.4, 3.0, 0x9a7650], [-7.8, -4.8, 4.2, 3.6, 0x8f6d48], [6.4, -8.2, 3.2, 2.2, 0xa88660],
     [0, 7.5, 1.6, 3.6, 0xa88660], [-9.2, 5.6, 2.6, 2.0, 0x9a7650], [10.2, -4.2, 2.6, 2.4, 0xa88660],
@@ -647,7 +672,10 @@ function stationZone(scene: THREE.Scene, w: World, r: () => number): void {
 /** L'etang au sud de la route : eau, roseaux, une barque coulee. */
 function pondZone(scene: THREE.Scene, w: World, r: () => number): void {
   const P = POND;
-  const water = new THREE.Mesh(new THREE.CircleGeometry(1, 40), mat(0x4f8090, { flat: false }));
+  // Eau : un relief de vaguelettes qui deroule lentement, ou le soleil accroche des reflets.
+  const waterMat = new THREE.MeshPhongMaterial({ color: 0x3d7487, specular: 0x9cc6d2, shininess: 60, bumpMap: rippleTexture(), bumpScale: 0.8 });
+  w.water = waterMat;
+  const water = new THREE.Mesh(new THREE.CircleGeometry(1, 40), waterMat);
   water.rotation.x = -Math.PI / 2;
   water.scale.set(P.rx, P.rz, 1);
   water.position.set(P.x, 0.02, P.z);

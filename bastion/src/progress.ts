@@ -23,37 +23,37 @@ export const PADS: PadDef[] = [
   // ---- le camp
   { id: 'bed2', name: 'Réparer le potager', icon: '🥕', ...L.pads.bed2, site: L.beds[1]!, cost: { coins: 25 }, after: 3 },
   { id: 'gate', name: 'Dégager la porte nord', icon: '🚪', ...L.pads.gate, site: L.northGate, cost: { coins: 40 }, after: 4 },
-  { id: 'bench', name: 'Réparer l’établi', icon: '🔧', ...L.pads.bench, site: L.bench, cost: { coins: 60, log: 6 }, after: 7 },
-  { id: 'sawmill', name: 'Remettre la scierie en marche', icon: '🪚', ...L.pads.sawmill, site: L.sawmill, cost: { coins: 90, log: 10 }, after: 8 },
-  { id: 'tower', name: 'Relever la tour de guet', icon: '🗼', ...L.pads.tower, site: L.tower, cost: { coins: 150, plank: 8, scrap: 6 }, after: 11 },
-  { id: 'bed3', name: 'Réparer le potager', icon: '🍅', ...L.pads.bed3, site: L.beds[2]!, cost: { coins: 120, plank: 4 }, after: 12 },
-  { id: 'kitchen', name: 'Remettre la cuisine en état', icon: '🍲', ...L.pads.kitchen, site: L.kitchen, cost: { coins: 220, plank: 10, scrap: 6 }, after: 13 },
-  { id: 'shelter', name: 'Retaper l’abri', icon: '🏠', ...L.pads.shelter, site: L.shelter, cost: { coins: 300, plank: 12 }, after: 15 },
-  { id: 'farmer', name: 'Fermière', icon: '👩‍🌾', ...L.pads.farmer, cost: { coins: 250 }, after: 16 },
-  { id: 'lumber', name: 'Bûcheron', icon: '🧔', ...L.pads.lumber, cost: { coins: 300 }, after: 18 },
+  { id: 'bench', name: 'Réparer l’établi', icon: '🔧', ...L.pads.bench, site: L.bench, cost: { coins: 80, log: 8 }, after: 7 },
+  { id: 'sawmill', name: 'Remettre la scierie en marche', icon: '🪚', ...L.pads.sawmill, site: L.sawmill, cost: { coins: 180, log: 12 }, after: 8 },
+  { id: 'tower', name: 'Relever la tour de guet', icon: '🗼', ...L.pads.tower, site: L.tower, cost: { coins: 400, plank: 10, scrap: 6 }, after: 11 },
+  { id: 'bed3', name: 'Réparer le potager', icon: '🍅', ...L.pads.bed3, site: L.beds[2]!, cost: { coins: 300, plank: 6 }, after: 12 },
+  { id: 'kitchen', name: 'Remettre la cuisine en état', icon: '🍲', ...L.pads.kitchen, site: L.kitchen, cost: { coins: 550, plank: 12, scrap: 8 }, after: 13 },
+  { id: 'shelter', name: 'Retaper l’abri', icon: '🏠', ...L.pads.shelter, site: L.shelter, cost: { coins: 750, plank: 18 }, after: 15 },
+  { id: 'farmer', name: 'Fermière', icon: '👩‍🌾', ...L.pads.farmer, cost: { coins: 800, soup: 6 }, after: 16 },
+  { id: 'lumber', name: 'Bûcheron', icon: '🧔', ...L.pads.lumber, cost: { coins: 1100, soup: 8 }, after: 18 },
   // Automatisation : facultatifs, ils apparaissent quand la reserve se remplit.
-  { id: 'cashier', name: 'Caissière', icon: '👩‍💼', x: 0.6, z: 7.0, cost: { coins: 400 }, after: 17 },
-  { id: 'porter', name: 'Porteur', icon: '🧑‍🌾', x: 1.2, z: -5.4, cost: { coins: 550 }, after: 19 },
+  { id: 'cashier', name: 'Caissière', icon: '👩‍💼', x: 0.6, z: 7.0, cost: { coins: 1500, soup: 10 }, after: 17 },
+  { id: 'porter', name: 'Porteur', icon: '🧑‍🌾', x: 1.2, z: -5.4, cost: { coins: 2400, soup: 12 }, after: 19 },
   // ---- la ferme
-  { id: 'westRoad', name: 'Dégager l’entrée de la ferme', icon: '🚜', ...L.pads.westRoad, site: L.farmGate, cost: { coins: 350, plank: 10 }, after: 19 },
-  { id: 'field1', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field1, site: L.fields[0]!, cost: { coins: 150, plank: 6 }, after: 20 },
-  { id: 'mill', name: 'Restaurer le moulin', icon: '🍞', ...L.pads.mill, site: L.mill, cost: { coins: 450, plank: 20, scrap: 10 }, after: 22 },
-  { id: 'field2', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field2, site: L.fields[1]!, cost: { coins: 260, plank: 8 }, after: 24 },
+  { id: 'westRoad', name: 'Dégager l’entrée de la ferme', icon: '🚜', ...L.pads.westRoad, site: L.farmGate, cost: { coins: 2000, plank: 16, scrap: 8 }, after: 19 },
+  { id: 'field1', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field1, site: L.fields[0]!, cost: { coins: 2000, plank: 10 }, after: 20 },
+  { id: 'mill', name: 'Restaurer le moulin', icon: '🍞', ...L.pads.mill, site: L.mill, cost: { coins: 3200, plank: 30, scrap: 15 }, after: 22 },
+  { id: 'field2', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field2, site: L.fields[1]!, cost: { coins: 2800, plank: 14 }, after: 24 },
   // ---- l'etang
-  { id: 'dock', name: 'Réparer le ponton', icon: '🎣', ...L.pads.dock, site: L.dock, cost: { coins: 320, plank: 15 }, after: 25 },
-  { id: 'fisher', name: 'Pêcheur', icon: '🧑‍🦰', ...L.pads.fisher, cost: { coins: 450 }, after: 28 },
+  { id: 'dock', name: 'Réparer le ponton', icon: '🎣', ...L.pads.dock, site: L.dock, cost: { coins: 4000, plank: 24 }, after: 25 },
+  { id: 'fisher', name: 'Pêcheur', icon: '🧑‍🦰', ...L.pads.fisher, cost: { coins: 5000, bread: 10 }, after: 28 },
   // ---- la station
-  { id: 'eastRoad', name: 'Dégager la route de l’est', icon: '⛽', ...L.pads.eastRoad, site: L.stationGate, cost: { coins: 500, scrap: 15 }, after: 29 },
-  { id: 'scav', name: 'Ferrailleur', icon: '🧑‍🔧', ...L.pads.scav, cost: { coins: 550 }, after: 32 },
+  { id: 'eastRoad', name: 'Dégager la route de l’est', icon: '⛽', ...L.pads.eastRoad, site: L.stationGate, cost: { coins: 6800, plank: 10, scrap: 25 }, after: 29 },
+  { id: 'scav', name: 'Ferrailleur', icon: '🧑‍🔧', ...L.pads.scav, cost: { coins: 8500, bread: 12, fish: 10 }, after: 32 },
   // ---- la fin
-  { id: 'bed4', name: 'Réparer le potager', icon: '🍅', ...L.pads.bed4, site: L.beds[3]!, cost: { coins: 260, plank: 6 }, after: 33 },
-  { id: 'field3', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field3, site: L.fields[2]!, cost: { coins: 420, plank: 10 }, after: 34 },
+  { id: 'bed4', name: 'Réparer le potager', icon: '🍅', ...L.pads.bed4, site: L.beds[3]!, cost: { coins: 7800, plank: 12 }, after: 33 },
+  { id: 'field3', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field3, site: L.fields[2]!, cost: { coins: 9000, plank: 18 }, after: 34 },
   // ---- materiaux : pierre et metal
-  { id: 'quarry', name: 'Ouvrir la carrière', icon: '⛏️', ...L.pads.quarry, site: L.quarryShed, cost: { coins: 600, plank: 15 }, after: 35 },
-  { id: 'foundry', name: 'Restaurer la fonderie', icon: '🔥', ...L.pads.foundry, site: L.foundry, cost: { coins: 1200, stone: 40, scrap: 20 }, after: 38 },
-  { id: 'bus1', name: 'Bus : moteur', icon: '🔧', ...L.busPad, site: L.bus, cost: { coins: 900, scrap: 30 }, after: 42 },
-  { id: 'bus2', name: 'Bus : carrosserie', icon: '🚌', ...L.busPad, site: L.bus, cost: { coins: 1400, plank: 30, scrap: 15 }, after: 43 },
-  { id: 'bus3', name: 'Bus : carburant', icon: '⛽', ...L.busPad, site: L.bus, cost: { coins: 2200, fuel: 12, metal: 10 }, after: 44 },
+  { id: 'quarry', name: 'Ouvrir la carrière', icon: '⛏️', ...L.pads.quarry, site: L.quarryShed, cost: { coins: 11000, plank: 30, scrap: 10 }, after: 35 },
+  { id: 'foundry', name: 'Restaurer la fonderie', icon: '🔥', ...L.pads.foundry, site: L.foundry, cost: { coins: 8500, stone: 60, scrap: 30 }, after: 38 },
+  { id: 'bus1', name: 'Bus : moteur', icon: '🔧', ...L.busPad, site: L.bus, cost: { coins: 13500, scrap: 40, metal: 10 }, after: 42 },
+  { id: 'bus2', name: 'Bus : carrosserie', icon: '🚌', ...L.busPad, site: L.bus, cost: { coins: 18000, plank: 50, stone: 40, scrap: 20 }, after: 43 },
+  { id: 'bus3', name: 'Bus : plein et provisions', icon: '⛽', ...L.busPad, site: L.bus, cost: { coins: 20000, fuel: 20, metal: 20, bread: 20, fish: 20 }, after: 44 },
 ];
 
 /** Objectif a partir duquel les nuits (et les hordes) commencent : apres la palissade. */
@@ -64,12 +64,12 @@ export type UpId = 'bag' | 'boots' | 'axe' | 'gun' | 'health' | 'wall';
 export interface UpDef { id: UpId; name: string; icon: string; costs: number[]; effect: (lvl: number) => string }
 
 export const UPGRADES: UpDef[] = [
-  { id: 'bag', name: 'Grand sac', icon: '🎒', costs: [40, 110, 240, 480], effect: (l) => `Porte ${8 + 4 * l} objets` },
-  { id: 'boots', name: 'Bottes', icon: '🥾', costs: [60, 160, 360], effect: (l) => `Vitesse +${12 * l} %` },
-  { id: 'axe', name: 'Hache affûtée', icon: '🪓', costs: [50, 150, 350], effect: (l) => `${3 + l} rondins par arbre, coups plus rapides` },
-  { id: 'gun', name: 'Fusil', icon: '🔫', costs: [80, 200, 420, 800], effect: (l) => `Dégâts ×${1 + l}, portée ${10 + l} m` },
-  { id: 'health', name: 'Trousse de soins', icon: '❤️', costs: [70, 180, 400], effect: (l) => `${100 + 30 * l} points de vie` },
-  { id: 'wall', name: 'Palissade renforcée', icon: '🛡️', costs: [180, 450, 1000], effect: (l) => `Murs ${100 + 50 * l} % de solidité` },
+  { id: 'bag', name: 'Grand sac', icon: '🎒', costs: [60, 300, 1200, 3500, 9000], effect: (l) => `Porte ${8 + 4 * l} objets` },
+  { id: 'boots', name: 'Bottes', icon: '🥾', costs: [150, 900, 3500], effect: (l) => `Vitesse +${12 * l} %` },
+  { id: 'axe', name: 'Hache affûtée', icon: '🪓', costs: [120, 600, 2500], effect: (l) => `${3 + l} rondins par arbre, coups plus rapides` },
+  { id: 'gun', name: 'Fusil', icon: '🔫', costs: [200, 900, 3000, 8000], effect: (l) => `Dégâts ×${1 + l}, portée ${10 + l} m` },
+  { id: 'health', name: 'Trousse de soins', icon: '❤️', costs: [180, 900, 3500], effect: (l) => `${100 + 30 * l} points de vie` },
+  { id: 'wall', name: 'Palissade renforcée', icon: '🛡️', costs: [5500, 11000, 20000], effect: (l) => `Murs ${100 + 50 * l} % de solidité` },
 ];
 
 export interface Stats {
@@ -129,6 +129,62 @@ export interface Save {
   wallTier: number;
   /** Niveau de construction des batiments : 1 bois, 2 pierre, 3 metal. */
   bt: Record<string, number>;
+  /** Ce qui traine dans le camp : sac, reserve, bacs de l'etal, caisse, machines. */
+  stock?: Stock;
+  /** Jour de la victoire : ensuite, la menace monte encore doucement. */
+  wonDay: number;
+  /** Temps de jeu (s) a chaque objectif atteint : pour mesurer le rythme. */
+  objT: number[];
+  // ---- monetisation (equitable : plafonds par jour, rien d'obligatoire)
+  /** Pubs regardees aujourd'hui, par emplacement. */
+  ads: { key: string; n: Record<string, number> };
+  /** Calendrier de connexion : case atteinte (0..6) et dernier jour reclame. */
+  login: { step: number; last: string; total: number };
+  /** Jour ou le bonus « 3 quetes » a ete pris. */
+  questBonus: string;
+  /** Contrats de la Ville : ameliorations permanentes payees en gemmes. */
+  contracts: Record<string, number>;
+  /** Le premier achat de gemmes est double : deja utilise ? */
+  firstBuy: boolean;
+  /** Ravitaillement mensuel : fin (ms) et dernier jour reclame. */
+  monthly: { until: number; last: string };
+  /** Horloge la plus avancee vue : un retour en arriere ne redonne rien. */
+  clockHigh: number;
+  /** Gains hors ligne pas encore encaisses (gardes si l'appli est fermee avant). */
+  pendingOffline?: OfflineReport;
+  /** Offres et jalons deja vus ou recompenses. */
+  seen: string[];
+  // ---- apres la victoire : convois vers la Ville
+  convoys: number;
+  /** Retour du convoi en cours (ms), 0 sinon. */
+  convoyAt: number;
+  /** Renommee : +3 % sur les ventes par point (max 20). */
+  renown: number;
+}
+
+export interface Stock {
+  bag: ItemType[];
+  reserve: Partial<Record<ItemType, number>>;
+  bins: Partial<Record<ItemType, number>>;
+  cash: number;
+  conv: Record<string, [ItemType[], ItemType[]]>;
+}
+
+export interface OfflineReport {
+  /** Secondes comptees (apres plafond). */
+  secs: number;
+  /** Secondes reelles d'absence. */
+  away: number;
+  coins: number;
+  /** Objets ranges dans la reserve. */
+  items: Partial<Record<ItemType, number>>;
+  /** Usure de la palissade (points de vie perdus, jamais de breche). */
+  wear: number;
+  nights: number;
+  /** Conseil : ce qui a limite la production. */
+  tip: string;
+  /** Rendement applique (0..1). */
+  eff: number;
 }
 
 /** Nouvelle cle : la vallee est un nouveau niveau, l'ancienne partie du camp n'est pas reprise. */
@@ -144,7 +200,9 @@ export function freshSave(): Save {
     gems: 0, owned: [], lv: {}, boosts: {}, chestAt: 0, quests: { key: '', list: [] }, gemAds: { key: '', n: 0 },
     broken: [], fixPaid: {}, campLv: 1,
     weapons: ['rifle'], weapon: 'rifle', outfits: ['base'], outfit: 'base', caches: {}, rescued: 0, radio: [],
-    wallTier: 1, bt: {},
+    wallTier: 1, bt: {}, wonDay: 0, objT: [],
+    ads: { key: '', n: {} }, login: { step: 0, last: '', total: 0 }, questBonus: '', contracts: {}, firstBuy: false,
+    monthly: { until: 0, last: '' }, clockHigh: Date.now(), seen: [], convoys: 0, convoyAt: 0, renown: 0,
   };
 }
 
@@ -174,6 +232,13 @@ export function loadSave(): Save {
       caches: { ...(d.caches ?? {}) },
       radio: Array.isArray(d.radio) ? d.radio : [],
       bt: { ...(d.bt ?? {}) },
+      objT: Array.isArray(d.objT) ? d.objT : [],
+      ads: d.ads && typeof d.ads.n === 'object' ? d.ads : base.ads,
+      login: { ...base.login, ...(d.login ?? {}) },
+      contracts: { ...(d.contracts ?? {}) },
+      monthly: { ...base.monthly, ...(d.monthly ?? {}) },
+      seen: Array.isArray(d.seen) ? d.seen : [],
+      clockHigh: typeof d.clockHigh === 'number' ? d.clockHigh : Date.now(),
       // Les parties d'avant les materiaux avaient deja des pieux taillés.
       wallTier: d.wallTier ?? ((d.v ?? 3) < 4 ? 2 : 1),
     };

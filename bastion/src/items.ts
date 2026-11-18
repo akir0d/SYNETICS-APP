@@ -26,8 +26,8 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   bread: { name: 'Pain', icon: '🍞', price: 16, h: 0.2 },
   fish: { name: 'Poisson', icon: '🐟', price: 8, h: 0.16 },
   fuel: { name: 'Carburant', icon: '⛽', price: 10, h: 0.5 },
-  stone: { name: 'Pierre', icon: '🧱', price: 2, h: 0.24 },
-  metal: { name: 'Métal', icon: '⚙️', price: 14, h: 0.16 },
+  stone: { name: 'Pierre', icon: '🧱', price: 3, h: 0.24 },
+  metal: { name: 'Métal', icon: '⚙️', price: 18, h: 0.16 },
 };
 
 export function itemMesh(t: ItemType): THREE.Group {

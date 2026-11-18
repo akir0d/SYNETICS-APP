@@ -11,7 +11,7 @@ import {
 import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type HelperCtx, type Job } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
-import { C, box, damp, easeOutBack, glow, mat, rbox } from './kit';
+import { box, damp, easeOutBack, glow, rbox } from './kit';
 import { CAMP, L, insideFarm, insideStation } from './layout';
 import { regions, type NavState } from './nav';
 import { Palisade, TIERS, logsNeeded, stateOf, unitHp, type Section } from './palisade';
@@ -24,16 +24,19 @@ import {
 import { Bed, ChopTree, FIELD_D, FIELD_W, Pump, ScrapSource, StoneSource, plantForest } from './resources';
 import { Restorer } from './restore';
 import {
-  BOOSTS, BOOST_TIME, CHEST_EVERY, GEM_ADS_PER_DAY, LEVELS, MAX_LEVEL, QUESTS, levelCost, rollQuests, todayKey,
-  type BoostId, type LevelId,
+  AD_CAPS, AD_DAY_MAX, BOOSTS, BOOST_MAX, BOOST_MAX_AD, BOOST_TIME, CHEST_EVERY, CONTRACTS, GEMS_PER_AD, LEVELS, LOGIN, MAX_LEVEL, QUESTS,
+  levelPrice, rollQuests, todayKey,
+  type AdSpot, type BoostId, type ContractId, type LevelId,
 } from './meta';
 import { PRODUCTS, SIMULATED, purchase, showRewarded, type Product } from './monetize';
+import { simulateOffline } from './offline';
 import { CREW, OUTFITS, RADIO, WEAPONS, type WeaponId } from './meta';
 import { Airdrop, CACHE_SPOTS, Cache, Caravan, DROP_SPOTS, RESCUE_SPOTS, Rescue, type Spot } from './events';
 import {
   bedRuin, benchRuin, dockRuin, fieldRuin, foundryRuin, gateJunk, junkPile, kitchenRuin, millRuin, quarryRuin, sawmillRuin, shelterRuin, towerRuin,
 } from './ruins';
 import { BIN_CAP, CoinDrops, Converter, Market, Reserve } from './stations';
+import { campDirt, planarUV } from './textures';
 import { buildWorld } from './world';
 import { Horde, type Structure, type Zombie } from './zombies';
 
@@ -56,7 +59,7 @@ const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 220);
 // Ciel voile, lumiere chaude et un peu poussiereuse : le monde d'apres, pas une carte postale.
 const DAY = {
   sky: new THREE.Color(0xbfd2cf), hemiSky: new THREE.Color(0xf6e9d2), hemiGround: new THREE.Color(0x6f7a45),
-  hemi: 1.6, sunColor: new THREE.Color(0xffdcb0), sun: 2.7, fogNear: 12, fogFar: 62, exposure: 1.02,
+  hemi: 1.35, sunColor: new THREE.Color(0xffd9a8), sun: 3.05, fogNear: 12, fogFar: 62, exposure: 1.04,
 };
 const NIGHT = {
   sky: new THREE.Color(0x0c1526), hemiSky: new THREE.Color(0x30487a), hemiGround: new THREE.Color(0x0b1220),
@@ -210,6 +213,7 @@ const ui = {
   objective: $('.objective'), objIcon: $('.objective .oi'), objText: $('.objective .ot'),
   toast: $('.toast'), modal: $('.modal'), sheetBody: $('.sheet-body'),
   joy: $('.joy'), knob: $('.joy-knob'), hp: $('.hpbar'), hpFill: $('.hpbar i'),
+  adPill: $<HTMLButtonElement>('.ad-pill'),
   menuBtn: $('.menu-btn'), menu: $('.menu'), sound: $<HTMLButtonElement>('.menu .m-sound'), reset: $<HTMLButtonElement>('.menu .m-reset'),
 };
 
@@ -241,9 +245,28 @@ function placeLabel(el: HTMLElement, x: number, y: number, z: number): void {
   el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%, -100%)`;
 }
 
+/** Les grands nombres restent lisibles : 18 500, puis 125k. */
+function fmt(n: number): string {
+  n = Math.round(n);
+  if (n >= 100000) return `${Math.round(n / 1000)}k`;
+  if (n >= 10000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, '0')}`;
+  return String(n);
+}
+
+/** Un cout en texte simple (pour les messages). */
+function costText(c: Cost): string {
+  const parts: string[] = [];
+  if (c.coins > 0) parts.push(`${fmt(c.coins)} pièces`);
+  for (const t of Object.keys(ITEMS) as ItemType[]) {
+    const n = c[t];
+    if (n && n > 0) parts.push(`${ITEMS[t].icon}${n}`);
+  }
+  return parts.join(' ');
+}
+
 function costIcons(c: Cost): string {
   const parts: string[] = [];
-  if (c.coins > 0) parts.push(`<span class="coin"></span>${c.coins}`);
+  if (c.coins > 0) parts.push(`<span class="coin"></span>${fmt(c.coins)}`);
   for (const t of Object.keys(ITEMS) as ItemType[]) {
     const n = c[t];
     if (n && n > 0) parts.push(`${ITEMS[t].icon}${n}`);
@@ -270,16 +293,19 @@ interface Pad {
 }
 
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
+/** Geometries des zones, partagees (les zones de reparation vont et viennent). */
+const PAD_RING = new THREE.RingGeometry(1.15, 1.4, 48);
+const PAD_FILL = new THREE.CircleGeometry(1.1, 48);
 const fillMat = new THREE.MeshBasicMaterial({ color: 0xffd84a, transparent: true, opacity: 0.8, depthWrite: false });
 
 boot('zones et sauvegarde');
 const pads: Pad[] = PADS.map((def) => {
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.4, 48), ringMat);
+  const ring = new THREE.Mesh(PAD_RING, ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(def.x, 0.05, def.z);
   ring.visible = false;
   scene.add(ring);
-  const fill = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), fillMat);
+  const fill = new THREE.Mesh(PAD_FILL, fillMat);
   fill.rotation.x = -Math.PI / 2;
   fill.position.set(def.x, 0.045, def.z);
   fill.visible = false;
@@ -337,6 +363,13 @@ function restoreBuilding(id: string, b: Building, instant: boolean, done?: () =>
   });
 }
 
+/** Un repere invisible : la poussiere d'un chantier sans batiment part de la. */
+function marker(x: number, z: number): THREE.Object3D {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  return g;
+}
+
 /** Applique l'effet d'une construction ; `instant` au chargement d'une partie. */
 function applyBuild(id: string, instant: boolean): void {
   const bed = { bed2: beds[1], bed3: beds[2], bed4: beds[3], field1: fields[0], field2: fields[1], field3: fields[2] }[id];
@@ -362,13 +395,13 @@ function applyBuild(id: string, instant: boolean): void {
     case 'westRoad':
       world.locks.west.off = true;
       nav.westOpen = true;
-      restore(id, new THREE.Group(), instant);
+      restore(id, marker(L.farmGate.x, L.farmGate.z), instant);
       break;
     case 'eastRoad':
       world.locks.east.off = true;
       nav.eastOpen = true;
       market.eastOpen = true;
-      restore(id, new THREE.Group(), instant);
+      restore(id, marker(L.stationGate.x, L.stationGate.z), instant);
       break;
     case 'mill': restoreBuilding(id, B.mill!, instant, () => { mill.built = true; mill.setVisible(true); }); break;
     case 'quarry': restoreBuilding(id, B.quarry!, instant); break;
@@ -423,8 +456,8 @@ RUINS.bed1.visible = false;
 const REPAIR: Record<string, Cost> = {
   bed1: { coins: 0, log: 4 }, bed2: { coins: 0, log: 4 }, bed3: { coins: 0, log: 4 }, bed4: { coins: 0, log: 4 },
   field1: { coins: 0, log: 6 }, field2: { coins: 0, log: 6 }, field3: { coins: 0, log: 6 },
-  bench: { coins: 40, log: 6 }, sawmill: { coins: 60, log: 10 }, kitchen: { coins: 80, plank: 6 },
-  tower: { coins: 100, plank: 8 }, shelter: { coins: 120, plank: 10 }, mill: { coins: 150, plank: 12 },
+  bench: { coins: 100, log: 6 }, sawmill: { coins: 150, log: 10 }, kitchen: { coins: 250, plank: 6 },
+  tower: { coins: 300, plank: 8 }, shelter: { coins: 400, plank: 10 }, mill: { coins: 600, plank: 12 },
 };
 const STRUCT_HP: Record<string, number> = {
   bed1: 30, bed2: 30, bed3: 30, bed4: 30, field1: 40, field2: 40, field3: 40,
@@ -446,9 +479,10 @@ function structAlive(id: string): boolean {
 function siteOf(id: string): { x: number; z: number; reach: number } {
   const bed = { bed1: beds[0], bed2: beds[1], bed3: beds[2], bed4: beds[3], field1: fields[0], field2: fields[1], field3: fields[2] }[id];
   if (bed) return { x: bed.x, z: bed.z, reach: Math.hypot(bed.w, bed.d) / 2 + 0.3 };
-  const p = { bench: L.bench, sawmill: L.sawmill, kitchen: L.kitchen, tower: L.tower, shelter: L.shelter, mill: L.mill }[id]!;
-  const r = { bench: 1.6, sawmill: 2.2, kitchen: 2.0, tower: 1.9, shelter: 2.6, mill: 2.4 }[id]!;
-  return { x: p.x, z: p.z, reach: r };
+  const P: Record<string, { x: number; z: number }> = { bench: L.bench, sawmill: L.sawmill, kitchen: L.kitchen, tower: L.tower, shelter: L.shelter, mill: L.mill, foundry: L.foundry };
+  const R: Record<string, number> = { bench: 1.6, sawmill: 2.2, kitchen: 2.0, tower: 1.9, shelter: 2.6, mill: 2.4, foundry: 2.2 };
+  const p = P[id] ?? L.bench;
+  return { x: p.x, z: p.z, reach: R[id] ?? 2 };
 }
 
 const STRUCTS: Structure[] = Object.keys(REPAIR).map((id) => {
@@ -478,6 +512,7 @@ function wreck(id: string, instant: boolean): void {
   if (!isBroken(id)) save.broken.push(id);
   const ruin = RUINS[id];
   const built = builtOf(id);
+  restorer.cancel(built);
   built.visible = false;
   if (ruin) ruin.visible = true;
   setWorking(id, false);
@@ -504,6 +539,40 @@ function onStructHit(st: Structure, at: THREE.Vector3, dmg: number): void {
     wreck(st.id, false);
   }
 }
+
+// ---- chiffres qui s'envolent : chaque gain se voit la ou il arrive
+
+interface Floater { el: HTMLElement; x: number; y: number; z: number; t: number }
+const floaters: Floater[] = [];
+const FLOAT_T = 1.2;
+function floatText(text: string, x: number, y: number, z: number, cls = ''): void {
+  let f = floaters.find((q) => q.t <= 0);
+  if (!f) {
+    if (floaters.length >= 14) f = floaters.reduce((a, b) => (a.t < b.t ? a : b));
+    else {
+      f = { el: document.createElement('div'), x: 0, y: 0, z: 0, t: 0 };
+      labels.appendChild(f.el);
+      floaters.push(f);
+    }
+  }
+  f.el.className = `float-num ${cls}`;
+  f.el.textContent = text;
+  f.x = x;
+  f.y = y;
+  f.z = z;
+  f.t = FLOAT_T;
+}
+function placeFloaters(dt: number): void {
+  for (const f of floaters) {
+    if (f.t <= 0) continue;
+    f.t -= dt;
+    if (f.t <= 0) { f.el.classList.add('off'); continue; }
+    const k = 1 - f.t / FLOAT_T;
+    placeLabel(f.el, f.x, f.y + (1 - (1 - k) * (1 - k)) * 1.8, f.z);
+    f.el.style.opacity = String(Math.min(1, f.t * 3));
+  }
+}
+const floatAtPlayer = (text: string, cls = '') => floatText(text, player.position.x, 2.6, player.position.z, cls);
 
 // ---- alertes : un ⚠️ au-dessus de ce qui se fait attaquer
 
@@ -567,9 +636,9 @@ const freeHouse = () => houses() - HOUSED.filter((id) => isBuilt(id)).length > 0
 const CAMP_LEVELS: { cost: Cost; title: string; done: string }[] = [
   { cost: { coins: 0 }, title: '', done: '' },
   { cost: { coins: 0 }, title: '', done: '' },
-  { cost: { coins: 800, plank: 25, log: 20 }, title: 'Camp niv. 2 : extension est', done: 'Le camp s’agrandit : armurerie, 2 maisons, 2 tours' },
-  { cost: { coins: 2000, plank: 40, scrap: 20 }, title: 'Camp niv. 3 : extension ouest', done: 'Le camp s’agrandit : infirmerie, 2 maisons, 2 tours' },
-  { cost: { coins: 4500, stone: 60, metal: 15 }, title: 'Camp niv. 4 : bastion', done: 'Bastion : entrepôt et palissade renforcée' },
+  { cost: { coins: 6500, plank: 40, log: 30 }, title: 'Camp niv. 2 : extension est', done: 'Le camp s’agrandit : armurerie, 2 maisons, 2 tours' },
+  { cost: { coins: 11000, plank: 60, scrap: 40, bread: 20 }, title: 'Camp niv. 3 : extension ouest', done: 'Le camp s’agrandit : infirmerie, 2 maisons, 2 tours' },
+  { cost: { coins: 12000, stone: 100, metal: 30 }, title: 'Camp niv. 4 : bastion', done: 'Bastion : entrepôt et palissade renforcée' },
 ];
 const CAMP_PAD = { x: -3.6, z: 6.2 };
 const dirtStrips = new Set<number>();
@@ -577,6 +646,8 @@ const dirtStrips = new Set<number>();
 /** Reconstruit la palissade aux dimensions actuelles du camp (troncons neufs, intacts). */
 function rebuildPalisade(): void {
   const northOn = palisade.north.enabled;
+  // Ce qui volait vers un troncon retourne a la reserve plutot que de se perdre.
+  for (const s of palisade.sections) for (let i = 0; i < s.inflight; i++) reserve.add(palisade.repairItem);
   for (const sg of palisade.walls) {
     const i = world.walls.indexOf(sg);
     if (i >= 0) world.walls.splice(i, 1);
@@ -603,7 +674,9 @@ function applyCampLevel(instant: boolean): void {
     for (const [x0, x1] of [[13, size.maxX], [size.minX, -13]] as const) {
       if (x1 - x0 <= 0 || dirtStrips.has(x0)) continue;
       dirtStrips.add(x0);
-      const strip = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 + 0.6, 22.6), mat(C.dirt, { flat: false }));
+      const sg = new THREE.PlaneGeometry(x1 - x0 + 0.6, 22.6);
+      planarUV(sg, 1 / 6);
+      const strip = new THREE.Mesh(sg, campDirt(0xc9a57a));
       strip.rotation.x = -Math.PI / 2;
       strip.position.set((x0 + x1) / 2, 0.014, 0);
       strip.receiveShadow = true;
@@ -636,11 +709,11 @@ const dynPads = new Map<string, DynPad>();
 const repairMat = new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.85, depthWrite: false });
 
 function makeDyn(key: string, x: number, z: number, cost: Cost, icon: string, title: string, done: () => void): DynPad {
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.4, 48), key.startsWith('fix') ? repairMat : ringMat);
+  const ring = new THREE.Mesh(PAD_RING, key.startsWith('fix') ? repairMat : ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(x, 0.05, z);
   scene.add(ring);
-  const fill = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), fillMat);
+  const fill = new THREE.Mesh(PAD_FILL, fillMat);
   fill.rotation.x = -Math.PI / 2;
   fill.position.set(x, 0.045, z);
   scene.add(fill);
@@ -704,8 +777,59 @@ function repaired(id: string): void {
   sfx.sfxBuild();
 }
 
-/** Fait correspondre les zones affichees a l'etat : une par batiment demoli, une pour le camp. */
+/** Convoi n°k vers la Ville : de plus en plus cher, il emporte aussi des vivres et du carburant. */
+function convoyCost(k: number): Cost {
+  return { coins: Math.round((15000 * Math.pow(1.3, k)) / 100) * 100, fuel: 20, bread: 30, fish: 30, metal: 10 };
+}
+const CONVOY_TIME = 10 * 60 * 1000;
+
+function startConvoy(): void {
+  save.convoyAt = nowT() + CONVOY_TIME;
+  bus.root.visible = true;
+  bus.root.position.set(L.bus.x, 0, L.bus.z);
+  bus.driving = 0.001;
+  sfx.sfxVictory();
+  toast(`🚌 Convoi n°${save.convoys + 1} en route vers la Ville : retour dans 10 min`);
+  persist();
+}
+
+function convoyBack(): void {
+  save.convoyAt = 0;
+  save.convoys++;
+  save.renown = Math.min(20, save.renown + 1);
+  bus.driving = 0;
+  bus.root.position.set(L.bus.x, 0, L.bus.z);
+  bus.root.visible = true;
+  restorer.run(null, bus.root);
+  gainGems(25);
+  const outfit = save.convoys === 3 ? 'convoy' : save.convoys === 10 ? 'legend' : null;
+  if (outfit && !save.outfits.includes(outfit)) save.outfits.push(outfit);
+  const o = outfit ? OUTFITS.find((x) => x.id === outfit) : null;
+  showModal(`<div class="modal-big">🚌</div><h2>Le convoi est rentré !</h2>
+    <p>La Ville a reçu tes vivres. Ton camp gagne en renommée.</p>
+    <div class="stats"><div><b>+25 💎</b><span>gemmes</span></div><div><b>${save.renown}/20</b><span>renommée (+${3 * save.renown} % ventes)</span></div></div>
+    ${o ? `<p>${o.icon} Nouvelle tenue : <b>${o.name}</b> (boutique)</p>` : ''}`);
+  sfx.sfxVictory();
+  persist();
+}
+
+function updateConvoy(): void {
+  if (bus.driving > 6) {
+    // Le bus a quitte l'ecran : il reviendra au retour du convoi.
+    bus.driving = 0;
+    bus.root.visible = false;
+    bus.root.position.set(L.bus.x, 0, L.bus.z);
+  }
+  if (save.convoyAt > 0 && nowT() >= save.convoyAt && !ui.modal.classList.contains('show')) convoyBack();
+}
+
+/** Fait correspondre les zones affichees a l'etat : une par batiment demoli, une pour le camp, un convoi. */
 function syncDynPads(): void {
+  // Apres la victoire : un convoi a la fois, depuis l'arret du bus.
+  const ckey = `convoy:${save.convoys}`;
+  if (save.won && save.convoyAt === 0 && victoryT === 0 && bus.driving === 0 && !dynPads.has(ckey)) {
+    dynPads.set(ckey, makeDyn(ckey, L.busPad.x, L.busPad.z, convoyCost(save.convoys), '🚌', `Convoi n°${save.convoys + 1} vers la Ville`, startConvoy));
+  }
   for (const id of save.broken) {
     const key = `fix:${id}`;
     if (dynPads.has(key)) continue;
@@ -729,7 +853,7 @@ function syncDynPads(): void {
 // ---------------------------------------------------------------- objectifs
 
 /** `house` : ce recrutement demande une maison libre (sinon on guide vers l'agrandissement). */
-interface Objective { icon: string; text: string; target: () => THREE.Vector3 | null; done: () => boolean; house?: string }
+interface Objective { icon: string; text: string; target: () => THREE.Vector3 | null; done: () => boolean; house?: string; crew?: boolean }
 
 const padPos = (id: string) => () => {
   const d = PADS.find((p) => p.id === id)!;
@@ -782,7 +906,7 @@ const OBJECTIVES: Objective[] = [
   { icon: '🍲', text: 'Fais cuire de la soupe (légumes à la cuisine)', target: at(L.kitchenIn), done: stat('soup') },
   { icon: '🏠', text: 'Retape l’abri des survivants', target: padPos('shelter'), done: () => isBuilt('shelter') },
   { icon: '👩‍🌾', text: 'Recrute une fermière', target: padPos('farmer'), done: () => isBuilt('farmer') },
-  { icon: '📦', text: 'Récupère sa récolte dans la réserve', target: () => new THREE.Vector3(reserve.zone.x, 0, reserve.zone.z), done: stat('chest') },
+  { icon: '📦', text: 'Récupère sa récolte dans la réserve', target: () => new THREE.Vector3(reserve.zone.x, 0, reserve.zone.z), done: stat('chest'), crew: true },
   { icon: '🧔', text: 'Recrute un bûcheron', target: padPos('lumber'), done: () => isBuilt('lumber') },
   // ---- la ferme (19 a 24)
   { icon: '🚜', text: 'Dégage l’entrée de la ferme, à l’ouest', target: padPos('westRoad'), done: () => isBuilt('westRoad') },
@@ -821,17 +945,29 @@ function currentObjective(): Objective | null {
   return OBJECTIVES[save.obj] ?? null;
 }
 
+/** Ce qui empeche l'objectif en cours d'avancer, et ou aller pour le debloquer. */
+function objectiveBlock(): { icon: string; text: string; at: THREE.Vector3 } | null {
+  const o = currentObjective();
+  if (!o) return null;
+  if (o.house && !freeHouse()) return { icon: '🏠', text: `Agrandis le camp (🏰 près du feu) pour loger ${o.house}`, at: new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z) };
+  if (o.crew && isBroken('shelter')) {
+    const r = repairSpot('shelter');
+    return { icon: '🔨', text: 'Répare l’abri : sans toit, les survivants ne travaillent plus', at: new THREE.Vector3(r.x, 0, r.z) };
+  }
+  return null;
+}
+
 function renderObjective(): void {
   const o = currentObjective();
   ui.objective.classList.toggle('off', !o);
   if (!o) return;
-  const blocked = !!o.house && !freeHouse();
-  ui.objIcon.textContent = blocked ? '🏠' : o.icon;
-  ui.objText.textContent = blocked ? `Agrandis le camp (🏰 près du feu) pour loger ${o.house}` : o.text;
-  objBlocked = blocked;
+  const b = objectiveBlock();
+  ui.objIcon.textContent = b ? b.icon : o.icon;
+  ui.objText.textContent = b ? b.text : o.text;
+  objBlocked = b ? b.text : '';
   bump(ui.objective);
 }
-let objBlocked = false;
+let objBlocked = '';
 
 function advanceObjectives(): void {
   let moved = false;
@@ -840,8 +976,11 @@ function advanceObjectives(): void {
     moved = true;
   }
   if (moved) {
+    // Temps de jeu a chaque objectif : pour verifier le rythme de la partie.
+    while (save.objT.length < save.obj) save.objT.push(Math.round(save.playTime));
     renderObjective();
     sfx.sfxObjective();
+    checkMilestones();
     playRadio();
     persist();
   }
@@ -893,12 +1032,12 @@ function renderSheet(): void {
   const levels = LEVELS.filter((d) => !d.needs || isBuilt(d.needs)).map((d) => {
     const lvl = lv(d.id);
     const max = lvl >= MAX_LEVEL;
-    const cost = levelCost(d, lvl);
+    const cost = levelPrice(d, lvl);
     return `<div class="card">
       <div class="card-icon">${d.icon}</div>
       <div class="card-main"><div class="card-title">${d.name} <span class="lv">niv. ${lvl}/${MAX_LEVEL}</span></div>
       <div class="card-desc">${d.effect(max ? lvl : lvl + 1)}</div></div>
-      <button class="btn ${!max && save.coins < cost ? 'poor' : ''}" data-lv="${d.id}" ${max ? 'disabled' : ''}>${max ? 'MAX' : `<span class="coin"></span>${cost}`}</button>
+      <button class="btn ${!max && !canAfford(cost) ? 'poor' : ''}" data-lv="${d.id}" ${max ? 'disabled' : ''}>${max ? 'MAX' : costIcons(cost)}</button>
     </div>`;
   }).join('');
   ui.sheetBody.innerHTML = `<h2>🧱 Matériaux</h2>${materialCards()}<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + UPGRADES.map((u) => {
@@ -918,18 +1057,25 @@ ui.sheetBody.addEventListener('click', (e) => {
   const mb = (e.target as HTMLElement).closest<HTMLElement>('[data-mat]');
   if (mb) {
     const up = materialUpgrades().find((u) => u.key === mb.dataset.mat);
-    if (!up || !up.ready || !canAfford(up.cost)) {
+    const moved = up && up.ready ? depositInto(up.pkey, up.cost) : 0;
+    if (!up || !moved) {
       sfx.sfxNope();
+      if (up && up.ready) toast(`Il manque : ${costText(remainingOf(up.pkey, up.cost))}`);
       mb.classList.remove('shake');
       void mb.offsetWidth;
       mb.classList.add('shake');
       return;
     }
-    spend(up.cost);
-    up.apply();
-    sfx.sfxBuild();
-    buzz(40);
-    particles.burst(player.position.clone().setY(2), [0xffd84a, 0xffffff, 0x9a9890], 40, { speed: 5, up: 6, size: 0.16 });
+    if (totalCost(remainingOf(up.pkey, up.cost)) === 0) {
+      delete save.fixPaid[up.pkey];
+      up.apply();
+      sfx.sfxBuild();
+      buzz(40);
+      particles.burst(player.position.clone().setY(2), [0xffd84a, 0xffffff, 0x9a9890], 40, { speed: 5, up: 6, size: 0.16 });
+    } else {
+      sfx.sfxDrop(6);
+      buzz(15);
+    }
     renderSheet();
     persist();
     return;
@@ -937,16 +1083,17 @@ ui.sheetBody.addEventListener('click', (e) => {
   const lb = (e.target as HTMLElement).closest<HTMLElement>('[data-lv]');
   if (lb) {
     const d = LEVELS.find((x) => x.id === lb.dataset.lv)!;
-    const cost = levelCost(d, lv(d.id));
+    const cost = levelPrice(d, lv(d.id));
     if (lv(d.id) >= MAX_LEVEL) return;
-    if (save.coins < cost) {
+    if (!canAfford(cost)) {
       sfx.sfxNope();
+      if (save.coins >= cost.coins) toast(`Il manque : ${costText(cost)}`);
       lb.classList.remove('shake');
       void lb.offsetWidth;
       lb.classList.add('shake');
       return;
     }
-    save.coins -= cost;
+    spend(cost);
     save.lv[d.id] = lv(d.id) + 1;
     sfx.sfxBuild();
     buzz(30);
@@ -1000,7 +1147,7 @@ function refreshSheetButtons(): void {
   });
   ui.sheetBody.querySelectorAll<HTMLElement>('[data-lv]').forEach((b) => {
     const d = LEVELS.find((x) => x.id === b.dataset.lv)!;
-    b.classList.toggle('poor', lv(d.id) < MAX_LEVEL && save.coins < levelCost(d, lv(d.id)));
+    b.classList.toggle('poor', lv(d.id) < MAX_LEVEL && !canAfford(levelPrice(d, lv(d.id))));
   });
 }
 
@@ -1009,15 +1156,25 @@ function refreshSheetButtons(): void {
 const lv = (id: LevelId) => save.lv[id] ?? 0;
 const owns = (id: string) => save.owned.includes(id);
 const boostOn = (id: BoostId) => (save.boosts[id] ?? 0) > 0;
-/** Ce que rapporte une vente : niveau de l'etal et boost « ventes x2 ». */
-/** Chaque survivant sauve fait de la reclame au camp : +4 % sur les ventes (jusqu'a +40 %). */
-const sellMul = () => (1 + 0.06 * lv('stall') + Math.min(0.4, 0.04 * save.rescued)) * (boostOn('sell') ? 2 : 1);
+const ct = (id: ContractId) => save.contracts[id] ?? 0;
+/** L'heure, sans retour en arriere : reculer l'horloge du telephone ne redonne rien. */
+const nowT = () => Math.max(Date.now(), save.clockHigh);
+const dayKey = () => todayKey(new Date(nowT()));
+
+/**
+ * Ce que rapporte une vente : niveau de l'etal, survivants sauves (+4 % chacun, jusqu'a +40 %),
+ * reclame en ville (contrat), renommee (convois) et boost « ventes x2 ».
+ */
+const sellMul = () => (1 + 0.05 * lv('stall') + Math.min(0.4, 0.04 * save.rescued) + 0.08 * ct('reclame') + 0.03 * save.renown)
+  * (boostOn('sell') ? 2 : 1);
+/** Vitesse des survivants (contrat « equipe aguerrie »). */
+const crewMul = () => 1 + 0.12 * ct('crew');
 
 /** Applique niveaux et boosts aux machines, cultures, reserve et au joueur (chaque image). */
 function applyMeta(dt: number): void {
   for (const b of BOOSTS) if ((save.boosts[b.id] ?? 0) > 0) save.boosts[b.id] = Math.max(0, save.boosts[b.id]! - dt);
   const grow = boostOn('grow') ? 2 : 1;
-  for (const b of beds) b.growMul = (1 + 0.12 * lv('crops')) * grow;
+  for (const b of beds) b.growMul = grow;
   // Batiments en pierre puis en metal : +50 % de cadence a chaque palier.
   const tierK = (id: string) => 1 + 0.5 * (bt(id) - 1);
   saw.speed = (1 + 0.15 * lv('saw')) * grow * tierK('sawmill');
@@ -1028,59 +1185,143 @@ function applyMeta(dt: number): void {
   player.speedMul = (1 + 0.12 * save.up.boots) * (boostOn('speed') ? 1.4 : 1);
 }
 
-function startBoost(id: BoostId): void {
-  save.boosts[id] = (save.boosts[id] ?? 0) + BOOST_TIME;
+/** Un boost : il se cumule, jusqu'a un plafond (15 min par les pubs, 30 min en tout). */
+function startBoost(id: BoostId, max = BOOST_MAX): void {
+  save.boosts[id] = Math.min(max, Math.max(save.boosts[id] ?? 0, 0) + BOOST_TIME);
   const b = BOOSTS.find((x) => x.id === id)!;
   sfx.sfxObjective();
-  toast(`${b.icon} ${b.name} : 3 minutes !`);
+  toast(`${b.icon} ${b.name} : encore ${Math.round(save.boosts[id]! / 60)} min`);
   persist();
 }
+/** Le boost a-t-il encore de la place sous ce plafond ? */
+const boostRoom = (id: BoostId, max: number) => (save.boosts[id] ?? 0) + 30 <= max;
 
-/** Pieces qu'offre un coffre : de quoi avancer, a la mesure de la partie. */
-const chestCoins = () => 120 + 60 * save.day + 8 * save.obj;
+/** Pieces d'un coffre : quelques minutes de revenu, a la mesure de la progression. */
+const chestCoins = () => Math.round((100 + 12 * Math.pow(save.obj, 1.5)) / 10) * 10;
+/** Ce que donne vraiment un coffre (contrat « ravitailleur fidele »). */
+const chestReward = () => Math.round((chestCoins() * (1 + 0.5 * ct('chest'))) / 10) * 10;
 
 function gainGems(n: number): void {
   save.gems += n;
+  floatText(`+${n} 💎`, player.position.x + 0.6, 3.2, player.position.z, 'gem');
   bump(ui.gemsPill);
   sfx.sfxCoin();
 }
 
+// ---- budget de pubs : chaque emplacement a son plafond du jour
+
+function adsToday(): Record<string, number> {
+  const key = dayKey();
+  if (save.ads.key !== key) save.ads = { key, n: {} };
+  return save.ads.n;
+}
+function adLeft(spot: AdSpot): number {
+  const n = adsToday();
+  const total = Object.values(n).reduce((a, b) => a + b, 0);
+  return Math.max(0, Math.min(AD_CAPS[spot] - (n[spot] ?? 0), AD_DAY_MAX - total));
+}
+/** Pub recompensee, toujours au choix du joueur : plafonnee, comptee seulement si elle va au bout. */
+function rewarded(spot: AdSpot, what: string): Promise<boolean> {
+  if (adLeft(spot) <= 0) {
+    toast('📺 C’est tout pour aujourd’hui : reviens demain !');
+    return Promise.resolve(false);
+  }
+  return showRewarded(what, owns('noads')).then((ok) => {
+    if (ok) {
+      const n = adsToday();
+      n[spot] = (n[spot] ?? 0) + 1;
+      persist();
+    }
+    return ok;
+  });
+}
+/** Bouton « pub » : grise une fois le plafond du jour atteint. */
+const adButton = (spot: AdSpot, attrs: string, label: string) => adLeft(spot) > 0
+  ? `<button class="btn ad" ${attrs}>📺 ${label}</button>`
+  : `<button class="btn ad" disabled>📺 Demain</button>`;
+
+// ---- quetes du jour
+
 function ensureQuests(): void {
-  const key = todayKey();
-  if (save.quests.key === key) return;
-  save.quests = { key, list: rollQuests(key, save.obj, save.day, save.stats) };
-  if (save.gemAds.key !== key) save.gemAds = { key, n: 0 };
+  const key = dayKey();
+  save.quests.list = save.quests.list.filter((q) => QUESTS.some((d) => d.id === q.id));
+  if (save.quests.key === key && save.quests.list.length) return;
+  // Les objectifs suivent la menace (donc la progression), plafonnes : une journee reste faisable.
+  save.quests = { key, list: rollQuests(key, save.obj, Math.min(20, threat()), save.stats) };
 }
 
 function questProgress(q: { id: string; base: number; goal: number }): number {
-  const def = QUESTS.find((d) => d.id === q.id)!;
-  return Math.min(q.goal, save.stats[def.stat] - q.base);
+  const def = QUESTS.find((d) => d.id === q.id);
+  if (!def) return 0;
+  return Math.max(0, Math.min(q.goal, save.stats[def.stat] - q.base));
 }
 
-const chestReady = () => Date.now() >= save.chestAt;
+const chestReady = () => nowT() >= save.chestAt;
 const questToClaim = () => save.quests.list.some((q) => !q.claimed && questProgress(q) >= q.goal);
+const questBonusReady = () => save.quests.list.length >= 3 && save.quests.list.every((q) => q.claimed) && save.questBonus !== save.quests.key;
+const loginReady = () => save.login.last !== dayKey();
+const monthlyReady = () => save.monthly.until > nowT() && save.monthly.last !== dayKey();
+/** La boutique n'apparait qu'une fois les premiers gestes appris. */
+const shopUnlocked = () => save.obj >= 3;
 
 function fmtWait(ms: number): string {
   const m = Math.ceil(ms / 60000);
   return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
 }
 
-let shopTab: 'shop' | 'quests' = 'shop';
+type ShopTab = 'shop' | 'quests' | 'city';
+let shopTab: ShopTab = 'shop';
 let hudClock = 0;
+
+/** Jalons de l'histoire recompenses : chaque grande etape franchie donne des gemmes. */
+const MILESTONES: { at: number; text: string }[] = [
+  { at: 19, text: 'Le camp tient debout' }, { at: 25, text: 'La ferme revit' }, { at: 29, text: 'L’étang est à vous' },
+  { at: 33, text: 'La station est rouverte' }, { at: 38, text: 'La pierre remplace le bois' }, { at: 42, text: 'Le métal coule' },
+  { at: 45, text: 'Le bus est prêt' },
+];
+function checkMilestones(): void {
+  for (const m of MILESTONES) {
+    const key = `m:${m.at}`;
+    if (save.obj < m.at || save.seen.includes(key)) continue;
+    save.seen.push(key);
+    gainGems(10);
+    toast(`🏅 ${m.text} : +10 💎`);
+  }
+}
+
+/** Pub contextuelle : quand la file d'attente deborde, on propose « ventes x2 » (jamais imposee). */
+let adPillFor: BoostId | null = null;
+function renderAdPill(): void {
+  const day = !save.cycle || save.phase === 'day';
+  const waiting = market.customers.filter((c) => c.state !== 'leave').length;
+  const want = shopUnlocked() && day && waiting >= 3 && !boostOn('sell') && adLeft('boost_sell') > 0 && save.obj >= 5;
+  adPillFor = want ? 'sell' : null;
+  ui.adPill.classList.toggle('off', !want);
+  if (want) setText(ui.adPill, '📺 Ventes ×2 · 5 min');
+}
 
 function renderMetaHud(): void {
   hudClock -= 1;
   if (hudClock > 0) return;
   hudClock = 20;
   ensureQuests();
-  const alert = chestReady() || questToClaim();
+  ui.shopBtn.classList.toggle('off', !shopUnlocked());
+  const cityAlert = loginReady() || monthlyReady();
+  const alert = chestReady() || questToClaim() || questBonusReady() || cityAlert;
   ui.shopBtn.classList.toggle('alert', alert);
-  ui.shop.querySelector('[data-tab="quests"]')!.classList.toggle('alert', questToClaim());
+  ui.shop.querySelector('[data-tab="quests"]')!.classList.toggle('alert', questToClaim() || questBonusReady());
+  ui.shop.querySelector('[data-tab="city"]')!.classList.toggle('alert', cityAlert);
   const html = BOOSTS.filter((b) => boostOn(b.id))
-    .map((b) => `<span>${b.icon} ${b.name} · ${Math.ceil(save.boosts[b.id]! / 60)} min</span>`).join('');
+    .map((b) => `<span>${b.icon} ${b.name} · ${Math.ceil(save.boosts[b.id]! / 60)} min</span>`).join('')
+    + (save.convoyAt > nowT() ? `<span class="convoy">🚌 Convoi · ${fmtWait(save.convoyAt - nowT())}</span>` : '');
   if (ui.boostBar.innerHTML !== html) ui.boostBar.innerHTML = html;
+  renderAdPill();
+  maybeOffer();
   if (ui.shop.classList.contains('show')) renderShop();
 }
+
+const card = (icon: string, title: string, desc: string, btns: string, cls = '') =>
+  `<div class="card ${cls}"><div class="card-icon">${icon}</div><div class="card-main"><div class="card-title">${title}</div><div class="card-desc">${desc}</div></div><div class="btns">${btns}</div></div>`;
 
 function renderShop(): void {
   ensureQuests();
@@ -1095,49 +1336,86 @@ function renderShop(): void {
         <div class="card-main"><div class="card-title">${def.text.replace('{n}', String(q.goal))}</div>
         <div class="card-desc">${n} / ${q.goal}</div><div class="bar"><i style="width:${(n / q.goal) * 100}%"></i></div></div>
         <button class="btn gem" data-claim="${i}" ${!done || q.claimed ? 'disabled' : ''}>${q.claimed ? '✓' : `+${def.gems} 💎`}</button></div>`;
-    }).join('') + `<p class="note">Nouvelles quêtes chaque jour à minuit.</p>`;
+    }).join('');
+    const got = save.quests.list.filter((q) => q.claimed).length;
+    const bonusTaken = save.questBonus === save.quests.key;
+    h += card('🏆', 'Les trois quêtes du jour', bonusTaken ? 'Bonus pris : à demain !' : `${got} / 3 terminées`,
+      `<button class="btn gem" data-qbonus ${questBonusReady() ? '' : 'disabled'}>${bonusTaken ? '✓' : '+10 💎'}</button>`, 'gold');
+    h += `<p class="note">Nouvelles quêtes chaque jour à minuit.</p>`;
+  } else if (shopTab === 'city') {
+    h = `<h3>Calendrier du ravitailleur</h3><div class="calendar">`;
+    LOGIN.forEach((d, i) => {
+      const done = i < save.login.step;
+      const today = i === save.login.step && loginReady();
+      h += `<div class="cal ${done ? 'done' : ''} ${today ? 'today' : ''}"><b>J${i + 1}</b><span>${d.icon}</span><small>${d.label}</small></div>`;
+    });
+    h += `</div>`;
+    h += loginReady()
+      ? `<button class="btn big wide" data-login>Récupérer : ${LOGIN[save.login.step % 7]!.label}</button>`
+      : `<p class="note">Reviens demain pour la case suivante. Sauter un jour ne remet rien à zéro.</p>`;
+    if (save.monthly.until > nowT()) {
+      const left = Math.ceil((save.monthly.until - nowT()) / 86400000);
+      h += card('📦', 'Ravitaillement mensuel', `40 💎 par jour · encore ${left} j`,
+        `<button class="btn gem" data-monthly ${monthlyReady() ? '' : 'disabled'}>${monthlyReady() ? '+40 💎' : '✓'}</button>`, 'gold');
+    }
+    h += `<h3>Contrats de la Ville · permanents</h3>`;
+    for (const c of CONTRACTS) {
+      const l = ct(c.id);
+      const max = l >= c.costs.length;
+      const cost = c.costs[l] ?? 0;
+      h += card(c.icon, `${c.name} <span class="lv">${l}/${c.costs.length}</span>`, c.effect(max ? l : l + 1),
+        max ? `<button class="btn" disabled>MAX</button>` : `<button class="btn gem ${save.gems < cost ? 'poor' : ''}" data-contract="${c.id}">${cost} 💎</button>`);
+    }
+    h += `<p class="note">Les contrats restent acquis pour toute la partie.</p>`;
   } else {
-    const wait = save.chestAt - Date.now();
-    const adsLeft = GEM_ADS_PER_DAY - (save.gemAds.key === todayKey() ? save.gemAds.n : 0);
-    const card = (icon: string, title: string, desc: string, btns: string) =>
-      `<div class="card"><div class="card-icon">${icon}</div><div class="card-main"><div class="card-title">${title}</div><div class="card-desc">${desc}</div></div><div class="btns">${btns}</div></div>`;
+    const wait = save.chestAt - nowT();
+    const gemsLeft = adLeft('gems');
     h = `<h3>Gratuit</h3>`;
-    h += card('🎁', 'Coffre du ravitailleur', chestReady() ? `${chestCoins()} pièces et 3 💎` : `Prochain dans ${fmtWait(wait)}`,
-      chestReady() ? `<button class="btn" data-chest="free">Ouvrir</button>` : `<button class="btn ad" data-chest="ad">📺 Ouvrir</button>`);
-    h += card('💎', 'Gemmes offertes', `+3 💎 · encore ${adsLeft} aujourd'hui`, `<button class="btn ad" data-gemad ${adsLeft <= 0 ? 'disabled' : ''}>📺 +3</button>`);
-    h += `<h3>Boosts · 3 minutes</h3>`;
+    h += card('🎁', 'Coffre du ravitailleur', chestReady() ? `${chestReward()} pièces et 3 💎` : `Prochain dans ${fmtWait(wait)}`,
+      chestReady() ? `<button class="btn" data-chest="free">Ouvrir</button>` : adButton('chest', 'data-chest="ad"', `Ouvrir (${adLeft('chest')})`));
+    h += card('💎', 'Gemmes offertes', `+${GEMS_PER_AD} 💎 · encore ${gemsLeft} aujourd'hui`, adButton('gems', 'data-gemad', `+${GEMS_PER_AD}`));
+    if (save.convoyAt > nowT()) {
+      h += card('🚌', `Convoi n°${save.convoys + 1} en route`, `Retour dans ${fmtWait(save.convoyAt - nowT())}`, adButton('convoy', 'data-convoy', '−5 min'));
+    }
+    h += `<h3>Boosts · 5 minutes</h3>`;
     for (const b of BOOSTS) {
       const left = save.boosts[b.id] ?? 0;
+      const spot = `boost_${b.id}` as AdSpot;
+      const adOk = boostRoom(b.id, BOOST_MAX_AD);
       h += card(b.icon, b.name, left > 0 ? `En cours · ${Math.ceil(left / 60)} min` : b.desc,
-        `<button class="btn ad" data-boost="${b.id}" data-pay="ad">📺</button><button class="btn gem" data-boost="${b.id}" data-pay="gem">${b.gems} 💎</button>`);
+        (adOk ? adButton(spot, `data-boost="${b.id}" data-pay="ad"`, `${adLeft(spot)}`) : `<button class="btn ad" disabled>📺 Max</button>`)
+        + `<button class="btn gem" data-boost="${b.id}" data-pay="gem" ${boostRoom(b.id, BOOST_MAX) ? '' : 'disabled'}>${b.gems} 💎</button>`);
     }
     h += `<h3>Armes</h3>`;
     for (const wd of WEAPONS) {
       const owned = save.weapons.includes(wd.id);
       const on = save.weapon === wd.id;
-      const btns = !owned && save.campLv < 2 ? `<button class="btn" disabled>Armurerie requise</button>`
+      const btns = !owned && save.campLv < 2 ? `<button class="btn" disabled>Armurerie (camp niv. 2)</button>`
         : on ? `<button class="btn" disabled>Équipée</button>`
         : owned ? `<button class="btn" data-equip="${wd.id}">Équiper</button>`
-          : `<button class="btn" data-weapon="${wd.id}" data-pay="coin"><span class="coin"></span>${wd.coins}</button><button class="btn gem" data-weapon="${wd.id}" data-pay="gem">${wd.gems} 💎</button>`;
+          : `<button class="btn ${save.coins < wd.coins ? 'poor' : ''}" data-weapon="${wd.id}" data-pay="coin"><span class="coin"></span>${wd.coins}</button><button class="btn gem" data-weapon="${wd.id}" data-pay="gem">${wd.gems} 💎</button>`;
       h += card(wd.icon, wd.name, wd.desc, btns);
     }
     h += `<h3>Tenues</h3>`;
     for (const o of OUTFITS) {
       const owned = save.outfits.includes(o.id);
+      if (o.gems < 0 && !owned) continue;
       const on = save.outfit === o.id;
       const swatch = `<i class="swatch" style="background:#${o.jacket.toString(16).padStart(6, '0')}"></i>`;
       const btns = on ? `<button class="btn" disabled>Portée</button>`
         : owned ? `<button class="btn" data-outfit="${o.id}">Porter</button>`
           : `<button class="btn gem" data-outfit="${o.id}">${o.gems} 💎</button>`;
-      h += card(o.icon, `${o.name} ${swatch}`, owned ? 'Dans ton sac' : 'Tenue', btns);
+      h += card(o.icon, `${o.name} ${swatch}`, owned ? (o.gems < 0 ? 'Gagnée en convoi' : 'Dans ton sac') : 'Tenue', btns);
     }
     h += `<h3>Pièces</h3>`;
-    h += card('💰', 'Sac de pièces', `${chestCoins() * 2} pièces`, `<button class="btn gem" data-coins="1">30 💎</button>`);
-    h += card('💰', 'Coffre de pièces', `${chestCoins() * 9} pièces`, `<button class="btn gem" data-coins="2">120 💎</button>`);
+    h += card('💰', 'Sac de pièces', `${chestReward() * 2} pièces`, `<button class="btn gem" data-coins="1">30 💎</button>`);
+    h += card('💰', 'Coffre de pièces', `${chestReward() * 10} pièces · le meilleur prix`, `<button class="btn gem" data-coins="2">120 💎</button>`);
     h += `<h3>Offres</h3>`;
     for (const p of PRODUCTS) {
       if (p.once && owns(p.id)) continue;
-      h += card(p.icon, p.name, p.desc, `<button class="btn real" data-buy="${p.id}">${p.price}</button>`);
+      const double = p.gems > 0 && !save.firstBuy;
+      h += card(p.icon, `${p.name}${double ? ' <span class="tag">×2 1er achat</span>' : ''}`, p.desc,
+        `<button class="btn real" data-buy="${p.id}">${p.price}</button>`, p.id === 'starter' ? 'gold' : '');
     }
     if (SIMULATED) h += `<p class="note">Version de test : les publicités et les achats sont simulés, rien n'est jamais débité.</p>`;
   }
@@ -1150,25 +1428,47 @@ function renderShop(): void {
 }
 let lastShop = '';
 
-function openShop(tab: 'shop' | 'quests' = shopTab): void {
+function openShop(tab: ShopTab = shopTab): void {
   shopTab = tab;
   renderShop();
   ui.shop.classList.add('show');
 }
 
-ui.shopBtn.addEventListener('click', () => openShop(questToClaim() && !chestReady() ? 'quests' : 'shop'));
+ui.shopBtn.addEventListener('click', () => {
+  if (!shopUnlocked()) return;
+  openShop(loginReady() || monthlyReady() ? 'city' : (questToClaim() || questBonusReady()) && !chestReady() ? 'quests' : 'shop');
+});
 ui.shop.querySelector('.shop-close')!.addEventListener('click', () => ui.shop.classList.remove('show'));
 ui.shop.addEventListener('click', (e) => {
   if (e.target === ui.shop) ui.shop.classList.remove('show');
   const t = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
-  if (t) { shopTab = t.dataset.tab as 'shop' | 'quests'; renderShop(); }
+  if (t) { shopTab = t.dataset.tab as ShopTab; renderShop(); }
+});
+ui.adPill.addEventListener('click', () => {
+  const id = adPillFor;
+  if (!id) return;
+  void rewarded(`boost_${id}` as AdSpot, 'Ventes ×2 pendant 5 minutes').then((ok) => { if (ok) startBoost(id, BOOST_MAX_AD); });
 });
 
 function grantChest(): void {
-  save.chestAt = Date.now() + CHEST_EVERY;
+  // Ouvert par une pub : le prochain coffre gratuit reste a l'heure prevue.
+  if (chestReady()) save.chestAt = nowT() + CHEST_EVERY;
   gainGems(3);
-  flyCoins(chestCoins(), player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 14);
-  toast(`🎁 Coffre : ${chestCoins()} pièces et 3 💎`);
+  grantCoins(chestReward(), above(), 14);
+  toast(`🎁 Coffre : ${chestReward()} pièces et 3 💎`);
+  persist();
+}
+
+function claimLogin(): void {
+  if (!loginReady()) return;
+  const step = save.login.step % LOGIN.length;
+  const d = LOGIN[step]!;
+  save.login = { step: step + 1 >= LOGIN.length ? 0 : step + 1, last: dayKey(), total: save.login.total + 1 };
+  if (d.r.gems) gainGems(d.r.gems);
+  if (d.r.chests) grantCoins(chestReward() * d.r.chests, above(), 14);
+  if (d.r.boost) startBoost(d.r.boost);
+  sfx.sfxVictory();
+  toast(`📅 Jour ${step + 1} : ${d.label} !`);
   persist();
 }
 
@@ -1193,10 +1493,11 @@ function wearOutfit(id: string): void {
   player.setOutfit(o.jacket, o.cap, o.pants);
 }
 
+/** Pas assez de gemmes : on le dit, et on montre ou en trouver (sans forcer). */
 function payGems(n: number): boolean {
   if (save.gems < n) {
     sfx.sfxNope();
-    toast('💎 Pas assez de gemmes');
+    toast(`💎 Il manque ${n - save.gems} gemmes : quêtes, coffre, calendrier ou offres`);
     return false;
   }
   save.gems -= n;
@@ -1205,17 +1506,22 @@ function payGems(n: number): boolean {
 
 function grantProduct(p: Product): void {
   if (p.once) save.owned.push(p.id);
+  let gems = p.gems;
+  // Premier achat de gemmes double : un vrai coup de pouce pour essayer.
+  if (gems > 0 && !save.firstBuy) {
+    gems *= 2;
+    save.firstBuy = true;
+  }
+  if (gems > 0) gainGems(gems);
   if (p.id === 'starter') {
-    gainGems(150);
-    save.coins += 1500;
-    save.up.bag = Math.min(4, save.up.bag + 1);
+    grantCoins(chestReward() * 4, above(), 16);
+    save.up.bag = Math.min(UPGRADES[0]!.costs.length, save.up.bag + 1);
+    if (!save.outfits.includes('ranger')) save.outfits.push('ranger');
     applyUpgrades();
-equipWeapon((WEAPONS.find((x) => x.id === save.weapon)?.id ?? 'rifle') as WeaponId);
-wearOutfit(save.outfit);
-  } else if (p.id === 'gems_s') gainGems(80);
-  else if (p.id === 'gems_m') gainGems(500);
-  else if (p.id === 'gems_l') gainGems(1200);
-  toast(`${p.icon} ${p.name} obtenu !`);
+  } else if (p.id === 'monthly') {
+    save.monthly = { until: Math.max(nowT(), save.monthly.until) + 30 * 86400000, last: '' };
+  }
+  toast(`${p.icon} ${p.name} obtenu${gems > 0 ? ` : +${gems} 💎` : ''} !`);
   sfx.sfxVictory();
   persist();
 }
@@ -1225,32 +1531,57 @@ ui.shopBody.addEventListener('click', (e) => {
   if (!el || (el as HTMLButtonElement).disabled) return;
   const d = el.dataset;
   if (d.claim !== undefined) {
-    const q = save.quests.list[Number(d.claim)]!;
-    if (q.claimed || questProgress(q) < q.goal) return;
+    const q = save.quests.list[Number(d.claim)];
+    if (!q || q.claimed || questProgress(q) < q.goal) return;
     q.claimed = true;
-    gainGems(QUESTS.find((x) => x.id === q.id)!.gems);
+    gainGems(QUESTS.find((x) => x.id === q.id)?.gems ?? 0);
     persist();
+  } else if (d.qbonus !== undefined) {
+    if (!questBonusReady()) return;
+    save.questBonus = save.quests.key;
+    gainGems(10);
+    toast('🏆 Trois quêtes : +10 💎');
+    persist();
+  } else if (d.login !== undefined) claimLogin();
+  else if (d.monthly !== undefined) {
+    if (!monthlyReady()) return;
+    save.monthly.last = dayKey();
+    gainGems(40);
+    persist();
+  } else if (d.contract) {
+    const c = CONTRACTS.find((x) => x.id === d.contract)!;
+    const l = ct(c.id);
+    const cost = c.costs[l];
+    if (cost === undefined || !payGems(cost)) return renderShop();
+    save.contracts[c.id] = l + 1;
+    sfx.sfxVictory();
+    toast(`${c.icon} ${c.name} : ${c.effect(l + 1)}`);
+    persist();
+  } else if (d.convoy !== undefined) {
+    void rewarded('convoy', 'un convoi plus rapide').then((ok) => {
+      if (!ok || save.convoyAt <= 0) return;
+      save.convoyAt = Math.max(nowT(), save.convoyAt - 5 * 60 * 1000);
+      persist();
+      renderShop();
+    });
   } else if (d.chest === 'free') grantChest();
-  else if (d.chest === 'ad') void showRewarded('le coffre du ravitailleur', owns('noads')).then((ok) => ok && grantChest());
+  else if (d.chest === 'ad') void rewarded('chest', 'le coffre du ravitailleur').then((ok) => ok && grantChest());
   else if (d.gemad !== undefined) {
-    void showRewarded('3 gemmes', owns('noads')).then((ok) => {
+    void rewarded('gems', `${GEMS_PER_AD} gemmes`).then((ok) => {
       if (!ok) return;
-      ensureQuests();
-      save.gemAds.n++;
-      gainGems(3);
+      gainGems(GEMS_PER_AD);
       persist();
       renderShop();
     });
   } else if (d.boost) {
     const id = d.boost as BoostId;
     const b = BOOSTS.find((x) => x.id === id)!;
-    if (d.pay === 'gem') { if (payGems(b.gems)) startBoost(id); }
-    else void showRewarded(b.name, owns('noads')).then((ok) => ok && startBoost(id));
+    if (d.pay === 'gem') { if (boostRoom(id, BOOST_MAX) && payGems(b.gems)) startBoost(id, BOOST_MAX); }
+    else if (boostRoom(id, BOOST_MAX_AD)) void rewarded(`boost_${id}` as AdSpot, `${b.name} pendant 5 minutes`).then((ok) => ok && startBoost(id, BOOST_MAX_AD));
   } else if (d.coins) {
     const big = d.coins === '2';
     if (payGems(big ? 120 : 30)) {
-      const n = chestCoins() * (big ? 9 : 2);
-      flyCoins(n, player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 16);
+      grantCoins(chestReward() * (big ? 10 : 2), above(), 16);
       persist();
     }
   } else if (d.weapon) {
@@ -1269,7 +1600,7 @@ ui.shopBody.addEventListener('click', (e) => {
   } else if (d.outfit) {
     const o = OUTFITS.find((x) => x.id === d.outfit)!;
     if (!save.outfits.includes(o.id)) {
-      if (!payGems(o.gems)) return renderShop();
+      if (o.gems < 0 || !payGems(o.gems)) return renderShop();
       save.outfits.push(o.id);
       toast(`${o.icon} ${o.name} : nouvelle tenue !`);
     }
@@ -1282,19 +1613,53 @@ ui.shopBody.addEventListener('click', (e) => {
   renderShop();
 });
 
+/**
+ * Les offres se montrent au bon moment, une seule fois, et jamais la nuit : le pack de depart
+ * apres la premiere nuit tenue, « sans pub » apres quelques pubs regardees.
+ */
+function maybeOffer(): void {
+  if (ui.modal.classList.contains('show') || ui.shop.classList.contains('show')) return;
+  if (save.cycle && save.phase === 'night') return;
+  const once = (key: string) => {
+    if (save.seen.includes(key)) return false;
+    save.seen.push(key);
+    return true;
+  };
+  if (!owns('starter') && save.stats.nights >= 1 && once('offer:starter')) {
+    const p = PRODUCTS.find((x) => x.id === 'starter')!;
+    showModal(`<div class="modal-big">${p.icon}</div><h2>${p.name}</h2><p>${p.desc}</p>
+      <p class="muted">Offre unique · ${p.price}${SIMULATED ? ' · achat simulé (version de test)' : ''}</p>
+      <button class="btn real" data-see>Voir l’offre</button>`);
+    ui.modal.querySelector('[data-see]')!.addEventListener('click', () => { ui.modal.classList.remove('show'); openShop('shop'); });
+    return;
+  }
+  const watched = Object.values(save.ads.n).reduce((a, b) => a + b, 0);
+  if (!owns('noads') && watched >= 6 && once('offer:noads')) {
+    toast('🚫 Astuce : l’offre « Sans pub » donne les récompenses sans regarder les vidéos');
+  }
+}
+
 /** K.O. avec un gros chargement : une pub pour le recuperer, au choix du joueur. */
 function offerKeepBag(lost: ItemType[]): void {
+  if (adLeft('ko') <= 0) {
+    toast(`💫 K.O. ! ${lost.length} objets perdus`);
+    return;
+  }
   showModal(`<div class="modal-big">💫</div><h2>K.O. !</h2>
     <p>Tu as lâché ton chargement (${lost.length} objets).</p>
     <button class="btn ad" data-keep>📺 Le récupérer</button>`);
+  let busy = false;
   ui.modal.querySelector('[data-keep]')!.addEventListener('click', () => {
-    void showRewarded('ton chargement', owns('noads')).then((ok) => {
+    if (busy) return;
+    busy = true;
+    void rewarded('ko', 'ton chargement').then((ok) => {
+      busy = false;
       if (!ok) return;
       ui.modal.classList.remove('show');
-      for (const t of lost) player.stack.add(t);
+      for (const t of lost) if (player.stack.count < player.stack.cap) player.stack.add(t);
       toast('🎒 Chargement récupéré');
     });
-  }, { once: true });
+  });
 }
 
 // ---------------------------------------------------------------- materiaux : palissade et batiments
@@ -1312,10 +1677,10 @@ const TIERABLE: { id: string; name: string; icon: string; w: number }[] = [
 ];
 const WALL_COSTS: Cost[] = [
   { coins: 0 },
-  { coins: 300, log: 40 },
-  { coins: 800, stone: 120 },
-  { coins: 1800, scrap: 120, stone: 30 },
-  { coins: 3500, metal: 60 },
+  { coins: 700, log: 50 },
+  { coins: 4500, stone: 150 },
+  { coins: 9000, scrap: 150, stone: 40 },
+  { coins: 18000, metal: 80 },
 ];
 
 /** On paie avec ce qu'on porte et ce qui est dans la reserve. */
@@ -1335,7 +1700,7 @@ function spend(c: Cost): void {
   }
 }
 
-interface MatUp { key: string; icon: string; title: string; desc: string; cost: Cost; ready: boolean; why: string; apply: () => void }
+interface MatUp { key: string; pkey: string; icon: string; title: string; desc: string; cost: Cost; ready: boolean; why: string; apply: () => void }
 
 function materialUpgrades(): MatUp[] {
   const out: MatUp[] = [];
@@ -1344,7 +1709,7 @@ function materialUpgrades(): MatUp[] {
     const next = TIERS[t]!;
     const ready = t + 1 === 3 ? isBuilt('quarry') : t + 1 === 5 ? isBuilt('foundry') : true;
     out.push({
-      key: 'wall', icon: next.icon, title: `Palissade : ${next.name}`,
+      key: 'wall', pkey: `mat:wall:${t + 1}`, icon: next.icon, title: `Palissade : ${next.name}`,
       desc: `Actuelle : ${TIERS[t - 1]!.name} · solidité ×${(next.mul / TIERS[t - 1]!.mul).toFixed(1)}, se répare en ${ITEMS[next.item].icon}`,
       cost: WALL_COSTS[t]!, ready, why: t + 1 === 3 ? 'Il faut la carrière' : 'Il faut la fonderie',
       apply: () => {
@@ -1360,15 +1725,15 @@ function materialUpgrades(): MatUp[] {
     if (cur >= 3) continue;
     const toStone = cur === 1;
     const cost: Cost = toStone
-      ? { coins: Math.round(250 * b.w / 10) * 10, stone: Math.round(25 * b.w) }
-      : { coins: Math.round(800 * b.w / 10) * 10, metal: Math.round(15 * b.w) };
+      ? { coins: Math.round(2000 * b.w / 10) * 10, stone: Math.round(30 * b.w) }
+      : { coins: Math.round(6000 * b.w / 10) * 10, metal: Math.round(15 * b.w) };
     out.push({
-      key: b.id, icon: b.icon, title: `${b.name} en ${BT_NAMES[cur]!.toLowerCase()}`,
+      key: b.id, pkey: `mat:${b.id}:${cur + 1}`, icon: b.icon, title: `${b.name} en ${BT_NAMES[cur]!.toLowerCase()}`,
       desc: `Plus grand, deux fois plus solide, cadence +50 %`,
       cost, ready: toStone ? isBuilt('quarry') : isBuilt('foundry'), why: toStone ? 'Il faut la carrière' : 'Il faut la fonderie',
       apply: () => {
         save.bt[b.id] = cur + 1;
-        applyBuildingTier(b.id);
+        try { applyBuildingTier(b.id); } catch (err) { console.error(err); }
         toast(`${b.icon} ${b.name} reconstruite en ${BT_NAMES[cur]!.toLowerCase()} !`);
       },
     });
@@ -1376,16 +1741,47 @@ function materialUpgrades(): MatUp[] {
   return out;
 }
 
+/** Ce qu'il reste a apporter pour un chantier paye en plusieurs fois. */
+function remainingOf(key: string, cost: Cost): Cost {
+  const paid = save.fixPaid[key] ?? { coins: 0 };
+  const r: Cost = { coins: Math.max(0, cost.coins - paid.coins) };
+  for (const t of Object.keys(ITEMS) as ItemType[]) {
+    const need = cost[t];
+    if (need) r[t] = Math.max(0, need - (paid[t] ?? 0));
+  }
+  return r;
+}
+
+/** Verse dans le chantier tout ce qu'on peut (pieces, sac puis reserve). Renvoie ce qui a ete verse. */
+function depositInto(key: string, cost: Cost): number {
+  const rem = remainingOf(key, cost);
+  const paid = (save.fixPaid[key] ??= { coins: 0 });
+  let moved = 0;
+  const c = Math.min(save.coins, rem.coins);
+  if (c > 0) { save.coins -= c; paid.coins += c; moved += c; }
+  for (const t of Object.keys(ITEMS) as ItemType[]) {
+    let n = rem[t] ?? 0;
+    while (n > 0 && (player.stack.take((x) => x === t) || reserve.take((x) => x === t))) {
+      n--;
+      paid[t] = (paid[t] ?? 0) + 1;
+      moved++;
+    }
+  }
+  return moved;
+}
+
 function materialCards(): string {
   const ups = materialUpgrades();
   if (!ups.length) return `<p class="note">Tout est construit en dur.</p>`;
   return ups.map((u) => {
-    const ok = u.ready && canAfford(u.cost);
+    const rem = remainingOf(u.pkey, u.cost);
+    const k = 1 - totalCost(rem) / Math.max(1, totalCost(u.cost));
+    const can = u.ready && (Math.min(save.coins, rem.coins) > 0 || (Object.keys(ITEMS) as ItemType[]).some((t) => (rem[t] ?? 0) > 0 && have(t) > 0));
     return `<div class="card"><div class="card-icon">${u.icon}</div>
       <div class="card-main"><div class="card-title">${u.title}</div><div class="card-desc">${u.ready ? u.desc : u.why}</div>
-      <div class="card-desc">${costIcons(u.cost)}</div></div>
-      <button class="btn ${ok ? '' : 'poor'}" data-mat="${u.key}">Bâtir</button></div>`;
-  }).join('') + `<p class="note">Les matériaux se prennent dans ton sac puis dans la réserve.</p>`;
+      <div class="card-desc">${k > 0 ? 'Reste : ' : ''}${costIcons(rem)}</div>${k > 0 ? `<div class="bar"><i style="width:${Math.round(k * 100)}%"></i></div>` : ''}</div>
+      <button class="btn ${can ? '' : 'poor'}" data-mat="${u.key}">Déposer</button></div>`;
+  }).join('') + `<p class="note">Dépose en plusieurs fois : tout ce que tu as dans le sac et la réserve part au chantier, rien n'est perdu.</p>`;
 }
 
 /** Un batiment en dur : un peu plus grand, sur un socle de pierre ou de fer, et plus solide. */
@@ -1421,6 +1817,8 @@ ui.sound.addEventListener('click', () => {
   persist();
 });
 let resetArmed = 0;
+/** Partie effacee : plus rien ne doit etre ecrit par-dessus avant le rechargement. */
+let resetting = false;
 ui.reset.addEventListener('click', () => {
   if (Date.now() - resetArmed > 3000) {
     resetArmed = Date.now();
@@ -1428,6 +1826,7 @@ ui.reset.addEventListener('click', () => {
     setTimeout(() => { ui.reset.textContent = 'Recommencer le camp'; }, 3000);
     return;
   }
+  resetting = true;
   wipeSave();
   save = freshSave();
   writeSave(save);
@@ -1474,6 +1873,16 @@ function earn(n: number): void {
   bump(ui.moneyPill);
 }
 
+/** Une recompense : creditee tout de suite (rien ne se perd si l'appli est fermee), les pieces volent pour le plaisir. */
+function grantCoins(n: number, from: THREE.Vector3, pieces = 14): void {
+  if (n <= 0) return;
+  floatAtPlayer(`+${fmt(n)}`);
+  save.coins += n;
+  save.stats.earned += n;
+  flyCoins(n, from, playerChest, () => { sfx.sfxCoin(); bump(ui.moneyPill); }, pieces);
+}
+const above = () => player.position.clone().add(new THREE.Vector3(0, 4, 2));
+
 const playerChest = () => player.position.clone().setY(1.3);
 
 /** Objets en vol vers chaque bac de l'etal. */
@@ -1500,6 +1909,25 @@ function putInConverter(c: Converter, t: ItemType, from: THREE.Vector3): void {
 }
 
 const shelfRoom = (t: ItemType) => ITEMS[t].price > 0 ? BIN_CAP - market.bins.countOf(t) - (shelfPending.get(t) ?? 0) : 0;
+
+/** Les materiaux de construction : ils ne partent a l'etal que si aucun chantier ouvert n'en veut. */
+const MATERIALS: ItemType[] = ['log', 'plank', 'scrap', 'stone', 'metal', 'fuel'];
+let neededSet = new Set<ItemType>();
+let neededClock = 0;
+/** Ce que reclament les chantiers ouverts (zones, reparations, materiaux en cours). */
+function neededNow(): Set<ItemType> {
+  if (neededClock > 0) return neededSet;
+  neededClock = 0.5;
+  const set = new Set<ItemType>();
+  const addRem = (rem: Cost) => { for (const t of Object.keys(ITEMS) as ItemType[]) if ((rem[t] ?? 0) > 0) set.add(t); };
+  for (const p of pads) if (p.shown && !isBuilt(p.def.id)) addRem(remaining(p));
+  for (const dp of dynPads.values()) addRem(dynRemaining(dp));
+  for (const u of materialUpgrades()) if (save.fixPaid[u.pkey]) addRem(remainingOf(u.pkey, u.cost));
+  neededSet = set;
+  return set;
+}
+/** Peut-on vendre ce que porte le joueur (ou le porteur) ? Pas un materiau qu'un chantier attend. */
+const sellable = (t: ItemType) => !(MATERIALS.includes(t) && neededNow().has(t));
 const convRoom = (c: Converter) => c.input.cap - c.input.count - (convPending.get(c) ?? 0);
 
 let actClock = 0;
@@ -1523,6 +1951,7 @@ function interact(dt: number): void {
   dropClock -= dt;
   pickClock -= dt;
   payClock -= dt;
+  neededClock -= dt;
   fishClock -= dt;
   pumpClock -= dt;
   still = move.lengthSq() > 0 ? 0 : still + dt;
@@ -1534,7 +1963,11 @@ function interact(dt: number): void {
   if (freeSpace() <= 0 && fullClock <= 0) {
     const nearRes = beds.some((b) => b.unlocked && b.ripeCount() > 0 && b.distance(p.x, p.z) < 0.95)
       || trees.some((t) => t.standing && Math.hypot(t.x - p.x, t.z - p.z) < 1.75)
-      || scraps.some((s) => s.amount > 0 && Math.hypot(s.x - p.x, s.z - p.z) < s.radius);
+      || scraps.some((s) => s.amount > 0 && Math.hypot(s.x - p.x, s.z - p.z) < s.radius)
+      || pumps.some((u) => u.amount > 0 && near(u.x, u.z, u.radius))
+      || (isBuilt('quarry') && rocks.some((r) => r.amount > 0 && near(r.x, r.z, r.radius)))
+      || (isBuilt('dock') && near(L.fishSpot.x, L.fishSpot.z, 1.1))
+      || (reserve.total > 0 && near(reserve.zone.x, reserve.zone.z, 1.1));
     if (nearRes) {
       fullClock = 6;
       toast('🎒 Sac plein ! Va vider ton chargement');
@@ -1550,10 +1983,13 @@ function interact(dt: number): void {
       if (from) {
         harvestClock = 0.1;
         const kind: ItemType = b.kind;
-        giveToPlayer(kind, from, () => {
+        const got = () => {
           save.stats.harvested++;
           if (kind === 'wheat') save.stats.wheat++;
-        });
+        };
+        giveToPlayer(kind, from, got);
+        // Niveau « Cultures » : parfois, la plante donne double.
+        if (freeSpace() > 0 && Math.random() < 0.05 * lv('crops')) giveToPlayer(kind, from.clone().setY(from.y + 0.3), got);
         particles.burst(from, [0x7fdc5a, 0x5a3a20], 4, { speed: 2, up: 3, size: 0.08, life: 0.4 });
         break;
       }
@@ -1644,7 +2080,8 @@ function interact(dt: number): void {
   }
   // Reserve : immobile devant le coffre, on recupere ce que les survivants y ont mis.
   if (settled && pickClock <= 0 && reserve.total > 0 && freeSpace() > 0 && near(reserve.zone.x, reserve.zone.z, 1.1)) {
-    const t = reserve.take();
+    const need = neededNow();
+    const t = reserve.take((x) => need.has(x)) ?? reserve.take();
     if (t) {
       pickClock = 0.09;
       giveToPlayer(t, reserve.topWorld(), () => { save.stats.chest++; });
@@ -1653,7 +2090,7 @@ function interact(dt: number): void {
 
   // Deposer a l'etal tout ce qui se vend.
   if (settled && dropClock <= 0 && near(L.shelf.x, L.shelf.z, 1.6)) {
-    const item = player.stack.take((t) => shelfRoom(t) > 0);
+    const item = player.stack.take((t) => shelfRoom(t) > 0 && sellable(t));
     if (item) {
       dropClock = 0.08;
       putOnShelf(item.type, item.pos);
@@ -1701,6 +2138,7 @@ function interact(dt: number): void {
   // Encaisser.
   if (market.cash > 0 && near(L.cash.x, L.cash.z, 1.4)) {
     const n = market.takeCash();
+    floatText(`+${fmt(n)}`, L.cash.x, 1.4, L.cash.z);
     flyCoins(n, market.cashWorld(), playerChest, (k) => {
       earn(k);
       save.stats.cashed += k;
@@ -1738,6 +2176,13 @@ function interact(dt: number): void {
   // Reparations et niveau du camp : memes regles que les chantiers.
   syncDynPads();
   for (const dp of dynPads.values()) {
+    // Tout est paye mais rien n'est en vol (appli fermee au mauvais moment) : on termine.
+    if (dp.inflight === 0 && totalCost(dynRemaining(dp)) === 0) {
+      dropDyn(dp);
+      dp.done();
+      persist();
+      continue;
+    }
     if (!settled || payClock > 0 || !near(dp.x, dp.z, 1.45)) continue;
     const rem = dynRemaining(dp);
     const paid = save.fixPaid[dp.key]!;
@@ -1823,6 +2268,9 @@ function putInReserve(t: ItemType, from: THREE.Vector3): void {
   }, 0.3, 1.1);
 }
 
+/** Ce que le porteur sort de la reserve : pas la pierre, le metal ni le carburant, ni ce qu'un chantier attend. */
+const portable = (t: ItemType) => t !== 'stone' && t !== 'metal' && t !== 'fuel' && sellable(t);
+
 const helperCtx: HelperCtx = {
   beds, trees, scraps, walls: world.walls, solids: world.solids, nav: navAll, night: false, dockReady: false,
   reachable: (x, z) => (!insideFarm(x, z) || nav.westOpen) && (!insideStation(x, z) || nav.eastOpen),
@@ -1847,8 +2295,8 @@ const helperCtx: HelperCtx = {
     h.stack.add('fish');
     particles.burst(new THREE.Vector3(L.fishSpot.x, 0.3, L.fishSpot.z + 1.8), [0xbfe6ff, 0xffffff], 8, { speed: 2, up: 3, size: 0.1, life: 0.5 });
   },
-  reserveCount: () => reserve.total,
-  reserveTake: () => reserve.take(),
+  reserveCount: () => { let n = 0; for (const [t, c] of reserve.counts) if (portable(t)) n += c; return n; },
+  reserveTake: () => reserve.take(portable),
   porterDrop: (t) => {
     // D'abord la machine qui transforme, sinon le bac de l'etal.
     const conv = t === 'log' ? saw : t === 'carrot' || t === 'tomato' ? cook : t === 'wheat' ? mill : t === 'scrap' ? forge : null;
@@ -1856,7 +2304,7 @@ const helperCtx: HelperCtx = {
     if (shelfRoom(t) > 0) return { at: L.shelf, put: (x, from) => putOnShelf(x, from) };
     return null;
   },
-  outputs: () => [cook, mill].filter((c) => c.built && c.output.count > 0 && shelfRoom(c.product) > 0)
+  outputs: () => [cook, mill, saw, forge].filter((c) => c.built && c.output.count > 0 && shelfRoom(c.product) > 0 && sellable(c.product) && c.product !== 'metal')
     .map((c) => ({ at: { x: c.output.x, z: c.output.z }, take: () => c.output.take() })),
   cashSpot: { x: L.cash.x - 1.2, z: L.cash.z - 0.4 },
   onCashier: () => {
@@ -1876,10 +2324,19 @@ let shake = 0;
 let invuln = 0;
 let ko = 0;
 
+/**
+ * La menace : elle suit la progression (objectifs) plutot que le temps passe, pour qu'une
+ * partie longue ne fasse pas deraper la horde. Apres le depart du bus, +1 toutes les 3 nuits.
+ */
+function threat(): number {
+  const after = save.won ? Math.floor(Math.max(0, save.day - save.wonDay) / 3) : 0;
+  return Math.max(1, Math.min(save.day, 6 + Math.floor(save.obj / 2)) + after);
+}
+
 function startNight(): void {
   save.phase = 'night';
   save.phaseT = 0;
-  horde.startNight(save.day);
+  horde.startNight(threat());
   endDayEvents();
   sfx.sfxToggle(true);
   toast(horde.bruteNight ? `🌙 Nuit ${save.day} : une brute est avec eux !` : `🌙 Nuit ${save.day} : ils arrivent !`);
@@ -1893,8 +2350,8 @@ function startDay(): void {
   save.phase = 'day';
   save.phaseT = 0;
   sfx.sfxToggle(false);
-  save.gems += 2;
-  toast(`☀️ Jour ${save.day} : le camp a tenu ! +2 💎`);
+  save.gems += 1;
+  toast(`☀️ Jour ${save.day} : le camp a tenu ! +1 💎`);
   document.body.classList.remove('night');
   planDay(0);
   persist();
@@ -1907,8 +2364,8 @@ const airdrop = new Airdrop(scene);
 const caravan = new Caravan(scene);
 const rescue = new Rescue(scene);
 const zoneOpen = (sp: Spot) => sp.zone === null || (sp.zone === 'farm' ? nav.westOpen : nav.eastOpen);
-const CACHE_REFILL = 8 * 60 * 1000;
-caches.forEach((c, i) => { if ((save.caches[`c${i}`] ?? 0) > Date.now()) c.open(); });
+const CACHE_REFILL = 15 * 60 * 1000;
+caches.forEach((c, i) => { if ((save.caches[`c${i}`] ?? 0) > nowT()) c.open(); });
 
 const evLabel = (cls: string) => {
   const el = document.createElement('div');
@@ -1936,17 +2393,28 @@ function planDay(from: number): void {
   plan.rescue = save.day >= 3 ? pick(0.45, 0.3, 0.7) : -1;
 }
 
+/** La caravane repart : ce qui a deja ete livre est paye (une fois et demie le prix de l'etal). */
+function caravanLeaves(): void {
+  if (offer && offer.got > 0 && offer.got < offer.need) {
+    const n = Math.round(offer.got * ITEMS[offer.want].price * 1.5);
+    grantCoins(n, new THREE.Vector3(caravan.zone.x, 1.5, caravan.zone.z), 8);
+    toast(`🛒 La caravane paie ce que tu as livré : ${n} pièces`);
+  } else toast('🛒 La caravane reprend la route');
+  caravan.show(false);
+  offer = null;
+}
+
 function endDayEvents(): void {
   if (airdrop.active) airdrop.hide();
-  if (caravan.active) { caravan.show(false); offer = null; }
+  if (caravan.active) caravanLeaves();
   if (rescue.active) rescue.hide();
   plan.drop = plan.caravan = plan.rescue = -1;
 }
 
 /** Butin d'une cache (petit) ou d'un ravitaillement (gros). */
 function giveLoot(at: THREE.Vector3, big: boolean): void {
-  const coins = (big ? 150 : 40) + (big ? 50 : 12) * save.day;
-  flyCoins(coins, at, playerChest, earn, 10);
+  const coins = big ? Math.round(0.4 * chestCoins()) : 20 + Math.round(0.06 * chestCoins());
+  grantCoins(coins, at, 10);
   const pool: ItemType[] = ['scrap', 'plank', 'log', 'scrap'];
   if (nav.eastOpen) pool.push('fuel');
   const n = big ? 5 : 2 + Math.floor(Math.random() * 2);
@@ -1956,7 +2424,7 @@ function giveLoot(at: THREE.Vector3, big: boolean): void {
     giveToPlayer(t, at.clone().add(new THREE.Vector3(0, 0.3 * i, 0)));
     given++;
   }
-  const gems = big ? 4 + Math.floor(Math.random() * 3) : Math.random() < 0.25 ? 1 + Math.floor(Math.random() * 2) : 0;
+  const gems = big ? 2 + Math.floor(Math.random() * 2) : Math.random() < 0.15 ? 1 : 0;
   if (gems) gainGems(gems);
   particles.burst(at, [0xffd84a, 0xffffff, 0x8be36b], big ? 40 : 18, { speed: 5, up: 6, size: 0.15, life: 0.9 });
   sfx.sfxBuild();
@@ -1967,8 +2435,8 @@ function giveLoot(at: THREE.Vector3, big: boolean): void {
 function makeOffer(): Offer {
   const options = productsList().filter((t) => t !== 'carrot');
   const want = options[Math.floor(Math.random() * options.length)] ?? 'carrot';
-  const need = Math.max(6, Math.round(60 / ITEMS[want].price)) + save.day;
-  return { want, need, got: 0, pay: Math.round(need * ITEMS[want].price * 2.5), gems: 3 };
+  const need = Math.max(6, Math.round(60 / ITEMS[want].price)) + Math.min(10, threat());
+  return { want, need, got: 0, pay: Math.round(need * ITEMS[want].price * 2.5), gems: 2 };
 }
 
 function updateEvents(dt: number, time: number): void {
@@ -2014,11 +2482,7 @@ function updateEvents(dt: number, time: number): void {
     toast('🆘 Quelqu’un appelle à l’aide dans la vallée !');
   }
   // La caravane repart en fin d'apres-midi.
-  if (caravan.active && f > 0.85) {
-    caravan.show(false);
-    offer = null;
-    toast('🛒 La caravane reprend la route');
-  }
+  if (caravan.active && offer && f > 0.85) caravanLeaves();
 }
 
 /** Fouille, ravitaillement, caravane, sauvetage : tout se fait immobile, 0,5 s. */
@@ -2026,10 +2490,10 @@ function interactEvents(dt: number, settled: boolean): void {
   if (!settled) rescueHold = 0;
   // Caches
   caches.forEach((c, i) => {
-    if (!c.ready && (save.caches[`c${i}`] ?? 0) <= Date.now()) c.ready = true;
+    if (!c.ready && (save.caches[`c${i}`] ?? 0) <= nowT()) c.ready = true;
     if (!settled || !c.ready || !zoneOpen(c.spot) || !near(c.spot.x, c.spot.z, 1.3)) return;
     c.open();
-    save.caches[`c${i}`] = Date.now() + CACHE_REFILL;
+    save.caches[`c${i}`] = nowT() + CACHE_REFILL;
     giveLoot(new THREE.Vector3(c.spot.x, 0.8, c.spot.z), false);
     persist();
   });
@@ -2049,7 +2513,7 @@ function interactEvents(dt: number, settled: boolean): void {
       o.got++;
       flyers.launch(itemMesh(item.type), item.pos, () => caravan.trader.root.getWorldPosition(new THREE.Vector3()).setY(1.3), () => sfx.sfxDrop(o.got), 0.3, 1.0);
       if (o.got >= o.need) {
-        flyCoins(o.pay, new THREE.Vector3(caravan.zone.x, 1.5, caravan.zone.z), playerChest, earn, 14);
+        grantCoins(o.pay, new THREE.Vector3(caravan.zone.x, 1.5, caravan.zone.z), 14);
         gainGems(o.gems);
         toast(`🛒 Marché conclu : ${o.pay} pièces et ${o.gems} 💎 !`);
         offer = null;
@@ -2063,7 +2527,7 @@ function interactEvents(dt: number, settled: boolean): void {
     rescue.progress = Math.min(1, rescueHold / 2);
     if (rescueHold >= 2) {
       save.rescued++;
-      gainGems(5);
+      gainGems(3);
       particles.burst(new THREE.Vector3(rescue.x, 1.2, rescue.z), [0xffd84a, 0xffffff, 0x8be36b], 30, { speed: 4, up: 6, size: 0.15 });
       sfx.sfxVictory();
       toast(`🙌 Survivant sauvé ! Il rejoint le camp et fait connaître l’étal : ventes +4 %`);
@@ -2135,10 +2599,10 @@ function updateCycle(dt: number): void {
       save.cycle = true;
       save.phase = 'day';
       save.phaseT = 0;
+      planDay(0);
     }
     return;
   }
-  if (save.won && save.phase === 'day') return;
   save.phaseT += dt;
   if (save.phase === 'day' && save.phaseT >= dayLen(save.day)) startNight();
   else if (save.phase === 'night') {
@@ -2163,8 +2627,8 @@ function shoot(z: Zombie, from: THREE.Vector3, dmg: number, light = true): void 
     buzz(20);
     save.stats.kills++;
     // Hordes nombreuses : un zombie sur deux lache une piece, les brutes un vrai butin.
-    if (z.brute) drops.spawn(hit.pos, 10, 2 + save.day);
-    else if (Math.random() < 0.5) drops.spawn(hit.pos, 1, 1 + Math.floor(save.day / 3));
+    if (z.brute) drops.spawn(hit.pos, 10, Math.min(12, 2 + Math.floor(threat() / 2)));
+    else if (Math.random() < 0.5) drops.spawn(hit.pos, 1, Math.min(5, 1 + Math.floor(threat() / 4)));
   } else {
     particles.burst(hit.pos, hit.colors, 5, { speed: 3, up: 2, size: 0.12, life: 0.5 });
   }
@@ -2192,7 +2656,7 @@ function updateCombat(dt: number): void {
     const tz = horde.nearest(new THREE.Vector3(L.tower.x, 0, L.tower.z), 16);
     if (tz) {
       towerClock = 0.7 / (1 + 0.08 * lv('tower'));
-      shoot(tz, tower.muzzle, 1 + Math.floor(save.day / 3) + lv('tower') + 2 * (bt('tower') - 1), false);
+      shoot(tz, tower.muzzle, 1 + Math.floor(threat() / 3) + lv('tower') + 2 * (bt('tower') - 1), false);
     }
   }
   // Tours d'angle (niveau du camp) : elles couvrent les flancs.
@@ -2244,6 +2708,7 @@ function hurt(dt: number, contacts: number): void {
 let victoryT = 0;
 function startVictory(): void {
   save.won = true;
+  save.wonDay = save.day;
   bus.driving = 0.001;
   victoryT = 0.001;
   persist();
@@ -2270,7 +2735,7 @@ function showVictory(): void {
       <div><b>${save.stats.earned}</b><span>pièces gagnées</span></div>
       <div><b>${mins} min</b><span>de jeu</span></div>
     </div>
-    <p class="muted">Tu peux continuer à faire tourner le camp.</p>`, () => {
+    <p class="muted">Le camp continue : envoie des convois vers la Ville depuis l’arrêt du bus. Chacun rapporte des gemmes et de la renommée (+3 % sur les ventes).</p>`, () => {
     bus.driving = 0;
     bus.root.position.set(L.bus.x, 0, L.bus.z);
   });
@@ -2278,36 +2743,156 @@ function showVictory(): void {
   for (let i = 0; i < 3; i++) setTimeout(() => particles.burst(player.position.clone().setY(3), [0xffd84a, 0xff8fb1, 0x8be36b, 0x6fd3ff], 60, { speed: 8, up: 9, size: 0.2, life: 1.6 }), i * 300);
 }
 
+// ---- hors ligne : une simulation de la production, pas un forfait (voir offline.ts)
+
+/** Absence comptee au plus : 2 h, +1 h par niveau de contremaitre, +2 h avec l'entrepot, +1 h par relais radio, +15 min par niveau de reserve. */
+const maxAway = () => Math.min(16 * 3600, (2 + lv('foreman') + (save.campLv >= 4 ? 2 : 0) + ct('radio')) * 3600 + 900 * lv('reserve'));
+const offlineEff = () => Math.min(0.6, 0.3 + 0.02 * lv('foreman'));
+
+function fmtDur(secs: number): string {
+  const m = Math.round(secs / 60);
+  return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
+}
+
+/** Au retour, le monde a continue : cultures mures, epaves et roches de nouveau pleines. */
+function catchUpWorld(gap: number): void {
+  for (const b of beds) b.update(gap, 0);
+  for (const s of scraps) s.amount = s.max;
+  for (const r of rocks) r.amount = r.max;
+  for (const u of pumps) u.amount = u.max;
+}
+
 function offlineGains(): void {
-  const gap = (Date.now() - save.lastSeen) / 1000;
-  const workers = helpers.length;
-  save.lastSeen = Date.now();
-  if (gap < 60 || workers === 0) return;
-  const gain = Math.floor(Math.min(gap, 3 * 3600) * 0.35 * workers);
-  if (gain <= 0) return;
+  const now = Date.now();
+  const last = save.lastSeen;
+  save.lastSeen = now;
+  // Horloge du telephone reculee (ou avancee puis remise) : rien n'est compte.
+  if (now < save.clockHigh - 120000 || now <= last) {
+    if (save.pendingOffline) showOffline();
+    return;
+  }
+  const gap = (now - last) / 1000;
+  if (gap >= 60) catchUpWorld(gap);
+  const jobs: Record<string, boolean> = {};
+  for (const h of helpers) jobs[h.job] = true;
+  const bins: Partial<Record<ItemType, number>> = {};
+  for (const b of market.bins.bins) if (b.count > 0) bins[b.type] = b.count;
+  if (gap >= 60 && (helpers.length > 0 || market.bins.total > 0)) {
+    const unlocked = beds.filter((b) => b.unlocked);
+    const fieldW = unlocked.filter((b) => b.kind === 'wheat').length * 2.5;
+    const r = simulateOffline({
+      away: gap, maxAway: maxAway(), eff: offlineEff(), jobs, shelterOk: !isBroken('shelter'),
+      wheatShare: fieldW / Math.max(1, fieldW + unlocked.filter((b) => b.kind !== 'wheat').length),
+      conv: { saw: saw.built, cook: cook.built, mill: mill.built, forge: forge.built },
+      bins, sellMul: sellMul() / (boostOn('sell') ? 2 : 1), crewMul: crewMul(),
+      cashCap: 250 + 50 * lv('stall'), reserveRoom: Math.max(0, reserve.cap - reserve.total),
+      cycleLen: save.cycle ? dayLen(save.day) + nightLen(save.day) : 0,
+    });
+    // Les objets sont ranges tout de suite ; seules les pieces attendent qu'on les encaisse.
+    for (const [t, n] of Object.entries(r.binsSold) as [ItemType, number][]) for (let i = 0; i < n; i++) market.bins.take(t);
+    for (const [t, n] of Object.entries(r.items) as [ItemType, number][]) for (let i = 0; i < n; i++) reserve.add(t);
+    if (r.nights > 0) {
+      for (const sct of palisade.sections) {
+        if (!sct.enabled) continue;
+        const floor = Math.min(sct.hp, unitHp(sct));
+        palisade.setHp(sct, Math.max(floor, sct.hp - sct.max * 0.12 * r.nights));
+      }
+    }
+    const got = r.coins > 0 || Object.keys(r.items).length > 0;
+    if (got) {
+      const p = save.pendingOffline;
+      const { binsSold: _sold, ...rep } = r;
+      void _sold;
+      save.pendingOffline = p ? {
+        ...rep, coins: p.coins + rep.coins, secs: p.secs + rep.secs, away: p.away + rep.away, nights: p.nights + rep.nights, wear: p.wear + rep.wear,
+        items: mergeItems(p.items, rep.items),
+      } : rep;
+    }
+  }
+  persist();
+  if (save.pendingOffline) showOffline();
+}
+
+function mergeItems(a: Partial<Record<ItemType, number>>, b: Partial<Record<ItemType, number>>): Partial<Record<ItemType, number>> {
+  const out = { ...a };
+  for (const [t, n] of Object.entries(b) as [ItemType, number][]) out[t] = (out[t] ?? 0) + n;
+  return out;
+}
+
+/** Encaisse les gains hors ligne (une seule fois), eventuellement doubles par une pub. */
+function claimOffline(mult: number): void {
+  const r = save.pendingOffline;
+  if (!r) return;
+  save.pendingOffline = undefined;
+  const n = r.coins * mult;
+  // Pas dans les statistiques : l'absence ne fait pas avancer les quetes du jour.
+  save.coins += n;
+  flyCoins(n, above(), playerChest, () => { sfx.sfxCoin(); bump(ui.moneyPill); }, mult > 1 ? 16 : 12);
+  persist();
+}
+
+function showOffline(): void {
+  const r = save.pendingOffline;
+  if (!r || ui.modal.classList.contains('show')) return;
+  const items = (Object.entries(r.items) as [ItemType, number][]).filter(([, n]) => n > 0)
+    .map(([t, n]) => `<span>${ITEMS[t].icon}<b>${n}</b></span>`).join('');
+  const canDouble = r.coins >= 100 && r.secs >= 900 && adLeft('offline') > 0;
   showModal(`
     <div class="modal-big">⛺</div>
     <h2>Bon retour !</h2>
-    <p>Pendant ton absence, tes survivants ont fait tourner le camp :</p>
-    <div class="modal-gain"><span class="coin big"></span>${gain}</div>
-    <button class="btn ad" data-double>📺 Doubler : ${gain * 2} pièces</button>`, () => {
-    flyCoins(gain, player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 14);
-  });
+    <p class="muted">Absent ${fmtDur(r.away)}${r.away > r.secs + 60 ? ` · ${fmtDur(r.secs)} comptées` : ''} · rendement ${Math.round(r.eff * 100)} %</p>
+    ${r.coins > 0 ? `<div class="modal-gain"><span class="coin big"></span>${r.coins}</div>` : ''}
+    ${items ? `<p>Rangé dans la réserve :</p><div class="offline-items">${items}</div>` : ''}
+    ${r.nights > 0 ? `<p class="muted">🌙 ${r.nights} nuit${r.nights > 1 ? 's' : ''} : la palissade a tenu, mais elle est abîmée.</p>` : ''}
+    ${r.tip ? `<p class="tip">${r.tip}</p>` : ''}
+    ${canDouble ? `<button class="btn ad" data-double>📺 Doubler : ${r.coins * 2} pièces</button>` : ''}`, () => claimOffline(1));
+  let busy = false;
   ui.modal.querySelector('[data-double]')?.addEventListener('click', () => {
-    void showRewarded('gains hors ligne doublés', owns('noads')).then((ok) => {
-      if (!ok) return;
+    if (busy) return;
+    busy = true;
+    void rewarded('offline', 'gains hors ligne doublés').then((ok) => {
+      busy = false;
+      if (!ok || !save.pendingOffline) return;
       ui.modal.classList.remove('show');
-      flyCoins(gain * 2, player.position.clone().add(new THREE.Vector3(0, 4, 2)), playerChest, earn, 16);
+      claimOffline(2);
     });
-  }, { once: true });
+  });
 }
 
 // ================================================================ sauvegarde
 
+const CONVS: Record<string, Converter> = { saw, cook, mill, forge };
+
 function persist(): void {
+  if (resetting) return;
   save.lastSeen = Date.now();
+  save.clockHigh = Math.max(save.clockHigh, save.lastSeen);
   save.walls = palisade.hpList();
+  const bins: Partial<Record<ItemType, number>> = {};
+  for (const b of market.bins.bins) if (b.count > 0) bins[b.type] = b.count;
+  const res: Partial<Record<ItemType, number>> = {};
+  for (const [t, n] of reserve.counts) if (n > 0) res[t] = n;
+  const conv: Record<string, [ItemType[], ItemType[]]> = {};
+  for (const [k, c] of Object.entries(CONVS)) conv[k] = [c.input.pieces.map((x) => x.type), c.output.pieces.map((x) => x.type)];
+  save.stock = { bag: player.stack.slots.map((x) => x.type), reserve: res, bins, cash: market.cash, conv };
   writeSave(save);
+}
+
+/** Au lancement : on remet le sac, la reserve, les bacs, la caisse et les machines comme on les a laisses. */
+function restoreStock(): void {
+  const st = save.stock;
+  if (!st) return;
+  const ok = (t: string): t is ItemType => t in ITEMS;
+  for (const t of st.bag ?? []) if (ok(t) && player.stack.count < player.stack.cap) player.stack.add(t);
+  for (const [t, n] of Object.entries(st.reserve ?? {})) if (ok(t)) for (let i = 0; i < (n ?? 0); i++) reserve.add(t);
+  for (const [t, n] of Object.entries(st.bins ?? {})) if (ok(t)) for (let i = 0; i < Math.min(BIN_CAP, n ?? 0); i++) market.bins.add(t);
+  if (st.cash > 0) market.addCash(Math.round(st.cash));
+  for (const [k, [inp, out]] of Object.entries(st.conv ?? {})) {
+    const c = CONVS[k];
+    if (!c) continue;
+    for (const t of inp ?? []) if (ok(t) && !c.input.full) c.input.add(t);
+    for (const t of out ?? []) if (ok(t) && !c.output.full) c.output.add(t);
+  }
 }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) persist();
@@ -2418,7 +3003,7 @@ function setText(el: HTMLElement, t: string): void {
 
 function renderHud(dt: number): void {
   shownCoins = Math.abs(save.coins - shownCoins) < 0.5 ? save.coins : damp(shownCoins, save.coins, 10, dt);
-  setText(ui.money, String(Math.round(shownCoins)));
+  setText(ui.money, fmt(shownCoins));
   setText(ui.bag, `${player.stack.count}/${player.stack.cap}`);
   setText(ui.gems, String(save.gems));
   renderMetaHud();
@@ -2504,6 +3089,7 @@ function step(dt: number, time: number): void {
   B.kitchen!.anim?.(dt, time, cook.busy);
   B.mill!.anim?.(dt, time, mill.busy);
   bus.update(dt, time);
+  updateConvoy();
 
   const open = !save.cycle || save.phase === 'day';
   const sales = market.update(dt, open, productsList(), (from, to, t) => {
@@ -2512,7 +3098,9 @@ function step(dt: number, time: number): void {
   for (const s of sales) {
     save.stats.sold++;
     sfx.sfxSell();
-    flyCoins(Math.round(s.pay * sellMul()), s.at, () => market.cashWorld(), (n) => market.addCash(n), 6);
+    const pay = Math.round(s.pay * sellMul());
+    floatText(`+${fmt(pay)}`, s.at.x, s.at.y + 0.4, s.at.z, 'small');
+    flyCoins(pay, s.at, () => market.cashWorld(), (n) => market.addCash(n), 6);
   }
 
   nav.northOpen = isBuilt('gate');
@@ -2520,7 +3108,8 @@ function step(dt: number, time: number): void {
   updateEvents(dt, time);
   // Abri demoli : les survivants n'ont plus de toit et restent pres du feu.
   helperCtx.night = (save.cycle && save.phase === 'night') || isBroken('shelter');
-  for (const h of helpers) h.update(dt, helperCtx);
+  const cdt = dt * crewMul();
+  for (const h of helpers) h.update(cdt, helperCtx);
 
   flyers.update(dt);
   particles.update(dt);
@@ -2544,6 +3133,7 @@ function step(dt: number, time: number): void {
       renderPad(pad);
     }
     if (!pad.shown || isBuilt(pad.def.id)) continue;
+    if (pad.inflight === 0 && totalCost(remaining(pad)) === 0) { build(pad); continue; }
     pad.appear = Math.min(1, pad.appear + dt * 2.5);
     pad.pulse = Math.max(0, pad.pulse - dt * 4);
     const s = Math.max(0.001, easeOutBack(pad.appear)) * (1 + pad.pulse * 0.12 + (near(pad.def.x, pad.def.z, 1.45) ? 0.05 : 0));
@@ -2560,18 +3150,38 @@ let lastPersist = performance.now();
 const SIM = { scale: 1 };
 
 let firstFrame = true;
+let frameErrors = 0;
 function frame(): void {
+  // On reprogramme d'abord : une erreur dans une image ne doit jamais figer le jeu.
+  requestAnimationFrame(frame);
+  try {
+    drawFrame();
+  } catch (err) {
+    frameErrors++;
+    if (frameErrors < 5) console.error(err);
+    // Erreur avant la toute premiere image : on la remonte au diagnostic de demarrage.
+    if (firstFrame && frameErrors === 1) setTimeout(() => { throw err; });
+  }
+}
+
+/** Le jeu est en pause sous une fenetre (radio, retour, pub, boutique). */
+function paused(): boolean {
+  return ui.modal.classList.contains('show') || ui.shop.classList.contains('show') || !!document.querySelector('.ad-layer.show');
+}
+
+function drawFrame(): void {
   // La premiere image est notee comme une etape : si elle bloque, on le saura.
   if (firstFrame) boot('premiere image');
   const dt = Math.min(0.05, clock.getDelta());
   const time = clock.elapsedTime;
   // Les tests automatiques peuvent accelerer la simulation.
-  for (let i = 0; i < SIM.scale; i++) step(dt, time);
+  if (!paused()) for (let i = 0; i < SIM.scale; i++) step(dt, time);
 
   nightK = damp(nightK, save.cycle && save.phase === 'night' ? 1 : 0, 1.6, dt * SIM.scale);
   const dusk = save.cycle && save.phase === 'day' ? Math.max(0, (save.phaseT - (dayLen(save.day) - 20)) / 20) : 0;
   applyLighting(nightK, dusk, time);
 
+  if (world.water?.bumpMap) world.water.bumpMap.offset.set(time * 0.018, time * 0.011);
   for (const s of world.swayers) {
     s.o.rotation.z = Math.sin(time * 1.6 + s.phase) * s.amp;
     s.o.rotation.x = Math.cos(time * 1.3 + s.phase) * s.amp * 0.6;
@@ -2583,9 +3193,9 @@ function frame(): void {
 
   // Guidage vers l'objectif en cours.
   // Recrutement bloque faute de maison : on guide vers l'agrandissement du camp.
-  const blockedNow = !!currentObjective()?.house && !freeHouse();
-  if (blockedNow !== objBlocked) renderObjective();
-  const tgt = blockedNow ? new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z) : currentObjective()?.target() ?? null;
+  const blk = objectiveBlock();
+  if ((blk?.text ?? '') !== objBlocked) renderObjective();
+  const tgt = blk ? blk.at : currentObjective()?.target() ?? null;
   guide.visible = !!tgt;
   groundArrow.visible = false;
   if (tgt) {
@@ -2624,6 +3234,7 @@ function frame(): void {
   if (Math.hypot(L.chest.x - player.position.x, L.chest.z - player.position.z) < 9) placeLabel(reserve.label, L.chest.x, 1.6, L.chest.z);
   else reserve.label.classList.add('off');
   placeWarnings(dt);
+  placeFloaters(dt);
   placeEventLabels();
   placeCrew(dt);
   for (const dp of dynPads.values()) placeLabel(dp.label, dp.x, 0.3, dp.z - 1.4);
@@ -2662,7 +3273,6 @@ function frame(): void {
 
   // Sauvegarde reguliere, en temps reel (independante de la fluidite).
   if (performance.now() - lastPersist > 4000) { lastPersist = performance.now(); persist(); }
-  requestAnimationFrame(frame);
 }
 
 // ---------------------------------------------------------------- demarrage
@@ -2681,10 +3291,15 @@ applyCampLevel(true);
 for (const id of save.built) applyBuild(id, true);
 // Ce que les zombies avaient demoli reste en ruine jusqu'a reparation.
 for (const id of [...save.broken]) wreck(id, true);
-for (const b of TIERABLE) if (isBuilt(b.id) && bt(b.id) > 1) applyBuildingTier(b.id);
+for (const b of TIERABLE) {
+  if (!isBuilt(b.id) || bt(b.id) <= 1) continue;
+  try { applyBuildingTier(b.id); } catch (err) { console.error(err); }
+}
 applyUpgrades();
 equipWeapon((WEAPONS.find((x) => x.id === save.weapon)?.id ?? 'rifle') as WeaponId);
 wearOutfit(save.outfit);
+applyMeta(0);
+try { restoreStock(); } catch (err) { console.error(err); }
 player.hp = player.maxHp;
 player.position.set(L.spawn.x, 0, L.spawn.z);
 const camTarget = player.position.clone();
@@ -2695,9 +3310,10 @@ if (save.obj > 0) hint.classList.add('gone');
 if (save.cycle && save.phase === 'night') {
   // Une nuit interrompue reprend depuis le debut.
   save.phaseT = 0;
-  horde.startNight(save.day);
+  horde.startNight(threat());
   document.body.classList.add('night');
-}
+} else if (save.cycle) planDay(save.phaseT / dayLen(save.day));
+if (save.convoyAt > 0) bus.root.visible = false;
 boot('gains hors ligne');
 offlineGains();
 requestAnimationFrame(frame);

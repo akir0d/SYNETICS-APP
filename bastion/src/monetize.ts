@@ -8,7 +8,7 @@
 export const SIMULATED = true;
 
 export interface Product {
-  id: 'noads' | 'starter' | 'gems_s' | 'gems_m' | 'gems_l';
+  id: 'noads' | 'starter' | 'monthly' | 'gems_s' | 'gems_m' | 'gems_l' | 'gems_xl';
   name: string;
   icon: string;
   desc: string;
@@ -16,14 +16,18 @@ export interface Product {
   price: string;
   /** Achat unique (sans pub, pack de depart) ou rachetable (gemmes). */
   once: boolean;
+  /** Gemmes donnees tout de suite (doublees au tout premier achat qui en donne). */
+  gems: number;
 }
 
 export const PRODUCTS: Product[] = [
-  { id: 'starter', name: 'Pack du survivant', icon: '🎁', desc: '150 💎, 1 500 pièces et un grand sac', price: '1,99 €', once: true },
-  { id: 'noads', name: 'Sans pub', icon: '🚫', desc: 'Toutes les récompenses « pub » sans regarder de pub', price: '3,99 €', once: true },
-  { id: 'gems_s', name: 'Bourse de gemmes', icon: '💎', desc: '80 gemmes', price: '0,99 €', once: false },
-  { id: 'gems_m', name: 'Coffret de gemmes', icon: '💎', desc: '500 gemmes (+25 %)', price: '4,99 €', once: false },
-  { id: 'gems_l', name: 'Malle de gemmes', icon: '💎', desc: '1 200 gemmes (+50 %)', price: '9,99 €', once: false },
+  { id: 'starter', name: 'Pack du survivant', icon: '🎁', desc: '150 💎, 4 coffres de pièces, un sac plus grand et la tenue de garde forestier', price: '1,99 €', once: true, gems: 150 },
+  { id: 'monthly', name: 'Ravitaillement mensuel', icon: '📦', desc: '300 💎 tout de suite, puis 40 💎 chaque jour pendant 30 jours', price: '4,99 €', once: false, gems: 300 },
+  { id: 'noads', name: 'Sans pub', icon: '🚫', desc: 'Les récompenses « pub » sans regarder de vidéo (mêmes limites par jour)', price: '3,99 €', once: true, gems: 0 },
+  { id: 'gems_s', name: 'Bourse de gemmes', icon: '💎', desc: '80 gemmes', price: '0,99 €', once: false, gems: 80 },
+  { id: 'gems_m', name: 'Coffret de gemmes', icon: '💎', desc: '500 gemmes (+25 %)', price: '4,99 €', once: false, gems: 500 },
+  { id: 'gems_l', name: 'Malle de gemmes', icon: '💎', desc: '1 200 gemmes (+50 %)', price: '9,99 €', once: false, gems: 1200 },
+  { id: 'gems_xl', name: 'Trésor de gemmes', icon: '💎', desc: '2 800 gemmes (+75 %)', price: '19,99 €', once: false, gems: 2800 },
 ];
 
 let overlay: HTMLElement | null = null;

@@ -12,6 +12,10 @@ export interface HumanLook {
   scale?: number;
 }
 
+/** Ombre au sol partagee par tous les personnages (pas de geometrie par client qui passe). */
+const BLOB_GEO = new THREE.CircleGeometry(0.5, 14);
+const BLOB_MAT = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.16, depthWrite: false });
+
 export class Human {
   readonly root = new THREE.Group();
   readonly body = new THREE.Group();
@@ -47,10 +51,7 @@ export class Human {
       this.body.add(brim, crown);
     }
     this.root.add(shadow(this.body));
-    const blobShadow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.5, 14),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.16, depthWrite: false }),
-    );
+    const blobShadow = new THREE.Mesh(BLOB_GEO, BLOB_MAT);
     blobShadow.rotation.x = -Math.PI / 2;
     blobShadow.position.y = 0.02;
     this.root.add(blobShadow);

@@ -1,8 +1,8 @@
 // Les visiteurs de la nuit : lents, maladroits, plus comiques que gores.
 
 import * as THREE from 'three';
-import { mergeColored } from './bake';
-import { C, box, glow, group, rbox, sphere } from './kit';
+import { fusedMesh, onFront, oval } from './humans';
+import { C, blob, box, glow, group, lathe, lookMat, mixHex, plank, sphere, type Profile } from './kit';
 import { CAMP, insideCamp } from './layout';
 import type { Palisade, Section } from './palisade';
 import { route, type Region } from './nav';
@@ -10,6 +10,9 @@ import { collide, type Circle, type Segment } from './physics';
 
 const WHITE = new THREE.Color(0xffffff);
 const SHIRTS = [0x7a6a8f, 0x8f5a4a, 0x5a7a8f, 0x8a8a5a, 0x6a8f6a];
+const ZSKIN = 0x9dbf72;
+const ZPANTS = 0x4a4a52;
+const ZHAIR = 0x4a4a3a;
 /** Hordes nombreuses : jusqu'a 60 zombies a la fois. */
 const POOL = 60;
 /** Degats d'un coup de zombie sur la palissade, et cadence des coups. */
@@ -42,6 +45,8 @@ export interface Zombie {
   shirt: number;
   /** Batiment qu'il s'acharne a demolir, s'il en a choisi un. */
   target: Structure | null;
+  /** Casque et epauliere de recuperation, visibles sur les brutes seulement. */
+  gear: THREE.Object3D;
 }
 
 /** Ce que les zombies peuvent demolir dans le camp (potagers, machines, tours...). */
@@ -58,6 +63,109 @@ export interface Structure {
 
 export interface Hit { pos: THREE.Vector3; killed: boolean; colors: number[] }
 
+// ---------------------------------------------------------------- modele
+
+const ZTORSO: Profile = [[0, -0.04], [0.25, -0.04], [0.29, 0.02], [0.3, 0.2], [0.31, 0.4], [0.28, 0.54], [0.19, 0.62], [0, 0.65]];
+const ZHIPS: Profile = [[0, 0.5], [0.2, 0.5], [0.26, 0.56], [0.275, 0.68], [0, 0.7]];
+const ZSLEEVE: Profile = [[0, -0.3], [0.1, -0.3], [0.108, -0.26], [0.112, -0.02], [0.09, 0.08], [0, 0.11]];
+const ZFOREARM: Profile = [[0, -0.52], [0.065, -0.5], [0.075, -0.4], [0.08, -0.28], [0, -0.25]];
+const ZLEG: Profile = [[0, -0.5], [0.1, -0.5], [0.11, -0.47], [0.105, -0.2], [0.118, -0.02], [0.1, 0.06], [0, 0.09]];
+const ZLEG_TORN: Profile = [[0, -0.28], [0.105, -0.28], [0.112, -0.2], [0.118, -0.02], [0.1, 0.06], [0, 0.09]];
+const ZSHIN: Profile = [[0, -0.55], [0.075, -0.53], [0.08, -0.3], [0, -0.25]];
+const BUCKET: Profile = [[0.27, 0.05], [0.292, 0.07], [0.292, 0.095], [0.245, 0.3], [0, 0.31]];
+/** Le haut du corps penche en avant (pivot a la hanche). */
+const HUNCH = 0.2;
+
+/**
+ * Ourlet dechire : les sommets sous `yMax` (hors axe) descendent ou remontent un peu, en
+ * dents irregulieres. Copie de geometrie, creee une fois par variante (jamais affichee seule).
+ */
+function jag<T extends THREE.Mesh>(m: T, yMax: number, amp: number): T {
+  const g = m.geometry.clone();
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    if (y > yMax || Math.hypot(x, z) < 0.01) continue;
+    const j = Math.round((Math.atan2(x, z) + Math.PI) * 4);
+    const t = ((j * 37) % 7) / 6;
+    pos.setY(i, y - amp * t + amp * 0.25);
+  }
+  m.geometry = g;
+  return m;
+}
+
+/** Repere du haut du corps (penche) et de la tete, communs au tronc et a l'equipement des brutes. */
+function hunched(chest: THREE.Object3D[], head: THREE.Object3D[]): THREE.Group {
+  const h = group(...head);
+  h.position.set(0, 0.86, 0.1);
+  h.rotation.set(-0.1, 0, 0.15);
+  const c = group(...chest, h);
+  c.position.set(0, 0.66, 0);
+  c.rotation.x = HUNCH;
+  return c;
+}
+
+function zombieTrunk(shirt: number, v: number): THREE.Object3D {
+  const patch = onFront(-0.13, 0.31, 0.74);
+  const p = box(0.13, 0.11, 0.014, mixHex(shirt, 0xd9b48a, 0.45), -0.13, 0.38, patch.z + 0.004);
+  p.rotation.y = patch.ry;
+  const belly = blob(0.1, mixHex(ZSKIN, 0x5a7a40, 0.3), 0.07, 0.18, 0.2);
+  belly.scale.set(1, 0.8, 0.45);
+  const head = sphere(0.27, ZSKIN, 0, 0, 0, -12);
+  head.scale.set(1.05, 0.95, 1);
+  // Yeux depareilles : l'un grand, l'autre petit, pupilles qui louchent.
+  const eyeA = sphere(0.07, 0xf2e6a8, -0.09, 0.03, 0.235, 6);
+  const eyeB = sphere(0.05, 0xf2e6a8, 0.1, 0.05, 0.235, 6);
+  eyeA.scale.z = 0.7;
+  eyeB.scale.z = 0.7;
+  const mouth = box(0.12, 0.045, 0.03, 0x4a2a2a, 0.02, -0.12, 0.234);
+  mouth.rotation.z = -0.18;
+  const ear = blob(0.06, ZSKIN, 0.28, 0, 0);
+  ear.scale.set(0.6, 1, 0.8);
+  const tufts = v % 2 === 0
+    ? [blob(0.06, ZHAIR, -0.06, 0.25, -0.02), blob(0.05, ZHAIR, 0.08, 0.24, 0.03), blob(0.055, ZHAIR, 0, 0.2, -0.17)]
+    : [blob(0.065, ZHAIR, 0.02, 0.255, -0.05), blob(0.05, ZHAIR, -0.1, 0.22, 0.06)];
+  return group(
+    oval(lathe(ZHIPS, ZPANTS, 0, 0, 0, 12), 0.74),
+    hunched(
+      [jag(oval(lathe(ZTORSO, shirt, 0, 0, 0, 12), 0.74), 0.05, 0.07), p, belly],
+      [
+        head, eyeA, eyeB, mouth, ear, ...tufts,
+        sphere(0.03, 0x2a1a10, -0.075, 0.025, 0.282, -5), sphere(0.024, 0x2a1a10, 0.09, 0.04, 0.27, -5),
+        box(0.032, 0.03, 0.016, 0xeee6c8, 0.045, -0.105, 0.25),
+      ],
+    ),
+  );
+}
+
+/** Seau cabosse en guise de casque et epauliere de tole : les brutes. */
+function zombieGear(): THREE.Object3D {
+  const bucket = lathe(BUCKET, C.rust, 0, 0, -0.01, 12);
+  bucket.rotation.z = -0.12;
+  const pad = plank(0.3, 0.06, 0.32, C.metal, -0.27, 0.58, 0);
+  pad.rotation.z = 0.45;
+  const strap = box(0.06, 0.6, 0.016, 0x4a3426, 0, 0.32, 0.225);
+  strap.rotation.z = 0.6;
+  return hunched([pad, strap, sphere(0.03, C.tin, -0.2, 0.62, 0.12, 6)], [bucket]);
+}
+
+function zombieArm(shirt: number): THREE.Object3D {
+  const hand = sphere(0.085, ZSKIN, 0, -0.57, 0.01, -7);
+  hand.scale.set(1, 1.15, 0.8);
+  return group(jag(lathe(ZSLEEVE, shirt, 0, 0, 0, 8), -0.25, 0.06), lathe(ZFOREARM, ZSKIN, 0, 0, 0, 8), hand);
+}
+
+function zombieLeg(torn: boolean): THREE.Object3D {
+  const foot = sphere(0.11, torn ? mixHex(ZSKIN, 0x5a7a40, 0.25) : 0x3a3230, 0, -0.59, 0.05, -7);
+  foot.scale.set(torn ? 0.85 : 1, 0.6, torn ? 1.25 : 1.4);
+  const g = group(foot);
+  if (torn) g.add(jag(lathe(ZLEG_TORN, ZPANTS, 0, 0, 0, 8), -0.24, 0.06), lathe(ZSHIN, ZSKIN, 0, 0, 0, 8));
+  else g.add(jag(lathe(ZLEG, ZPANTS, 0, 0, 0, 8), -0.46, 0.04));
+  return g;
+}
+
 export class Horde {
   private readonly zs: Zombie[] = [];
   active = false;
@@ -71,42 +179,37 @@ export class Horde {
   }
 
   private make(i: number): Zombie {
-    // Les hordes sont nombreuses : chaque zombie est fusionne en 5 maillages (corps, 4 membres)
-    // partageant un seul materiau a couleurs de sommets, qu'on fait flasher quand il prend un coup.
-    const shirt = SHIRTS[i % SHIRTS.length]!;
-    const m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, emissive: 0x141a10 });
-    const part = (g: THREE.Group, cast: boolean): THREE.Object3D => {
-      const merged = mergeColored(g);
-      merged.traverse((o) => {
-        const mesh = o as THREE.Mesh;
-        if (mesh.isMesh) { mesh.material = m; mesh.castShadow = cast; mesh.receiveShadow = false; }
-      });
-      return merged;
+    // Les hordes sont nombreuses : chaque zombie tient en 5 maillages (tronc, 4 membres) dont
+    // les geometries sont partagees par variante de chemise, avec un materiau a couleurs de
+    // sommets propre a chaque zombie, qu'on fait flasher quand il prend un coup.
+    const v = i % SHIRTS.length;
+    const shirt = SHIRTS[v]!;
+    const m = lookMat({ vertexColors: true, emissive: 0x141a10 });
+    const part = (key: string, make: () => THREE.Object3D, cast: boolean): THREE.Mesh => {
+      const mesh = fusedMesh(key, make, m);
+      mesh.castShadow = cast;
+      mesh.receiveShadow = false;
+      return mesh;
     };
-    const skin = 0x9fc274;
-    const legL = part(group(box(0.22, 0.6, 0.24, 0x4a4440, 0, -0.3, 0)), false);
-    const legR = part(group(box(0.22, 0.6, 0.24, 0x4a4440, 0, -0.3, 0)), false);
+    const legL = group(part('zl0', () => zombieLeg(false), false));
+    const legR = group(part('zl1', () => zombieLeg(true), false));
     legL.position.set(-0.16, 0.66, 0);
     legR.position.set(0.16, 0.66, 0);
-    const armL = part(group(rbox(0.18, 0.6, 0.2, shirt, 0.07, 0, -0.28, 0), sphere(0.1, skin, 0, -0.62, 0, 6)), false);
-    const armR = part(group(rbox(0.18, 0.6, 0.2, shirt, 0.07, 0, -0.28, 0), sphere(0.1, skin, 0, -0.62, 0, 6)), false);
-    armL.position.set(-0.4, 1.22, 0);
-    armR.position.set(0.4, 1.22, 0);
-    const trunk = part(group(
-      rbox(0.62, 0.66, 0.4, shirt, 0.14, 0, 0.98, 0),
-      box(0.3, 0.16, 0.02, skin, 0.12, 0.8, 0.205),
-      sphere(0.29, skin, 0, 1.56, 0.04, 8),
-      sphere(0.055, 0xffb347, -0.11, 1.6, 0.3, 5),
-      sphere(0.055, 0xffb347, 0.11, 1.58, 0.3, 5),
-    ), true);
+    const armL = group(part(`za${v}`, () => zombieArm(shirt), false));
+    const armR = group(part(`za${v}`, () => zombieArm(shirt), false));
+    armL.position.set(-0.38, 1.17, 0.1);
+    armR.position.set(0.38, 1.17, 0.1);
+    const trunk = part(`zt${v}`, () => zombieTrunk(shirt, v), true);
+    const gear = part('zg', zombieGear, true);
+    gear.visible = false;
     const eyes = glow(0xff9a2a, 1.0);
-    eyes.position.set(0, 1.6, 0.32);
-    const body = group(trunk, eyes, legL, legR, armL, armR);
+    eyes.position.set(0, 1.5, 0.52);
+    const body = group(trunk, gear, eyes, legL, legR, armL, armR);
     const root = group(body);
     root.visible = false;
     this.scene.add(root);
     return {
-      root, body, armL, armR, legL, legR, mats: [m], bases: [m.emissive.clone()], eyes: [eyes], shirt,
+      root, body, armL, armR, legL, legR, mats: [m], bases: [m.emissive.clone()], eyes: [eyes], shirt, gear,
       hp: 3, speed: 1.3 + Math.random() * 0.9, phase: Math.random() * 6, rise: 0,
       state: 'hidden', timer: 0, flash: 0, knock: new THREE.Vector3(), hit: 0, brute: false, target: null,
     };
@@ -174,6 +277,7 @@ export class Horde {
     z.state = 'rising';
     z.root.visible = true;
     z.root.scale.setScalar(z.brute ? 1.7 : 1);
+    z.gear.visible = z.brute;
     z.target = null;
     z.body.rotation.set(0, 0, 0);
     z.speed = z.brute ? 1.0 : 1.3 + Math.random() * 0.9;
@@ -330,8 +434,8 @@ export class Horde {
       z.body.rotation.z = Math.sin(z.phase * 0.5) * 0.12;
       z.legL.rotation.x = Math.sin(z.phase) * 0.5;
       z.legR.rotation.x = -Math.sin(z.phase) * 0.5;
-      z.armL.rotation.x = -1.4 + Math.sin(z.phase * 0.9) * 0.15;
-      z.armR.rotation.x = -1.3 - Math.sin(z.phase * 0.8) * 0.2;
+      z.armL.rotation.x = -1.15 + Math.sin(z.phase * 0.9) * 0.22;
+      z.armR.rotation.x = -1.0 - Math.sin(z.phase * 0.8) * 0.26;
     }
     return contact;
   }

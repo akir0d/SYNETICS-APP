@@ -1,12 +1,12 @@
 // Ce qu'on recolte : potagers, arbres a abattre, epaves a demonter.
 
 import * as THREE from 'three';
-import { C, at, blob, box, cone, cyl, damp, group, rbox, rng, shadow, sphere } from './kit';
+import { C, at, blob, box, capsule, corrugated, cyl, damp, group, lathe, mixHex, paint, plank, rbox, rcyl, rng, shadow, sphere, torus, vgrad } from './kit';
 import { L } from './layout';
 import type { Circle, Segment } from './physics';
 import { mergeColored } from './bake';
 import { wreck } from './props';
-import { leafy, pine } from './flora';
+import { bend, foliage, leafy, pine, revolveGeo, stone, tubeGeo, vmesh } from './flora';
 
 // ---------------------------------------------------------------- potagers et champs
 
@@ -33,25 +33,23 @@ export class Bed {
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, readonly kind: Crop, readonly w = BED_W, readonly d = BED_D) {
     this.growTime = GROW[kind];
     const g = this.group;
-    if (kind === 'wheat') {
-      // Un champ : de la terre labouree bordee de piquets.
-      g.add(box(w, 0.12, d, C.soil, 0, 0.06, 0));
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(cyl(0.06, 0.07, 0.7, C.woodDark, 5, sx * w / 2, 0.35, sz * d / 2));
-      for (const sz of [-1, 1]) g.add(box(w, 0.06, 0.06, C.wood, 0, 0.5, sz * d / 2));
-    } else {
-      g.add(rbox(w, 0.4, d, C.wood, 0.05, 0, 0.2, 0));
-      g.add(box(w - 0.3, 0.06, d - 0.3, C.soil, 0, 0.41, 0));
-    }
     const base = kind === 'wheat' ? 0.12 : 0.44;
     const cols = Math.max(2, Math.round((w - 0.3) / 0.64));
     const rows = Math.max(2, Math.round((d - 0.3) / 0.55));
+    // Le cadre puis la terre : deux pieces fusionnees (partagees entre bacs de meme taille),
+    // qui tombent l'une apres l'autre quand on restaure le bac.
+    if (kind === 'wheat') g.add(shared(`field${w},${d},${rows}`, () => fieldFence(w, d)), shared(`furrows${w},${d},${rows}`, () => fieldSoil(w, d, rows)));
+    else g.add(shared(`bed${w},${d}`, () => bedFrame(w, d)), shared(`soil${w},${d},${cols},${rows}`, () => bedSoil(w, d, cols, rows)));
     const r = rng(Math.round(x * 13 + z * 7));
     for (let i = 0; i < rows; i++) {
       for (let j = 0; j < cols; j++) {
         const px = (j - (cols - 1) / 2) * ((w - 0.5) / Math.max(1, cols - 1));
         const pz = (i - (rows - 1) / 2) * ((d - 0.5) / Math.max(1, rows - 1));
-        // Chaque plante fusionnee en un maillage : 60 epis de ble ne coutent que 60 appels de dessin.
-        const obj = mergeColored(kind === 'carrot' ? carrotPlant() : kind === 'tomato' ? tomatoPlant(r) : wheatPlant(r));
+        // Chaque plante est un maillage fusionne, partage entre plantes de meme variete : 60 epis
+        // de ble ne coutent que 60 appels de dessin et quatre geometries. Les tirages r()
+        // d'origine sont gardes (tomate 9, ble 8) : rotations et pousses inchangees.
+        const obj = kind === 'carrot' ? plantModel('carrot', (i * cols + j) % 3)
+          : plantModel(kind, Math.floor(draw(r, kind === 'tomato' ? 9 : 8) * 4));
         at(obj, px, base, pz, r() * 6);
         obj.userData.base = base;
         g.add(obj);
@@ -130,31 +128,207 @@ export class Bed {
   }
 }
 
-function carrotPlant(): THREE.Group {
-  return group(
-    cone(0.08, 0.24, 0xff8a2a, 5, 0, 0.04, 0),
-    cone(0.06, 0.4, C.leafLight, 4, 0.04, 0.32, 0),
-    cone(0.06, 0.34, C.leaf, 4, -0.04, 0.28, 0.03),
-  );
+/** Premier de n tirages : garde la sequence du generateur d'origine. */
+function draw(r: () => number, n: number): number {
+  const first = r();
+  for (let i = 1; i < n; i++) r();
+  return first;
 }
 
-function tomatoPlant(r: () => number): THREE.Group {
-  const g = group(cyl(0.025, 0.03, 0.8, C.woodLight, 4, 0, 0.4, 0), blob(0.24, C.leafDark, 0, 0.5, 0));
-  for (let i = 0; i < 3; i++) g.add(sphere(0.085, 0xe8432f, (r() - 0.5) * 0.36, 0.3 + r() * 0.4, (r() - 0.5) * 0.36, 8));
+const smooth = (t: number): number => {
+  const k = Math.max(0, Math.min(1, t));
+  return k * k * (3 - 2 * k);
+};
+
+const modelCache = new Map<string, THREE.Group>();
+/** Modele fusionne une seule fois puis clone (geometrie et materiau partages). */
+function shared(key: string, make: () => THREE.Group): THREE.Group {
+  let m = modelCache.get(key);
+  if (!m) {
+    m = make();
+    modelCache.set(key, m);
+  }
+  return m.clone();
+}
+
+/** Une plante : quelques varietes fusionnees, partagees par toutes les plantes du jeu. */
+function plantModel(kind: Crop, v: number): THREE.Group {
+  return shared(`${kind}${v}`, () => mergeColored(kind === 'carrot' ? carrotPlant(v) : kind === 'tomato' ? tomatoPlant(v) : wheatPlant(v)));
+}
+
+const TONES = [C.wood, mixHex(C.wood, C.woodLight, 0.45), mixHex(C.wood, C.woodDark, 0.3)];
+
+/** Cadre du bac : deux rangs de planches biseautees, poteaux d'angle plus sombres. */
+function bedFrame(w: number, d: number): THREE.Group {
+  const g = new THREE.Group();
+  const t = 0.13;
+  let k = 0;
+  for (const y of [0.11, 0.31]) {
+    for (const s of [-1, 1]) {
+      g.add(plank(w - 0.06, 0.19, t, TONES[k++ % 3]!, 0, y, s * (d / 2 - t / 2)));
+      g.add(plank(t, 0.19, d - 2 * t - 0.01, TONES[k++ % 3]!, s * (w / 2 - t / 2), y, 0));
+    }
+  }
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(plank(0.17, 0.52, 0.17, C.woodDark, sx * (w / 2 - 0.085), 0.26, sz * (d / 2 - 0.085)));
+  return mergeColored(g, 0.05);
+}
+
+const SOIL_DEEP = new THREE.Color(0x4f2f1b);
+const SOIL_TOP = new THREE.Color(0x744628);
+
+/** Terre sombre et bombee du bac, avec une butte sous chaque plante et quelques mottes. */
+function bedSoil(w: number, d: number, cols: number, rows: number): THREE.Group {
+  const g = new THREE.Group();
+  g.add(paint(rbox(w - 0.26, 0.3, d - 0.26, C.soil, 0.13, 0, 0.31, 0), 'soil', (_x, y, _z, out) => {
+    out.lerpColors(SOIL_DEEP, SOIL_TOP, smooth((y + 0.15) / 0.3));
+  }));
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+      const px = (j - (cols - 1) / 2) * ((w - 0.5) / Math.max(1, cols - 1));
+      const pz = (i - (rows - 1) / 2) * ((d - 0.5) / Math.max(1, rows - 1));
+      const m = blob(0.145, mixHex(C.soil, 0x8a5a34, 0.4), px, 0.43, pz);
+      m.scale.set(1.15, 0.36, 1.15);
+      g.add(m);
+    }
+  }
+  const q = rng(77);
+  for (let i = 0; i < 7; i++) g.add(blob(0.05, 0x5c3820, (q() - 0.5) * (w - 0.6), 0.46, (q() - 0.5) * (d - 0.6)));
+  return mergeColored(g, 0.04);
+}
+
+/** Cloture du champ : piquets arrondis, deux lisses sur les grands cotes. */
+function fieldFence(w: number, d: number): THREE.Group {
+  const g = new THREE.Group();
+  for (const sx of [-1, 0, 1]) for (const sz of [-1, 1]) g.add(rcyl(0.065, 0.075, 0.72, C.woodDark, 0.6, sx * w / 2, 0.36, sz * d / 2));
+  for (const sz of [-1, 1]) {
+    g.add(plank(w, 0.08, 0.05, C.wood, 0, 0.52, sz * d / 2));
+    g.add(plank(w, 0.07, 0.05, TONES[2]!, 0, 0.27, sz * d / 2));
+  }
+  return mergeColored(g, 0.05);
+}
+
+/** Terre labouree : un fond et un sillon bombe sous chaque rang d'epis. */
+function fieldSoil(w: number, d: number, rows: number): THREE.Group {
+  const g = new THREE.Group();
+  g.add(paint(rbox(w - 0.06, 0.12, d - 0.06, C.soil, 0.05, 0, 0.06, 0), 'field', (_x, y, _z, out) => {
+    out.lerpColors(SOIL_DEEP, SOIL_TOP, smooth((y + 0.06) / 0.12) * 0.8);
+  }));
+  for (let i = 0; i < rows; i++) {
+    const pz = (i - (rows - 1) / 2) * ((d - 0.5) / Math.max(1, rows - 1));
+    const ridge = capsule(0.1, w - 0.45, mixHex(C.soil, 0x8a5a34, 0.45), 0, 0.1, pz);
+    ridge.rotation.z = Math.PI / 2;
+    ridge.scale.set(0.7, 1, 1.5);
+    g.add(ridge);
+  }
+  return mergeColored(g, 0.04);
+}
+
+const CARROT: [number, number][] = [[0, -0.12], [0.03, -0.09], [0.058, 0], [0.07, 0.08], [0.062, 0.125], [0.035, 0.15], [0, 0.155]];
+const CARROT_DEEP = new THREE.Color(0xd8611f);
+const CARROT_LIT = new THREE.Color(0xf5913a);
+const CARROT_TOP = new THREE.Color(0x9c9a3c);
+
+/** Carotte : l'epaule orange qui sort de terre et un plumeau de quatre fanes. */
+function carrotPlant(v: number): THREE.Group {
+  const q = rng(v * 17 + 3);
+  const g = new THREE.Group();
+  g.add(paint(lathe(CARROT, 0xf07f2c), 'carrot', (_x, y, _z, out) => {
+    out.lerpColors(CARROT_DEEP, CARROT_LIT, smooth((y + 0.1) / 0.2));
+    if (y > 0.11) out.lerp(CARROT_TOP, smooth((y - 0.11) / 0.04));
+  }));
+  for (let i = 0; i < 4; i++) {
+    const frond = vgrad(sphere(0.08, C.leaf, 0, 0, 0, -6), i % 2 ? C.leaf : C.leafDark, C.leafSun);
+    frond.scale.set(0.42, 2.1, 0.24);
+    const tilt = 0.28 + q() * 0.22;
+    frond.rotation.x = tilt;
+    frond.position.set(0, 0.168 * Math.cos(tilt), 0.168 * Math.sin(tilt));
+    const pivot = group(frond);
+    pivot.position.y = 0.12;
+    pivot.rotation.y = i * (Math.PI / 2) + q() * 0.6;
+    g.add(pivot);
+  }
   return g;
 }
 
-function wheatPlant(r: () => number): THREE.Group {
+const TOMATO = new THREE.Color(0xe2402b);
+const TOMATO_DEEP = new THREE.Color(0xa82a1c);
+const TOMATO_SHINE = new THREE.Color(0xff9c84);
+
+/** Plant de tomates : tuteur, touffe de feuilles, trois tomates rondes et luisantes. */
+function tomatoPlant(v: number): THREE.Group {
+  const q = rng(v * 23 + 5);
+  const g = new THREE.Group();
+  g.add(cyl(0.022, 0.026, 0.86, C.woodLight, 0, 0.07, 0.43, -0.06));
+  const bush = foliage(0.24, C.leafDark, 0, 0.46, 0, v, 0.26);
+  bush.scale.y = 1.08;
+  bush.rotation.y = v * 1.3;
+  g.add(bush, blob(0.065, C.leaf, 0.18, 0.66, 0.05), blob(0.065, C.leaf, -0.15, 0.3, -0.1));
+  for (let i = 0; i < 3; i++) {
+    const a = v * 1.7 + i * 2.1 + q() * 0.5;
+    const t = paint(sphere(0.072, TOMATO.getHex(), Math.sin(a) * 0.205, 0.3 + i * 0.12 + q() * 0.06, Math.cos(a) * 0.205, -6), 'tomato', (x, y, _z, out) => {
+      out.lerpColors(TOMATO_DEEP, TOMATO, smooth((y + 0.072) / 0.1));
+      if (y > 0.02 && x < 0.01) out.lerp(TOMATO_SHINE, 0.45);
+    });
+    g.add(t);
+  }
+  return g;
+}
+
+/** Touffe de ble : quatre tiges vert-dore, epis allonges, legerement ecartees. */
+function wheatPlant(v: number): THREE.Group {
+  const q = rng(v * 29 + 7);
   const g = new THREE.Group();
   for (let i = 0; i < 4; i++) {
-    const x = (r() - 0.5) * 0.3;
-    const z = (r() - 0.5) * 0.3;
-    g.add(cyl(0.02, 0.025, 0.8, 0xc9a640, 4, x, 0.4, z), cone(0.05, 0.22, 0xe8c25a, 5, x, 0.9, z));
+    const stalk = vgrad(cyl(0.016, 0.02, 0.78, C.olive, 0, 0, 0.39, 0), 0x8a8f45, 0xd2b04c);
+    const ear = vgrad(sphere(0.05, 0xe8c25a, 0, 0.88, 0, -5), 0xc9973a, 0xf0d27a);
+    ear.scale.set(1, 2.6, 1);
+    const stem = group(stalk, ear);
+    stem.position.set((q() - 0.5) * 0.3, 0, (q() - 0.5) * 0.3);
+    stem.rotation.set((q() - 0.5) * 0.26, 0, (q() - 0.5) * 0.26);
+    g.add(stem);
   }
   return g;
 }
 
 // ---------------------------------------------------------------- arbres
+
+let stumpMesh: THREE.Mesh | null = null;
+/**
+ * Souche partagee par tous les arbres (une geometrie, un appel de dessin) : ecorce aux
+ * racines evasees, coupe claire avec ses cernes, quelques copeaux autour.
+ */
+function stumpModel(): THREE.Mesh {
+  if (!stumpMesh) {
+    const g = new THREE.Group();
+    g.add(vmesh(revolveGeo([
+      [0.44, -0.03, 0.62, 0.3],
+      [0.34, 0.06, 0.72, 0.22],
+      [0.27, 0.16, 0.85, 0.06],
+      [0.255, 0.3, 0.95, 0.02],
+      [0.25, 0.37, 1.05, 0.02],
+      [0.226, 0.395, 1.12],
+    ], 14, C.bark, 5, 0.4)));
+    // La coupe : des anneaux alternes clair / fonce, le coeur plus sombre.
+    g.add(vmesh(revolveGeo([
+      [0.226, 0.394, 0.8],
+      [0.2, 0.396, 1.06],
+      [0.165, 0.398, 0.86],
+      [0.125, 0.4, 1.06],
+      [0.085, 0.401, 0.88],
+      [0.045, 0.402, 1.04],
+      [0, 0.403, 0.78],
+    ], 14, 0xe9c48e)));
+    const q = rng(5);
+    for (let i = 0; i < 5; i++) {
+      const a = i * 1.3 + q();
+      const chip = plank(0.12, 0.03, 0.07, i % 2 ? C.woodLight : 0xe9c48e, Math.sin(a) * (0.5 + q() * 0.2), 0.02, Math.cos(a) * (0.5 + q() * 0.2));
+      chip.rotation.set((q() - 0.5) * 0.4, q() * 3, (q() - 0.5) * 0.4);
+      g.add(chip);
+    }
+    stumpMesh = mergeColored(g, 0.02).children[0] as THREE.Mesh;
+  }
+  return new THREE.Mesh(stumpMesh.geometry, stumpMesh.material);
+}
 
 export class ChopTree {
   readonly root = new THREE.Group();
@@ -169,13 +343,12 @@ export class ChopTree {
   private readonly baseScale: number;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, r: () => number) {
-    this.model = r() < 0.5 ? pine(r) : leafy(r);
+    // Fusionne : un seul appel de dessin par arbre debout (memes tirages r() qu'avant).
+    this.model = mergeColored(r() < 0.5 ? pine(r) : leafy(r));
     this.baseScale = 0.85 + r() * 0.3;
     this.model.scale.setScalar(this.baseScale);
     this.model.rotation.y = r() * 6;
-    this.stump = shadow(cyl(0.24, 0.3, 0.35, C.woodDark, 7, 0, 0.17, 0));
-    const ring = cyl(0.2, 0.2, 0.02, 0xf2cf98, 7, 0, 0.36, 0);
-    this.stump.add(ring);
+    this.stump = shadow(stumpModel());
     this.stump.visible = false;
     this.root.add(this.model, this.stump);
     this.root.position.set(x, 0, z);
@@ -257,6 +430,75 @@ export function plantForest(scene: THREE.Scene): ChopTree[] {
 
 // ---------------------------------------------------------------- ferraille
 
+const BARREL: [number, number][] = [
+  [0, 0], [0.26, 0], [0.29, 0.025], [0.29, 0.08], [0.31, 0.105], [0.29, 0.13], [0.305, 0.45],
+  [0.29, 0.77], [0.31, 0.795], [0.29, 0.82], [0.29, 0.875], [0.26, 0.9], [0.22, 0.885], [0, 0.885],
+];
+
+/** Tas de ferraille : futs, toles ondulees, portiere, pneus, tuyaux et caisse sur un lit de gravats. */
+function scrapHeap(): THREE.Group {
+  const g = new THREE.Group();
+  const bed = blob(0.75, C.rustDark, 0, 0.04, 0);
+  bed.scale.set(1.5, 0.28, 1.25);
+  g.add(bed);
+  g.add(lathe(BARREL, C.rust, -0.78, 0, -0.32));
+  const lying = group(lathe(BARREL, 0x4f7a9a, 0, -0.45, 0));
+  lying.position.set(0.5, 0.31, 0.55);
+  lying.rotation.set(0, 0.5, Math.PI / 2);
+  g.add(lying);
+  g.add(at(plank(0.5, 0.5, 0.5, C.wood, 0, 0, 0), 0.02, 0.25, -0.08, 0.5));
+  const s1 = corrugated(1.2, 0.95, C.rust);
+  s1.position.set(-0.05, 0.5, -0.62);
+  s1.rotation.set(-0.45, 0.25, 0.05);
+  const s2 = corrugated(1.0, 0.8, 0x6f8a7a);
+  s2.position.set(0.1, 0.56, -0.02);
+  s2.rotation.set(-Math.PI / 2 + 0.3, 0.6, 0.1);
+  g.add(s1, s2);
+  const door = rbox(0.9, 0.55, 0.07, 0x5f7a8a, 0.035);
+  door.add(box(0.5, 0.2, 0.076, 0x2e3a42, 0.08, 0.12, 0));
+  door.position.set(0.88, 0.36, -0.38);
+  door.rotation.set(0, 1.2, 0.45);
+  g.add(door);
+  const t1 = torus(0.3, 0.11, 0x2f2f2f, -0.55, 0.11, 0.72);
+  t1.rotation.x = Math.PI / 2;
+  const t2 = torus(0.34, 0.12, 0x343434, 1.02, 0.42, 0.25);
+  t2.rotation.set(0.15, 1.3, 0);
+  g.add(t1, t2);
+  const p1 = cyl(0.055, 0.055, 1.5, C.metal, 0, -0.1, 0.62, 0.3);
+  p1.rotation.set(0, 0.4, Math.PI / 2 - 0.15);
+  const p2 = cyl(0.045, 0.045, 1.1, C.rust, 0, -0.3, 0.42, -0.1);
+  p2.rotation.set(0.2, -0.6, Math.PI / 2 + 0.25);
+  g.add(p1, p2);
+  const q = rng(9);
+  for (let i = 0; i < 4; i++) {
+    const a = i * 1.6 + q();
+    g.add(blob(0.12, i % 2 ? C.metal : C.rust, Math.sin(a) * 1.2, 0.06, Math.cos(a) * 1.05));
+  }
+  return mergeColored(g, 0.05);
+}
+
+/** Pompe a essence : socle, corps rouge degrade, tete blanche, ecran, pistolet et tuyau qui pend. */
+function pumpModel(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(rbox(0.95, 0.18, 0.75, C.concrete, 0.05, 0, 0.09, 0));
+  g.add(vgrad(rbox(0.6, 1.36, 0.45, 0xc9412f, 0.08, 0, 0.84, 0), 0xa8382a, 0xd64b35));
+  g.add(box(0.62, 0.08, 0.47, 0xf2c14e, 0, 0.42, 0));
+  g.add(rbox(0.66, 0.36, 0.52, C.white, 0.1, 0, 1.5, 0));
+  const badge = cyl(0.12, 0.12, 0.03, 0xf2c14e, 0, 0, 1.5, 0.265);
+  badge.rotation.x = Math.PI / 2;
+  g.add(badge);
+  g.add(rbox(0.4, 0.22, 0.04, C.concrete, 0.015, 0, 1.18, 0.226));
+  g.add(box(0.32, 0.15, 0.03, 0x2e3439, 0, 1.18, 0.243));
+  g.add(box(0.22, 0.035, 0.02, 0xe6b04a, 0, 1.21, 0.258), box(0.14, 0.035, 0.02, 0xe6b04a, -0.04, 1.15, 0.258));
+  // Etui sur le flanc, pistolet range dedans, tuyau qui pend en boucle.
+  g.add(box(0.09, 0.16, 0.13, C.metal, 0.345, 0.95, 0.1));
+  g.add(box(0.07, 0.2, 0.08, 0x3a3f44, 0.37, 0.86, 0.1));
+  const hose = bend(new THREE.Vector3(0.3, 1.0, -0.08), new THREE.Vector3(0.5, 0.45, -0.1), new THREE.Vector3(0.46, 0.3, -0.01), 4);
+  hose.push(...bend(hose[hose.length - 1]!, new THREE.Vector3(0.43, 0.2, 0.06), new THREE.Vector3(0.37, 0.76, 0.1), 4).slice(1));
+  g.add(vmesh(tubeGeo(hose, hose.map(() => 0.035), 7, 0x2b2b2b)));
+  return mergeColored(g, 0.03);
+}
+
 export class ScrapSource {
   readonly root: THREE.Group;
   amount = 6;
@@ -269,18 +511,7 @@ export class ScrapSource {
       this.root = shadow(at(wreck(x > 0 ? 0x8a5a3a : 0x5f7a8a), x, 0, z, ry));
       scene.add(this.root);
     } else {
-      const r = rng(9);
-      const g = new THREE.Group();
-      for (let i = 0; i < 14; i++) {
-        const b = r() < 0.5
-          ? rbox(0.6 + r() * 0.8, 0.2 + r() * 0.4, 0.5 + r() * 0.6, r() < 0.5 ? C.metal : C.rust, 0.04, (r() - 0.5) * 2, 0.2 + r() * 0.5, (r() - 0.5) * 2)
-          : cyl(0.3, 0.3, 0.9, r() < 0.5 ? 0x4f7a9a : C.rustDark, 8, (r() - 0.5) * 2, 0.45, (r() - 0.5) * 2);
-        b.rotation.set(r() * 0.6, r() * 3, r() * 0.6);
-        g.add(b);
-      }
-      const tire = cyl(0.42, 0.42, 0.26, 0x2f2f2f, 10, 0.8, 0.9, 0.2);
-      tire.rotation.x = 1.2;
-      g.add(tire);
+      const g = shared('heap', scrapHeap);
       this.root = shadow(at(g, x, 0, z, ry));
       scene.add(this.root);
     }
@@ -311,6 +542,8 @@ export class ScrapSource {
   }
 }
 
+const ROCK = [0x9a9890, 0x8b867c, 0xaea795];
+
 /** Affleurement rocheux de la carriere : on le casse a la pioche, il se reconstitue lentement. */
 export class StoneSource {
   readonly root = new THREE.Group();
@@ -320,13 +553,22 @@ export class StoneSource {
   private shake = 0;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, solids: Circle[]) {
+    // Gros galets lites et serres (un seul maillage fusionne), eclats et cailloux au pied.
     const r = rng(Math.round(x * 17 + z * 5));
+    const rock = new THREE.Group();
     for (let i = 0; i < 6; i++) {
-      const b = blob(0.6 + r() * 0.5, [0x9a9890, 0x85837b, 0xa8a59b][i % 3]!, (r() - 0.5) * 1.6, 0.35 + r() * 0.4, (r() - 0.5) * 1.4, 0);
-      b.scale.y = 0.7 + r() * 0.5;
+      const b = stone(Math.round((0.6 + r() * 0.5) * 20) / 20, ROCK[i % 3]!, i === 0, (r() - 0.5) * 1.6, 0.35 + r() * 0.4, (r() - 0.5) * 1.4);
+      b.scale.set(1.05, 0.7 + r() * 0.5, 0.95);
       b.rotation.y = r() * 3;
-      this.root.add(b);
+      rock.add(b);
     }
+    for (let i = 0; i < 5; i++) {
+      const a = i * 1.26 + r();
+      const p = stone(0.12 + (i % 2) * 0.06, ROCK[(i + 1) % 3]!, false, Math.sin(a) * 1.25, 0.06, Math.cos(a) * 1.1);
+      p.scale.y = 0.65;
+      rock.add(p);
+    }
+    this.root.add(mergeColored(rock, 0.04));
     shadow(this.root);
     this.root.position.set(x, 0, z);
     scene.add(this.root);
@@ -369,13 +611,7 @@ export class Pump {
   private shake = 0;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, solids: Circle[]) {
-    this.root = shadow(at(group(
-      box(0.9, 0.18, 0.7, C.concrete, 0, 0.09, 0),
-      rbox(0.6, 1.5, 0.45, 0xc9412f, 0.06, 0, 0.93, 0),
-      box(0.5, 0.35, 0.47, C.white, 0, 1.35, 0),
-      box(0.3, 0.18, 0.48, 0x2e3439, 0, 1.0, 0),
-      cyl(0.04, 0.04, 0.8, 0x2b2b2b, 5, 0.36, 0.8, 0.1),
-    ), x, 0, z));
+    this.root = shadow(at(shared('pump', pumpModel), x, 0, z));
     scene.add(this.root);
     solids.push({ x, z, r: 0.55 });
   }

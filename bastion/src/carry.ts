@@ -4,7 +4,14 @@ import * as THREE from 'three';
 import { damp } from './kit';
 import { ITEMS, itemMesh, type ItemType } from './items';
 
-interface Slot { type: ItemType; obj: THREE.Object3D; y: number }
+interface Slot { type: ItemType; obj: THREE.Object3D; y: number; z: number }
+
+/**
+ * Le bord avant de chaque objet s'aligne sur ce plan (un peu devant la racine de la pile) :
+ * la pile s'appuie contre le dos sans le traverser, quelle que soit la profondeur de l'objet.
+ */
+const FRONT = 0.02;
+const box = new THREE.Box3();
 
 export class Stack {
   readonly root = new THREE.Group();
@@ -44,11 +51,15 @@ export class Stack {
     if (this.full) return null;
     const obj = itemMesh(t);
     const y = this.slots.reduce((a, s) => a + ITEMS[s.type].h, 0);
-    obj.position.y = y;
-    obj.scale.setScalar(1.35);
     obj.rotation.y = (Math.random() - 0.5) * 0.25;
+    obj.updateMatrixWorld(true);
+    box.setFromObject(obj);
+    const z = box.isEmpty() ? obj.position.z : obj.position.z + FRONT - box.max.z;
+    obj.position.y = y;
+    obj.position.z = z;
+    obj.scale.setScalar(1.35);
     this.root.add(obj);
-    this.slots.push({ type: t, obj, y });
+    this.slots.push({ type: t, obj, y, z });
     this.wobble = 1;
     return obj;
   }
@@ -90,7 +101,7 @@ export class Stack {
     this.slots.forEach((s, i) => {
       const f = n > 1 ? i / Math.max(8, n) : 0;
       s.obj.position.y = damp(s.obj.position.y, s.y, 16, dt);
-      s.obj.position.z = this.lean * f * i * 0.35;
+      s.obj.position.z = s.z + this.lean * f * i * 0.35;
       s.obj.rotation.x = this.lean * f * 1.4 + Math.sin(walkPhase * 0.5 + i * 0.5) * 0.04 * speedK;
       const pop = i === n - 1 ? 1 + this.wobble * 0.35 : 1;
       s.obj.scale.setScalar(damp(s.obj.scale.x, pop, 14, dt));

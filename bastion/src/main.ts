@@ -11,7 +11,7 @@ import {
 import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type HelperCtx, type Job } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
-import { box, damp, easeOutBack, glow, rbox } from './kit';
+import { LOOK, box, damp, easeOutBack, glow, rbox } from './kit';
 import { CAMP, L, insideFarm, insideStation } from './layout';
 import { regions, type NavState } from './nav';
 import { Palisade, TIERS, logsNeeded, stateOf, unitHp, type Section } from './palisade';
@@ -50,22 +50,42 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// Courbe de tons maison (la Neutral de Khronos sans son ecrasement des noirs) : les teintes
+// des modeles restent franches et fideles, l'epaule n'adoucit que les hautes lumieres, les
+// ombres et la nuit restent lisibles. Calculee dans chaque shader : aucun post-traitement.
+THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
+  'vec3 CustomToneMapping( vec3 color ) { return color; }',
+  `vec3 CustomToneMapping( vec3 color ) {
+	color *= toneMappingExposure;
+	float peak = max( color.r, max( color.g, color.b ) );
+	if ( peak < 0.76 ) return color;
+	float np = 1.0 - 0.0576 / ( peak - 0.52 );
+	color *= np / peak;
+	float g = 1.0 - 1.0 / ( 0.15 * ( peak - np ) + 1.0 );
+	return mix( color, vec3( np ), g );
+}`,
+);
+renderer.toneMapping = THREE.CustomToneMapping;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 220);
 
-// Ciel voile, lumiere chaude et un peu poussiereuse : le monde d'apres, pas une carte postale.
+// Jour : soleil chaud et ciel de remplissage frais (ombres douces, jamais bouchees), sol qui
+// renvoie une lumiere chaude par en dessous. Nuit : bleu profond mais lisible, contours
+// eclaires par la lune (lisere de kit.ts). rim = couleur * force du lisere.
 const DAY = {
-  sky: new THREE.Color(0xbfd2cf), hemiSky: new THREE.Color(0xf6e9d2), hemiGround: new THREE.Color(0x6f7a45),
-  hemi: 1.35, sunColor: new THREE.Color(0xffd9a8), sun: 3.05, fogNear: 12, fogFar: 62, exposure: 1.04,
+  sky: new THREE.Color(0xc4d7d0), hemiSky: new THREE.Color(0xe4e8e8), hemiGround: new THREE.Color(0x8f7d58),
+  hemi: 2.1, sunColor: new THREE.Color(0xffe6c4), sun: 2.5, fogNear: 12, fogFar: 62, exposure: 1.0,
+  rim: new THREE.Color(0xffe6c4).multiplyScalar(0.42),
 };
 const NIGHT = {
-  sky: new THREE.Color(0x0c1526), hemiSky: new THREE.Color(0x30487a), hemiGround: new THREE.Color(0x0b1220),
-  hemi: 0.55, sunColor: new THREE.Color(0x9db8ff), sun: 0.45, fogNear: -2, fogFar: 20, exposure: 1.1,
+  sky: new THREE.Color(0x101d36), hemiSky: new THREE.Color(0x4064a2), hemiGround: new THREE.Color(0x1a2040),
+  hemi: 0.8, sunColor: new THREE.Color(0xa6ccff), sun: 0.6, fogNear: -2, fogFar: 20, exposure: 1.05,
+  rim: new THREE.Color(0x8fb4ff).multiplyScalar(0.5),
 };
-const DUSK_SKY = new THREE.Color(0xf0a878);
+const DUSK_SKY = new THREE.Color(0xf2a67c);
+const DUSK_RIM = DUSK_SKY.clone().multiplyScalar(0.45);
 
 scene.background = DAY.sky.clone();
 scene.fog = new THREE.Fog(DAY.sky.clone(), 40, 100);
@@ -77,7 +97,9 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 1, far: 70 });
 sun.shadow.bias = -0.0006;
-sun.shadow.normalBias = 0.03;
+sun.shadow.normalBias = 0.035;
+// Ombres portees un peu transparentes : lisibles mais douces, dans l'esprit « jouet ».
+sun.shadow.intensity = 0.86;
 scene.add(sun, sun.target);
 
 // ================================================================ monde
@@ -2974,6 +2996,7 @@ function applyLighting(t: number, dusk: number, time: number): void {
   sun.color.copy(lerpC(DAY.sunColor, NIGHT.sunColor)).lerp(DUSK_SKY, dusk * (1 - t) * 0.5);
   sun.intensity = DAY.sun + (NIGHT.sun - DAY.sun) * t;
   renderer.toneMappingExposure = DAY.exposure + (NIGHT.exposure - DAY.exposure) * t;
+  LOOK.rim.value.copy(lerpC(DAY.rim, NIGHT.rim)).lerp(DUSK_RIM, dusk * (1 - t) * 0.6);
 
   for (const nl of world.nightLights) {
     const flick = nl.flicker ? 1 + Math.sin(time * 13) * nl.flicker * 0.5 + Math.sin(time * 29) * nl.flicker * 0.3 : 1;

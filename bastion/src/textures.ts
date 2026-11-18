@@ -59,7 +59,10 @@ function grain(ctx: CanvasRenderingContext2D, size: number, r: () => number, amp
   ctx.putImageData(img, 0, 0);
 }
 
-/** Herbe : plaques seches et plus vertes, brins, grain. Multipliee par la couleur du sol. */
+/**
+ * Herbe : grandes plaques douces (seches, plus vertes), touffes de brins, grain discret.
+ * Multipliee par la couleur du sol. Assez douce pour l'ombrage lisse : pas de bruit criard.
+ */
 export function grassTexture(repeat: number): THREE.CanvasTexture {
   const S = 256;
   const c = document.createElement('canvas');
@@ -68,22 +71,33 @@ export function grassTexture(repeat: number): THREE.CanvasTexture {
   const r = rng(11);
   ctx.fillStyle = '#ececec';
   ctx.fillRect(0, 0, S, S);
-  for (let i = 0; i < 26; i++) blotch(ctx, S, r() * S, r() * S, 20 + r() * 50, r() < 0.5 ? 'rgba(255,236,170,0.35)' : 'rgba(150,190,120,0.35)');
-  for (let i = 0; i < 18; i++) blotch(ctx, S, r() * S, r() * S, 8 + r() * 18, 'rgba(110,120,70,0.28)');
-  // Brins d'herbe : petits traits fonces et clairs.
-  ctx.lineWidth = 1.2;
-  for (let i = 0; i < 900; i++) {
-    const x = r() * S;
-    const y = r() * S;
-    const a = -Math.PI / 2 + (r() - 0.5) * 0.9;
-    const l = 3 + r() * 5;
-    ctx.strokeStyle = r() < 0.6 ? 'rgba(80,100,50,0.35)' : 'rgba(255,255,220,0.35)';
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
-    ctx.stroke();
+  for (let i = 0; i < 26; i++) blotch(ctx, S, r() * S, r() * S, 24 + r() * 56, r() < 0.5 ? 'rgba(255,236,170,0.32)' : 'rgba(150,196,120,0.32)');
+  for (let i = 0; i < 18; i++) blotch(ctx, S, r() * S, r() * S, 10 + r() * 20, 'rgba(110,124,70,0.22)');
+  // Brins d'herbe par petites touffes : un trait sombre, un reflet clair a cote.
+  ctx.lineWidth = 1.3;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 260; i++) {
+    const cx = r() * S;
+    const cy = r() * S;
+    const n = 2 + Math.floor(r() * 3);
+    for (let k = 0; k < n; k++) {
+      const x = cx + (r() - 0.5) * 6;
+      const y = cy + (r() - 0.5) * 3;
+      const a = -Math.PI / 2 + (r() - 0.5) * 1.0;
+      const l = 3 + r() * 5;
+      ctx.strokeStyle = 'rgba(78,100,50,0.3)';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,225,0.3)';
+      ctx.beginPath();
+      ctx.moveTo(x + 1, y);
+      ctx.lineTo(x + 1 + Math.cos(a) * l * 0.7, y + Math.sin(a) * l * 0.7);
+      ctx.stroke();
+    }
   }
-  grain(ctx, S, r, 0.12);
+  grain(ctx, S, r, 0.07);
   return finish(c, repeat);
 }
 
@@ -96,20 +110,29 @@ export function dirtTexture(repeat: number): THREE.CanvasTexture {
   const r = rng(23);
   ctx.fillStyle = '#ededed';
   ctx.fillRect(0, 0, S, S);
-  for (let i = 0; i < 22; i++) blotch(ctx, S, r() * S, r() * S, 18 + r() * 46, r() < 0.55 ? 'rgba(120,90,60,0.25)' : 'rgba(255,240,210,0.35)');
+  for (let i = 0; i < 22; i++) blotch(ctx, S, r() * S, r() * S, 20 + r() * 50, r() < 0.55 ? 'rgba(120,90,60,0.22)' : 'rgba(255,240,210,0.32)');
   for (let i = 0; i < 260; i++) {
     const x = r() * S;
     const y = r() * S;
     const rad = 0.8 + r() * 2.2;
     const light = r() < 0.5;
     wrapped(S, x, y, rad, (px, py) => {
-      ctx.fillStyle = light ? 'rgba(255,250,235,0.7)' : 'rgba(90,70,50,0.45)';
+      // Caillou arrondi : ombre portee decalee puis dessus clair (lisible de haut, sans bruit).
+      const ry = rad * (0.6 + r() * 0.4);
+      const rot = r() * 3;
+      if (light) {
+        ctx.fillStyle = 'rgba(90,70,50,0.25)';
+        ctx.beginPath();
+        ctx.ellipse(px + 0.6, py + 0.8, rad, ry, rot, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = light ? 'rgba(255,250,235,0.65)' : 'rgba(90,70,50,0.38)';
       ctx.beginPath();
-      ctx.ellipse(px, py, rad, rad * (0.6 + r() * 0.4), r() * 3, 0, Math.PI * 2);
+      ctx.ellipse(px, py, rad, ry, rot, 0, Math.PI * 2);
       ctx.fill();
     });
   }
-  grain(ctx, S, r, 0.16);
+  grain(ctx, S, r, 0.1);
   return finish(c, repeat);
 }
 
@@ -122,8 +145,12 @@ export function rippleTexture(): THREE.CanvasTexture {
   const r = rng(5);
   ctx.fillStyle = '#808080';
   ctx.fillRect(0, 0, S, S);
-  for (let i = 0; i < 60; i++) {
-    blotch(ctx, S, r() * S, r() * S, 6 + r() * 16, r() < 0.5 ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)');
+  // Relief doux : de grandes ondulations puis quelques petites, sans pointes.
+  for (let i = 0; i < 24; i++) {
+    blotch(ctx, S, r() * S, r() * S, 14 + r() * 22, r() < 0.5 ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)');
+  }
+  for (let i = 0; i < 50; i++) {
+    blotch(ctx, S, r() * S, r() * S, 5 + r() * 10, r() < 0.5 ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)');
   }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = THREE.RepeatWrapping;
@@ -145,7 +172,10 @@ export function planarUV(g: THREE.BufferGeometry, scale: number): void {
 }
 
 let dirtMat: THREE.MeshLambertMaterial | null = null;
-/** Terre battue du camp (non fusionnee avec le decor : elle garde ses coordonnees de texture). */
+/**
+ * Terre battue du camp (non fusionnee avec le decor : elle garde ses coordonnees de texture).
+ * Materiau de sol : volontairement SANS l'ombrage d'ambiance de kit.ts (ni contact, ni lisere).
+ */
 export function campDirt(color: number): THREE.MeshLambertMaterial {
   if (!dirtMat) dirtMat = new THREE.MeshLambertMaterial({ color, map: dirtTexture(1) });
   return dirtMat;

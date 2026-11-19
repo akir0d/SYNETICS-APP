@@ -94,15 +94,20 @@ export class Particles {
   }
 
   update(dt: number): void {
+    // Au repos (aucune particule), rien n'est envoye au GPU ni dessine.
+    let hi = -1;
+    let dirty = false;
     for (let i = 0; i < CAP; i++) {
       const p = this.ps[i]!;
       if (!p.alive) continue;
+      dirty = true;
       p.life += dt;
       if (p.life >= p.max) {
         p.alive = false;
         this.mesh.setMatrixAt(i, this.m4.makeScale(0, 0, 0));
         continue;
       }
+      hi = i;
       p.vel.y -= p.gravity * dt;
       p.pos.addScaledVector(p.vel, dt);
       if (p.pos.y < 0.05) {
@@ -121,7 +126,8 @@ export class Particles {
       this.m4.compose(p.pos, this.q, this.s);
       this.mesh.setMatrixAt(i, this.m4);
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.count = hi + 1;
+    if (dirty) this.mesh.instanceMatrix.needsUpdate = true;
   }
 }
 

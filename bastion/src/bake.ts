@@ -84,6 +84,10 @@ function colored(m: THREE.Mesh, material: THREE.MeshLambertMaterial, rel: THREE.
  * avec le sol), quelle que soit la variete des teintes. Les autres materiaux partages
  * (emissifs, plats, textures) sont fusionnes par materiau.
  */
+/** Cote des tuiles du decor fusionne (unites du monde). */
+const TILE = 16;
+const tmpSize = new THREE.Vector3();
+
 export function bakeStatic(scene: THREE.Scene, keep: Set<THREE.Object3D>): number {
   scene.updateMatrixWorld(true);
   const buckets = new Map<string, { material: THREE.Material; cast: boolean; receive: boolean; geos: THREE.BufferGeometry[] }>();
@@ -95,6 +99,16 @@ export function bakeStatic(scene: THREE.Scene, keep: Set<THREE.Object3D>): numbe
     if (m.isMesh && !(m as THREE.InstancedMesh).isInstancedMesh && !Array.isArray(m.material)) {
       const material = m.material as THREE.Material;
       if (material.userData.shared && !material.transparent) {
+        // Les toutes petites pieces (boulons, fils, capuchons) ne projettent pas d'ombre :
+        // invisible vu de haut, et autant de triangles en moins dans la passe d'ombre.
+        if (m.castShadow) {
+          if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+          m.geometry.boundingBox!.getSize(tmpSize);
+          if (Math.max(tmpSize.x, tmpSize.y, tmpSize.z) * m.matrixWorld.getMaxScaleOnAxis() < 0.2) m.castShadow = false;
+        }
+        // Une fusion par tuile de terrain : ce qui est hors champ (ou hors de l'ombre) est ecarte.
+        const e = m.matrixWorld.elements;
+        const tile = `${Math.floor(e[12]! / TILE)},${Math.floor(e[14]! / TILE)}`;
         let g: THREE.BufferGeometry;
         let target: THREE.Material;
         let key: string;
@@ -102,13 +116,13 @@ export function bakeStatic(scene: THREE.Scene, keep: Set<THREE.Object3D>): numbe
           const lk = isLook(material);
           target = lk ? colorMat : groundColorMat;
           g = colored(m, material, m.matrixWorld, lk ? 0.03 : 0);
-          key = `${lk ? 'vc' : 'vg'}|${m.castShadow}|${m.receiveShadow}`;
+          key = `${lk ? 'vc' : 'vg'}|${m.castShadow}|${m.receiveShadow}|${tile}`;
         } else {
           // Un materiau a couleurs de sommets garde ses couleurs.
           target = material;
           g = strip(m, !!(material as THREE.MeshLambertMaterial).vertexColors);
           g.applyMatrix4(m.matrixWorld);
-          key = `${material.uuid}|${m.castShadow}|${m.receiveShadow}`;
+          key = `${material.uuid}|${m.castShadow}|${m.receiveShadow}|${tile}`;
         }
         let b = buckets.get(key);
         if (!b) {

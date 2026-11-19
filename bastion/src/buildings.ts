@@ -504,6 +504,14 @@ export function watchTower(scene: THREE.Scene, x: number = L.tower.x, z: number 
   }
   const t = hidden(g, x, z);
   scene.add(t);
+  if (withLight) {
+    // Le projecteur vit dans la scene des le depart (eteint tant que la tour est en ruine) :
+    // le nombre de lumieres visibles ne change jamais, donc aucun shader n'est recompile
+    // d'un coup au moment ou l'on releve la tour.
+    t.updateMatrixWorld(true);
+    scene.attach(light);
+    scene.attach(light.target);
+  }
   return { group: t, light, glowMats: withLight ? [lampMat] : [], live: withLight ? [lamp] : [], muzzle: new THREE.Vector3(x + 0.3, legH + 1.0, z + 0.4) };
 }
 

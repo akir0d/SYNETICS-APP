@@ -360,11 +360,10 @@ function ground(scene: THREE.Scene, r: () => number): void {
   for (const [x, z, rx, rz] of tracks) patch(scene, x, z, rx, rz, C.dirt, 0.012, r);
 
   const COUNT = 1000;
-  const tufts = new THREE.InstancedMesh(tuftGeo(), vmat(), COUNT);
+  const tufts: Inst[] = [];
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
-  const col = new THREE.Color();
   // Plusieurs verts voisins, un ou deux blonds : des touffes douces, jamais un aplat.
   const greens = [0x6f8a3e, 0x80994a, 0xa1b35e, 0xb5aa6c, 0x92a157];
   const onRoad = (z: number) => Math.abs(z - ROAD_Z) < 3.4;
@@ -385,17 +384,14 @@ function ground(scene: THREE.Scene, r: () => number): void {
     q.setFromEuler(e);
     const s = 0.6 + r() * 0.9;
     m4.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(s, s * (0.8 + r() * 0.8), s));
-    tufts.setMatrixAt(n, m4);
-    tufts.setColorAt(n, col.setHex(greens[Math.floor(r() * greens.length)]!));
+    tufts.push({ m: m4.clone(), c: greens[Math.floor(r() * greens.length)]!, x, z });
     n++;
   }
-  tufts.count = n;
-  tufts.receiveShadow = true;
-  scene.add(tufts);
+  tiledInstances(scene, tuftGeo(), tufts, true);
 
   // Quelques fleurs sauvages, discretes, hors du camp.
   const FL = 140;
-  const flowers = new THREE.InstancedMesh(flowerGeo(), vmat(), FL);
+  const flowers: Inst[] = [];
   const petals = [0xf2eee0, 0xe8d27a, 0xb8a6d9];
   n = 0;
   let guard = 0;
@@ -409,13 +405,38 @@ function ground(scene: THREE.Scene, r: () => number): void {
       if (insideCamp(x, z) || Math.abs(x) < 21 && Math.abs(z) < 13 || onRoad(z)) continue;
       q.setFromEuler(e.set(0, n * 1.7, 0));
       m4.compose(new THREE.Vector3(x, 0.16 + r() * 0.1, z), q, new THREE.Vector3(1, 0.7, 1));
-      flowers.setMatrixAt(n, m4);
-      flowers.setColorAt(n, col.setHex(c));
+      flowers.push({ m: m4.clone(), c, x, z });
       n++;
     }
   }
-  flowers.count = n;
-  scene.add(flowers);
+  tiledInstances(scene, flowerGeo(), flowers, false);
+}
+
+interface Inst { m: THREE.Matrix4; c: number; x: number; z: number }
+/**
+ * Repartit des instances (herbe, fleurs) par tuiles de terrain : chaque tuile a sa sphere
+ * englobante, donc seules celles a l'ecran (ou dans l'ombre) sont dessinees.
+ */
+function tiledInstances(scene: THREE.Scene, geo: THREE.BufferGeometry, list: Inst[], receive: boolean): void {
+  const TILE = 24;
+  const tiles = new Map<string, Inst[]>();
+  for (const it of list) {
+    const k = `${Math.floor(it.x / TILE)},${Math.floor(it.z / TILE)}`;
+    let t = tiles.get(k);
+    if (!t) tiles.set(k, (t = []));
+    t.push(it);
+  }
+  const col = new THREE.Color();
+  for (const t of tiles.values()) {
+    const mesh = new THREE.InstancedMesh(geo, vmat(), t.length);
+    t.forEach((it, i) => {
+      mesh.setMatrixAt(i, it.m);
+      mesh.setColorAt(i, col.setHex(it.c));
+    });
+    mesh.computeBoundingSphere();
+    mesh.receiveShadow = receive;
+    scene.add(mesh);
+  }
 }
 
 function road(scene: THREE.Scene, r: () => number): void {

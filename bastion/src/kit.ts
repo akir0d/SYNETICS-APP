@@ -627,11 +627,10 @@ export function cone(r: number, h: number, color: number | THREE.Material, seg =
 /** Galet rond et doux, a peine irregulier (rochers, buissons, petites boules). */
 export function blob(r: number, color: number | THREE.Material, x = 0, y = 0, z = 0, detail = 0): THREE.Mesh {
   const d = Math.max(detail, icoDetail(r));
-  const g = cached(`i${r},${d}`, () => {
-    const l = lumpyGeo(d, Math.round(r * 1000), 0.1, 0.92, 5);
-    l.scale(r, r, r);
-    return l;
-  });
+  // Forme unite en cache (8 variantes par finesse), puis simple mise a l'echelle : la
+  // deformation (couteuse au chargement) n'est calculee qu'une fois par variante.
+  const v = Math.round(r * 1000) % 8;
+  const g = cached(`i${r},${d}`, () => cached(`iu${v},${d}`, () => lumpyGeo(d, v, 0.1, 0.92, 5)).clone().scale(r, r, r));
   return mesh(g, M(color), x, y, z);
 }
 
@@ -651,11 +650,7 @@ export function sphere(r: number, color: number | THREE.Material, x = 0, y = 0, 
  */
 export function puff(r: number, color: number | THREE.Material, x = 0, y = 0, z = 0, seed = 0, lump = 0.22): THREE.Mesh {
   const d = r < 0.3 ? 1 : r < 0.8 ? 2 : 3;
-  const g = cached(`pf${r},${seed},${lump},${d}`, () => {
-    const l = lumpyGeo(d, seed + 101, lump, 0.8, 7);
-    l.scale(r, r, r);
-    return l;
-  });
+  const g = cached(`pf${r},${seed},${lump},${d}`, () => cached(`pfu${seed},${lump},${d}`, () => lumpyGeo(d, seed + 101, lump, 0.8, 7)).clone().scale(r, r, r));
   return mesh(g, M(color), x, y, z);
 }
 

@@ -47,7 +47,10 @@ const boot = (step: string) => (window as unknown as { __bootStep?: (s: string) 
 boot('rendu 3D');
 const app = document.getElementById('app')!;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+/** Resolution : pleine sur un bon telephone, reduite d'un cran si les images ralentissent. */
+const PR_MAX = Math.min(window.devicePixelRatio, 1.75);
+const PR_STEPS = [PR_MAX, Math.min(PR_MAX, 1.4), Math.min(PR_MAX, 1.15)];
+renderer.setPixelRatio(PR_MAX);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // Courbe de tons maison (la Neutral de Khronos sans son ecrasement des noirs) : les teintes
@@ -102,8 +105,11 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(DAY.sunColor, DAY.sun);
 const SUN_OFFSET = new THREE.Vector3(-14, 22, 10);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 1, far: 70 });
+// Boite d'ombre ajustee a ce que voit la camera (calcul pour portrait et paysage, objets
+// jusqu'a 4 de haut, plus une marge) : deux fois moins de surface que la boite carree,
+// donc une carte plus petite pour la meme nettete.
+sun.shadow.mapSize.set(1536, 1536);
+Object.assign(sun.shadow.camera, { left: -23, right: 15, top: 18.5, bottom: -11.5, near: 1, far: 70 });
 sun.shadow.bias = -0.0006;
 sun.shadow.normalBias = 0.035;
 // Ombres portees un peu transparentes : lisibles mais douces, dans l'esprit « jouet ».
@@ -1971,6 +1977,9 @@ let pumpClock = 0;
 /** Temps passe immobile : on ne depose rien tant qu'on n'est pas reste 0,5 s sur place. */
 let still = 0;
 const SETTLE = 0.5;
+/** Immobile a l'etal aussi longtemps, on vend meme les materiaux de chantier. */
+const SELL_ALL = 1;
+let stallHint = false;
 
 const near = (x: number, z: number, r: number) => Math.hypot(player.position.x - x, player.position.z - z) < r;
 
@@ -2118,14 +2127,21 @@ function interact(dt: number): void {
     }
   }
 
-  // Deposer a l'etal tout ce qui se vend.
-  if (settled && dropClock <= 0 && near(L.shelf.x, L.shelf.z, 1.6)) {
-    const item = player.stack.take((t) => shelfRoom(t) > 0 && sellable(t));
+  // Deposer a l'etal tout ce qui se vend. Les materiaux qu'un chantier attend sont gardes,
+  // sauf si l'on reste immobile un peu plus longtemps : alors tout part a la vente.
+  const atStall = near(L.shelf.x, L.shelf.z, 1.6);
+  if (!atStall) stallHint = false;
+  if (settled && dropClock <= 0 && atStall) {
+    const sellAll = still >= SELL_ALL;
+    const item = player.stack.take((t) => shelfRoom(t) > 0 && (sellAll || sellable(t)));
     if (item) {
       dropClock = 0.08;
       putOnShelf(item.type, item.pos);
       save.stats.shelved++;
       sfx.sfxDrop(market.bins.total);
+    } else if (!sellAll && !stallHint && player.stack.slots.some((x) => shelfRoom(x.type) > 0 && !sellable(x.type))) {
+      stallHint = true;
+      toast(`🧺 Matériaux gardés pour tes chantiers : reste encore ${Math.ceil(SELL_ALL - still)} s pour les vendre aussi`);
     }
   }
   // Reparer la palissade : immobile le long d'un troncon abime, avec des rondins.
@@ -3181,6 +3197,61 @@ let lastPersist = performance.now();
 const SIM = { scale: 1 };
 
 let firstFrame = true;
+/**
+ * Compile d'avance tous les shaders, y compris ceux de ce qui est encore cache (batiments en
+ * ruine, zombies, evenements, etats de la palissade) : sinon chaque premiere apparition
+ * fige le jeu un instant sur un telephone sans compilation en parallele.
+ */
+function precompile(): void {
+  const shown: THREE.Object3D[] = [];
+  scene.traverse((o) => {
+    if (o.visible || (o as THREE.Light).isLight) return;
+    o.visible = true;
+    shown.push(o);
+  });
+  try {
+    renderer.compile(scene, camera);
+  } catch (err) {
+    console.error(err);
+  }
+  for (const o of shown) o.visible = false;
+}
+
+// ---- resolution adaptative : moyenne des images sur 2 s ; deux fenetres lentes de suite
+// (> 19 ms, moins de 50 i/s) font baisser la resolution d'un cran, trois fenetres tres
+// rapides (< 14 ms) la remontent. Rien ne change sur un telephone qui tient la cadence.
+let prLevel = 0;
+let perfAcc = 0;
+let perfN = 0;
+let perfLast = 0;
+let perfSlow = 0;
+let perfFast = 0;
+const perfStart = performance.now();
+function adaptResolution(): void {
+  const now = performance.now();
+  const d = now - perfLast;
+  perfLast = now;
+  // Pas de mesure pendant le chargement, sous une fenetre, ni apres une pause de l'appli.
+  if (d <= 0 || d > 100 || now - perfStart < 5000 || paused()) return;
+  perfAcc += d;
+  perfN++;
+  if (perfAcc < 2000) return;
+  const avg = perfAcc / perfN;
+  perfAcc = 0;
+  perfN = 0;
+  perfSlow = avg > 19 ? perfSlow + 1 : 0;
+  perfFast = avg < 14 ? perfFast + 1 : 0;
+  let next = prLevel;
+  if (perfSlow >= 2 && prLevel < PR_STEPS.length - 1) next = prLevel + 1;
+  else if (perfFast >= 3 && prLevel > 0) next = prLevel - 1;
+  if (next === prLevel) return;
+  prLevel = next;
+  perfSlow = 0;
+  perfFast = 0;
+  renderer.setPixelRatio(PR_STEPS[prLevel]!);
+  resize();
+}
+
 let frameErrors = 0;
 function frame(): void {
   // On reprogramme d'abord : une erreur dans une image ne doit jamais figer le jeu.
@@ -3302,6 +3373,7 @@ function drawFrame(): void {
     (window as unknown as { __bootDone?: () => void }).__bootDone?.();
   }
 
+  adaptResolution();
   // Sauvegarde reguliere, en temps reel (independante de la fluidite).
   if (performance.now() - lastPersist > 4000) { lastPersist = performance.now(); persist(); }
 }
@@ -3347,6 +3419,8 @@ if (save.cycle && save.phase === 'night') {
 if (save.convoyAt > 0) bus.root.visible = false;
 boot('gains hors ligne');
 offlineGains();
+boot('shaders');
+precompile();
 requestAnimationFrame(frame);
 
 // Acces pour les tests automatiques.

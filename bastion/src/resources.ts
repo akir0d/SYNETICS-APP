@@ -57,6 +57,9 @@ export class Bed {
       }
     }
     shadow(g);
+    // Les plantes recoivent les ombres mais n'en projettent pas : invisible vu de haut, et
+    // ~150 appels de dessin en moins dans la passe d'ombre (le cadre et la terre gardent la leur).
+    for (const p of this.plants) p.obj.traverse((o) => { o.castShadow = false; });
     g.position.set(x, 0, z);
     g.visible = false;
     scene.add(g);

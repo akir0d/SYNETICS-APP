@@ -790,7 +790,7 @@ export function foundry(): Building {
       else out.copy(brick).lerp(soot, Math.max(0, Math.min(1, (y - 1.25) / 0.7)));
     }),
     cyl(1.14, 1.14, 0.07, IRON, 8, -0.6, 0.62, 0), cyl(1.13, 1.13, 0.07, IRON, 8, -0.6, 1.0, 0),
-    box(0.76, 0.08, 0.1, IRON, -0.6, 0.86, 1.1), box(0.08, 0.5, 0.1, IRON, -0.94, 0.6, 1.08), box(0.08, 0.5, 0.1, IRON, -0.26, 0.6, 1.08),
+    box(0.76, 0.08, 0.1, IRON, -0.6, 0.88, 1.19), box(0.08, 0.5, 0.1, IRON, -0.94, 0.6, 1.17), box(0.08, 0.5, 0.1, IRON, -0.26, 0.6, 1.17),
     rot(plank(0.5, 0.42, 0.04, IRON, -0.02, 0.6, 1.3), 0, -1.1),
   ));
   // La cheminee : brique, puis tuyau d'acier coiffe.
@@ -800,7 +800,7 @@ export function foundry(): Building {
     rcone(0.36, 0.2, IRON, 0.3, -0.6, 4.55, -0.3),
   ));
   const fireMat = uniqueMat(0xff8a2a, 0xff5a10);
-  const mouth = box(0.6, 0.45, 0.06, fireMat, -0.6, 0.6, 1.08);
+  const mouth = box(0.6, 0.45, 0.06, fireMat, -0.6, 0.6, 1.16);
   g.add(mouth);
   // L'enclume sur sa souche, le bac de trempe, les lingots, le tas de charbon.
   g.add(group(

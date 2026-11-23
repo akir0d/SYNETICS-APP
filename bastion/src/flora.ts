@@ -243,10 +243,10 @@ export function pine(r: () => number): THREE.Group {
   const g = group(vmesh(trunkGeo(0.2, 0.13, 1.0, 14, 5, q() * 6, C.bark)));
   // Trois etages : le bas plus sombre, le haut plus tendre ; festons et quart de tour varies.
   const tiers: [number, number, number, number, number][] = [
-    // R, H, base y, cotes, festons
-    [1.24, 1.42, 0.62, 22, 8],
-    [0.97, 1.36, 1.4, 20, 7],
-    [0.68, 1.64, 2.2, 16, 6],
+    // R, H, base y, cotes, festons (cotes = 5 x festons : festons reguliers et arrondis)
+    [1.24, 1.42, 0.62, 40, 8],
+    [0.97, 1.36, 1.4, 35, 7],
+    [0.68, 1.64, 2.2, 30, 6],
   ];
   tiers.forEach(([R, H, y, sides, lobes], i) => {
     const c = i === 0 ? mixHex(shade, C.leafDeep, 0.2) : i === 1 ? shade : mixHex(shade, C.pineLight, 0.45);

@@ -125,12 +125,17 @@ function pikeMesh(r: number, body: number, tone: number, bands: number[], sides 
   const ht = body;
   const h = body + tip;
   const bs = bands.filter((b) => b > 0.2 && b < ht - 0.15);
-  const prof: [number, number][] = [[r * 1.04, -0.05]];
+  // Pied ferme (pole) : visible quand le pieu est couche (rondin tombe, porte defoncee).
+  const prof: [number, number][] = [[0, -0.05], [r * 1.04, -0.05]];
   for (const b of bs) prof.push([r * (1.02 - (0.04 * b) / h), b - 0.06], [r + 0.032, b], [r * (1.02 - (0.04 * b) / h), b + 0.06]);
   prof.push([r * 0.97, ht - 0.035], [r * 0.93, ht], [r * 0.6, ht + tip * 0.42], [r * 0.27, ht + tip * 0.78], [0.028, h - 0.012], [0, h]);
   const m = lathe(prof, 0xffffff, 0, 0, 0, sides);
   const rope = new THREE.Color(ROPE);
   return paint(m, `pk${tone}|${bs.join(',')}|${ht.toFixed(3)}`, (x, y, z, out) => {
+    if (y < -0.045 && Math.hypot(x, z) < r * 0.5) {
+      out.copy(cutB);
+      return;
+    }
     if (y > ht - 0.005) {
       out.lerpColors(cutA, cutB, Math.min(1, (y - ht) / (tip * 0.5)));
       return;

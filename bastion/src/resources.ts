@@ -310,7 +310,7 @@ function stumpModel(): THREE.Mesh {
       [0.255, 0.3, 0.95, 0.02],
       [0.25, 0.37, 1.05, 0.02],
       [0.226, 0.395, 1.12],
-    ], 14, C.bark, 5, 0.4)));
+    ], 20, C.bark, 5, 0.4)));
     // La coupe : des anneaux alternes clair / fonce, le coeur plus sombre.
     g.add(vmesh(revolveGeo([
       [0.226, 0.394, 0.8],
@@ -320,7 +320,7 @@ function stumpModel(): THREE.Mesh {
       [0.085, 0.401, 0.88],
       [0.045, 0.402, 1.04],
       [0, 0.403, 0.78],
-    ], 14, 0xe9c48e)));
+    ], 20, 0xe9c48e)));
     const q = rng(5);
     for (let i = 0; i < 5; i++) {
       const a = i * 1.3 + q();

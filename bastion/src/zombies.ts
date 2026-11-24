@@ -303,11 +303,12 @@ export class Horde {
     z.speed = z.brute ? 1.0 : 1.3 + Math.random() * 0.9;
   }
 
-  nearest(p: THREE.Vector3, range: number): Zombie | null {
+  /** Le plus proche dans le rayon ; maxX ecarte ceux trop a l'est (tours de la ferme). */
+  nearest(p: THREE.Vector3, range: number, maxX = Infinity): Zombie | null {
     let best: Zombie | null = null;
     let bd = range;
     for (const z of this.zs) {
-      if (z.state !== 'walking') continue;
+      if (z.state !== 'walking' || z.root.position.x >= maxX) continue;
       const d = z.root.position.distanceTo(p);
       if (d < bd) { bd = d; best = z; }
     }

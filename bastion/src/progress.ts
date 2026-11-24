@@ -165,6 +165,11 @@ export interface Save {
   farmLv: number;
   /** Points de vie de chaque troncon de la palissade de la ferme. */
   farmWalls?: number[];
+  // ---- chasseurs de prime
+  /** Chasseurs recrutes a l'armurerie (dans l'ordre des places) et la zone que chacun defend. */
+  hunters: ('camp' | 'farm')[];
+  /** Jour dont la nuit est defendue par un chasseur de passage (renfort par pub), 0 sinon. */
+  merc: number;
 }
 
 export interface Stock {
@@ -208,7 +213,7 @@ export function freshSave(): Save {
     wallTier: 1, bt: {}, wonDay: 0, objT: [],
     ads: { key: '', n: {} }, login: { step: 0, last: '', total: 0 }, questBonus: '', contracts: {}, firstBuy: false,
     monthly: { until: 0, last: '' }, clockHigh: Date.now(), seen: [], convoys: 0, convoyAt: 0, renown: 0,
-    farmLv: 0,
+    farmLv: 0, hunters: [], merc: 0,
   };
 }
 
@@ -247,6 +252,8 @@ export function loadSave(): Save {
       clockHigh: typeof d.clockHigh === 'number' ? d.clockHigh : Date.now(),
       farmLv: typeof d.farmLv === 'number' ? Math.max(0, Math.min(2, Math.floor(d.farmLv))) : 0,
       farmWalls: Array.isArray(d.farmWalls) ? d.farmWalls : undefined,
+      hunters: Array.isArray(d.hunters) ? d.hunters.slice(0, 3).map((z) => (z === 'farm' ? 'farm' : 'camp')) : [],
+      merc: typeof d.merc === 'number' ? d.merc : 0,
       // Les parties d'avant les materiaux avaient deja des pieux taillés.
       wallTier: d.wallTier ?? ((d.v ?? 3) < 4 ? 2 : 1),
     };

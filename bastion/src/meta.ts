@@ -130,9 +130,9 @@ export const CHEST_EVERY = 4 * 3600 * 1000;
  * pour qu'elles restent un coup de pouce, pas une source infinie. « Sans pub » saute la video
  * mais garde les memes plafonds.
  */
-export type AdSpot = 'gems' | 'chest' | 'boost_sell' | 'boost_grow' | 'boost_speed' | 'offline' | 'ko' | 'drop' | 'caravan' | 'convoy';
+export type AdSpot = 'gems' | 'chest' | 'boost_sell' | 'boost_grow' | 'boost_speed' | 'offline' | 'ko' | 'drop' | 'caravan' | 'convoy' | 'hunter';
 export const AD_CAPS: Record<AdSpot, number> = {
-  gems: 5, chest: 2, boost_sell: 3, boost_grow: 3, boost_speed: 3, offline: 6, ko: 6, drop: 3, caravan: 2, convoy: 2,
+  gems: 5, chest: 2, boost_sell: 3, boost_grow: 3, boost_speed: 3, offline: 6, ko: 6, drop: 3, caravan: 2, convoy: 2, hunter: 1,
 };
 export const AD_DAY_MAX = 20;
 export const GEMS_PER_AD = 3;

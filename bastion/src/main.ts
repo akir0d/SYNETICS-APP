@@ -10,9 +10,10 @@ import {
 } from './buildings';
 import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type HelperCtx, type Job } from './helpers';
+import { HUNTERS, HUNTER_COST, HUNTER_LV, HUNT_RANGE, Hunter, MERC, type HuntZone, type HunterCtx } from './hunters';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
 import { LOOK, box, damp, easeOutBack, glow, guardShaders, rbox } from './kit';
-import { CAMP, FARM, L, insideFarm, insideStation } from './layout';
+import { CAMP, FARM, L, ROAD_Z, insideFarm, insideStation } from './layout';
 import { regions, type NavState } from './nav';
 import { Palisade, TIERS, logsNeeded, stateOf, unitHp, type Section } from './palisade';
 import type { Segment } from './physics';
@@ -253,11 +254,32 @@ const ui = {
   menuBtn: $('.menu-btn'), menu: $('.menu'), sound: $<HTMLButtonElement>('.menu .m-sound'), reset: $<HTMLButtonElement>('.menu .m-reset'),
 };
 
+/** Instant du dernier toast (temps de jeu) : les astuces attendent que l'ecran soit libre. */
+let toastAt = -99;
+/** Astuces en attente : jamais par-dessus un autre toast, marquees vues seulement une fois montrees. */
+const hintQ: { key: string; msg: string }[] = [];
+
 function toast(msg: string): void {
+  toastAt = save.playTime;
   ui.toast.textContent = msg;
   ui.toast.classList.remove('show');
   void ui.toast.offsetWidth;
   ui.toast.classList.add('show');
+}
+
+function hintLater(key: string, msg: string): void {
+  if (save.seen.includes(key) || hintQ.some((h) => h.key === key)) return;
+  hintQ.push({ key, msg });
+}
+
+/** Une astuce a la fois, une fois le toast precedent fini et hors de la nuit. */
+function drainHints(): void {
+  if (!hintQ.length || save.playTime - toastAt <= 2.8 || (save.cycle && save.phase === 'night')) return;
+  const h = hintQ.shift()!;
+  if (save.seen.includes(h.key)) return;
+  save.seen.push(h.key);
+  toast(h.msg);
+  persist();
 }
 
 function bump(el: HTMLElement): void {
@@ -922,6 +944,8 @@ function buildExt(e: ExtSite): void {
 interface DynPad {
   key: string; x: number; z: number; cost: Cost; icon: string; title: string;
   ring: THREE.Mesh; fill: THREE.Mesh; label: HTMLElement; inflight: number; done: () => void;
+  /** Apparue sous les pieds du joueur : rien n'y part tant qu'il n'en est pas sorti. */
+  armed: boolean;
 }
 const dynPads = new Map<string, DynPad>();
 const repairMat = new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.85, depthWrite: false });
@@ -939,7 +963,7 @@ function makeDyn(key: string, x: number, z: number, cost: Cost, icon: string, ti
   label.className = 'pad-label';
   labels.appendChild(label);
   save.fixPaid[key] ??= { coins: 0 };
-  const dp: DynPad = { key, x, z, cost, icon, title, ring, fill, label, inflight: 0, done };
+  const dp: DynPad = { key, x, z, cost, icon, title, ring, fill, label, inflight: 0, done, armed: !near(x, z, 1.6) };
   renderDyn(dp);
   return dp;
 }
@@ -1092,14 +1116,18 @@ const FARM_WALL: { tier: number; cost: Cost; icon: string; title: string; done: 
 /** Chantier de la palissade : devant l'entree de la ferme, a gauche de la porte, hors du passage. */
 const FARM_WALL_PAD = { x: -38.6, z: 15.8 };
 const FARM_TOWER_COST: Cost = { coins: 3000, plank: 15, scrap: 10 };
-const FARM_TOWER_RANGE = 17;
+const FARM_TOWER_RANGE = 18;
+/** Les tours de la ferme ne visent que le cote ferme (entre son mur est et le mur ouest du camp). */
+const FARM_TOWER_MAXX = FARM.maxX + 2;
 /**
- * Tours de garde de la ferme (apres la palissade) : coin sud-est (porte, route, champs) et
- * coin nord-ouest (moulin, flanc de la foret). Chantiers comme les tours d'angle du camp.
+ * Tours de garde de la ferme (apres la palissade) : au milieu des murs est (champs) et ouest
+ * (moulin, maison). Deux coins laisseraient deux angles hors de portee ; a mi-mur, a 18 m,
+ * elles couvrent toute la palissade. Ids gardes pour les sauvegardes. Chantiers comme les
+ * tours d'angle du camp.
  */
 const farmTowers = [
-  { id: 'farmTowerSE', x: -22.6, z: 13.4, pad: { x: -25.0, z: 15.8 } },
-  { id: 'farmTowerNW', x: -48.4, z: -9.4, pad: { x: -46.4, z: -7.2 } },
+  { id: 'farmTowerSE', x: -22.6, z: 2.0, pad: { x: -24.8, z: 4.5 } },
+  { id: 'farmTowerNW', x: -48.4, z: 2.0, pad: { x: -45.8, z: 3.4 } },
 ].map((t, i) => {
   const tw = watchTower(scene, t.x, t.z, false);
   const site: ExtSite = {
@@ -1208,10 +1236,7 @@ function syncFarmPads(): void {
       shake = Math.max(shake, 0.2);
       renderObjective();
     }));
-    if (fl === 0 && !save.seen.includes('hint:farmwall')) {
-      save.seen.push('hint:farmwall');
-      toast('🪓 Nouveau chantier devant la ferme : une palissade pour protéger les champs');
-    }
+    if (fl === 0) hintLater('hint:farmwall', '🪓 Nouveau chantier devant la ferme : une palissade pour protéger les champs');
   }
   if (fl < 1) return;
   for (const t of farmTowers) {
@@ -1220,6 +1245,265 @@ function syncFarmPads(): void {
     if (isBuilt(e.id) || dynPads.has(k)) continue;
     dynPads.set(k, makeDyn(k, e.pad.x, e.pad.z, e.cost, e.icon, 'Bâtir : tour de garde', () => buildExt(e)));
   }
+}
+
+
+// ---- chasseurs de prime : recrutes a l'armurerie, ils defendent la nuit le camp ou la ferme
+
+/** Zone devant l'armurerie (la ou etait son chantier) : elle ouvre le panneau des chasseurs. */
+const HUNT_PAD = { x: 13.0, z: 4.5 };
+/** Ou ils attendent le jour : pres de l'armurerie ; le chasseur de passage, pres du feu. */
+const HUNT_REST = [{ x: 12.2, z: 2.3 }, { x: 12.2, z: 6.7 }, { x: 11.0, z: 4.5 }];
+const MERC_REST = { x: L.campfire.x - 2.8, z: L.campfire.z + 1.4 };
+/** Le chasseur de passage arrive et repart par la route. */
+const MERC_ROAD = { x: 1.5, z: ROAD_Z + 4 };
+
+const huntRingMat = new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0.85, depthWrite: false });
+const huntRing = new THREE.Mesh(PAD_RING, huntRingMat);
+huntRing.rotation.x = -Math.PI / 2;
+huntRing.position.set(HUNT_PAD.x, 0.05, HUNT_PAD.z);
+huntRing.visible = false;
+scene.add(huntRing);
+const huntLabel = document.createElement('div');
+huntLabel.className = 'pad-label off';
+labels.appendChild(huntLabel);
+
+const hunters: Hunter[] = [];
+let merc: Hunter | null = null;
+/** Dernier troncon frappe de chaque palissade, et quand (temps de jeu) : les chasseurs y courent. */
+const hotWall: Record<HuntZone, { s: Section | null; t: number }> = { camp: { s: null, t: -99 }, farm: { s: null, t: -99 } };
+
+/** Places ouvertes : une avec l'armurerie, deux au camp niveau 3, trois au niveau 4. */
+const huntSlots = () => (isBuilt('armory') ? HUNTER_LV.filter((l) => save.campLv >= l).length : 0);
+/** Un peu plus fort qu'une tour d'angle, moins que le joueur ; il suit la menace et le niveau des tours. */
+const huntDmg = () => 2 + Math.floor(threat() / 4) + lv('tower');
+/** La ferme n'est defendue qu'une fois fortifiee (sinon il reste au camp). */
+const zoneOf = (i: number): HuntZone => (save.hunters[i] === 'farm' && farmWall ? 'farm' : 'camp');
+const mercOn = () => save.cycle && save.merc === save.day;
+const inCampZone = (x: number, z: number) => x > CAMP.minX + 1.2 && x < CAMP.maxX - 1.2 && z > CAMP.minZ + 1.2 && z < CAMP.maxZ - 1.2;
+const inFarmZone = (x: number, z: number) => x > FARM.minX + 1.2 && x < FARM.maxX - 1.2 && z > FARM.minZ + 1.2 && z < FARM.maxZ - 1.2;
+const nowhere = () => false;
+
+const postBuf = { x: 0, z: 0 };
+/**
+ * Poste du k-ieme chasseur d'une zone : derriere le troncon attaque (8 dernieres secondes) ou
+ * le plus abime, sinon la porte nord (camp) ou les champs (ferme). Les suivants s'ecartent.
+ */
+function huntPost(zone: HuntZone, k: number): { x: number; z: number } {
+  const off = k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 2.4;
+  const wall = zone === 'farm' ? farmWall : palisade;
+  const hw = hotWall[zone];
+  let s = hw.s && hw.s.enabled && save.playTime - hw.t < 8 && wall && wall.sections.includes(hw.s) ? hw.s : null;
+  if (!s && wall) {
+    let worst = 0.7;
+    for (const q of wall.sections) if (q.enabled && q.hp / q.max < worst) { worst = q.hp / q.max; s = q; }
+  }
+  if (s) {
+    postBuf.x = s.x + s.nx * 2.4 - s.nz * off;
+    postBuf.z = s.z + s.nz * 2.4 + s.nx * off;
+  } else if (zone === 'farm') {
+    postBuf.x = -32.8;
+    postBuf.z = 1.5 + off;
+  } else {
+    postBuf.x = off;
+    postBuf.z = CAMP.minZ + 2.6;
+  }
+  return postBuf;
+}
+
+const huntCtx: HunterCtx = {
+  walls: world.walls, solids: world.solids, nav: navAll, duty: false, night: false,
+  rest: HUNT_REST[0]!, post: postBuf, inside: inCampZone,
+  target: (from, range) => horde.nearest(from, range),
+  fire: (_h, z, from) => shoot(z, from, huntDmg(), false),
+};
+
+function updateHunters(dt: number): void {
+  const night = save.cycle && save.phase === 'night';
+  // Au crepuscule (30 dernieres secondes du jour), ils partent deja vers leur poste.
+  const duty = night || (save.cycle && save.phase === 'day' && save.phaseT > dayLen(save.day) - 30);
+  if (isBuilt('armory')) hintLater('hint:hunters', '🤠 Devant l’armurerie : recrute des chasseurs de prime pour défendre la nuit');
+  // Recrute (ou relu dans la sauvegarde) : il sort de l'armurerie.
+  while (hunters.length < Math.min(save.hunters.length, HUNTERS.length)) {
+    const r = HUNT_REST[hunters.length]!;
+    hunters.push(new Hunter(scene, HUNTERS[hunters.length]!, r.x, r.z));
+  }
+  let camp = 0;
+  let farm = 0;
+  huntCtx.night = night;
+  huntCtx.duty = duty;
+  hunters.forEach((h, i) => {
+    const zone = zoneOf(i);
+    huntCtx.rest = HUNT_REST[i]!;
+    huntCtx.post = huntPost(zone, zone === 'farm' ? farm++ : camp++);
+    huntCtx.inside = !duty ? inCampZone : zone === 'farm' ? inFarmZone : inCampZone;
+    h.update(dt, huntCtx);
+  });
+  // Le chasseur de passage : il arrive par la route, defend le camp une nuit, puis repart.
+  const on = mercOn();
+  if (on && !merc) merc = new Hunter(scene, MERC, MERC_ROAD.x, MERC_ROAD.z);
+  if (!merc) return;
+  const root = merc.human.root;
+  if (on && !root.visible) {
+    root.visible = true;
+    root.position.set(MERC_ROAD.x, 0, MERC_ROAD.z);
+  }
+  if (!root.visible) return;
+  if (on) {
+    huntCtx.rest = MERC_REST;
+    huntCtx.post = huntPost('camp', camp++);
+    huntCtx.inside = inCampZone;
+  } else {
+    huntCtx.duty = false;
+    huntCtx.night = false;
+    huntCtx.rest = MERC_ROAD;
+    huntCtx.inside = nowhere;
+  }
+  merc.update(dt, huntCtx);
+  if (!on && Math.hypot(root.position.x - MERC_ROAD.x, root.position.z - MERC_ROAD.z) < 1) root.visible = false;
+}
+
+/** Recrute la place i (la suivante, si elle est ouverte) : paiement unique. */
+function hireHunter(i: number): boolean {
+  if (i !== save.hunters.length || i >= huntSlots() || i >= HUNTERS.length) return false;
+  if (!payCoins(HUNTER_COST[i]!)) return false;
+  save.hunters.push('camp');
+  const d = HUNTERS[i]!;
+  const r = HUNT_REST[i]!;
+  toast(`${d.icon} ${d.name} rejoint le camp : il le défendra chaque nuit`);
+  sfx.sfxVictory();
+  buzz(30);
+  particles.burst(new THREE.Vector3(r.x, 1.5, r.z), [0xffd84a, 0xffffff, 0xe0b077], 30, { speed: 4, up: 5, size: 0.14 });
+  persist();
+  return true;
+}
+
+/** Choisit la zone que le chasseur i defend la nuit (la ferme seulement si elle est fortifiee). */
+function setHuntZone(i: number, z: HuntZone): boolean {
+  if (i >= save.hunters.length) return false;
+  if (z === 'farm' && !farmWall) {
+    sfx.sfxNope();
+    toast('🌾 Bâtis d’abord la palissade de la ferme');
+    return false;
+  }
+  if (save.hunters[i] === z) return true;
+  save.hunters[i] = z;
+  const d = HUNTERS[i]!;
+  toast(`${d.icon} ${d.name} défendra ${z === 'farm' ? 'la ferme' : 'le camp'} la nuit`);
+  sfx.sfxDrop(4);
+  buzz(15);
+  persist();
+  return true;
+}
+
+/** Renfort d'une nuit par une pub (au choix du joueur, une par jour). */
+function callMerc(): void {
+  if (mercOn() || !save.cycle) return;
+  void rewarded('hunter', 'un chasseur en renfort cette nuit').then((ok) => {
+    if (!ok || mercOn()) return;
+    save.merc = save.day;
+    toast(`${MERC.icon} ${MERC.name} arrive par la route : il défendra le camp cette nuit`);
+    sfx.sfxObjective();
+    persist();
+    if (panel === 'hunters') renderHunters();
+  });
+}
+
+/** Le contenu ne change qu'apres un toucher (ou un niveau du camp) : on ne reconstruit qu'alors. */
+let huntKey = '';
+function renderHunters(): void {
+  const slots = huntSlots();
+  const on = mercOn();
+  const adOk = adLeft('hunter') > 0;
+  const dmg = huntDmg();
+  const key = `${slots}|${save.hunters.join(',')}|${farmWall ? 1 : 0}|${on ? 1 : 0}|${adOk ? 1 : 0}|${save.cycle ? 1 : 0}|${dmg}`;
+  if (key !== huntKey) {
+    huntKey = key;
+    let h = `<h2>🤠 Chasseurs de prime <span class="lv">${save.hunters.length}/${HUNTERS.length}</span></h2>
+      <p class="note">Payé une seule fois, chacun défend toutes les nuits la zone que tu lui donnes, et court là où la palissade est attaquée.</p>`;
+    HUNTERS.forEach((d, i) => {
+      if (i < save.hunters.length) {
+        const z = save.hunters[i];
+        const farmOk = !!farmWall;
+        const zb = (id: HuntZone, label: string, ok: boolean) =>
+          `<button class="btn zone ${z === id || (id === 'camp' && !farmOk) ? 'on' : ''}" data-hzone="${i}" data-z="${id}" ${ok ? '' : 'disabled'}>${label}</button>`;
+        h += card(d.icon, d.name, `Défend ${zoneOf(i) === 'farm' ? 'la ferme' : 'le camp'} · dégâts ${dmg} · portée ${HUNT_RANGE} m`,
+          zb('camp', '🏰 Camp', true) + zb('farm', '🌾 Ferme', farmOk));
+      } else if (i === save.hunters.length && i < slots) {
+        h += card(d.icon, d.name, `Recrute-le une fois : il défendra le camp ou la ferme, toutes les nuits · dégâts ${dmg}`,
+          `<button class="btn" data-hire="${i}"><span class="coin"></span>${fmt(HUNTER_COST[i]!)}</button>`);
+      } else {
+        const lvl = HUNTER_LV[i]!;
+        h += card('🔒', d.name, i < slots ? 'Recrute d’abord le précédent' : `Place ouverte au camp niveau ${lvl}`,
+          `<button class="btn" disabled>${i < slots ? `<span class="coin"></span>${fmt(HUNTER_COST[i]!)}` : `Camp niv. ${lvl}`}</button>`);
+      }
+    });
+    if (!farmWall && save.hunters.length) h += `<p class="note">🌾 La ferme pourra être défendue une fois sa palissade bâtie.</p>`;
+    h += `<h2>📺 Renfort</h2>`;
+    h += card(MERC.icon, 'Un chasseur en renfort cette nuit',
+      on ? `${MERC.name} défend le camp cette nuit` : `${MERC.name} vient défendre le camp une nuit, puis reprend la route`,
+      on ? `<button class="btn" disabled>En poste</button>` : !save.cycle ? `<button class="btn ad" disabled>📺 Plus tard</button>` : adButton('hunter', 'data-merc', 'Renfort'));
+    const scroll = ui.sheetBody.scrollTop;
+    ui.sheetBody.innerHTML = h;
+    ui.sheetBody.scrollTop = scroll;
+  }
+  ui.sheetBody.querySelectorAll<HTMLElement>('[data-hire]').forEach((b) => {
+    b.classList.toggle('poor', save.coins < (HUNTER_COST[Number(b.dataset.hire)] ?? 0));
+  });
+}
+
+ui.sheetBody.addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hire],[data-hzone],[data-merc]');
+  if (!el || el.disabled || ko > 0) return;
+  const d = el.dataset;
+  let ok = true;
+  if (d.hire !== undefined) ok = hireHunter(Number(d.hire));
+  else if (d.hzone !== undefined) ok = setHuntZone(Number(d.hzone), d.z === 'farm' ? 'farm' : 'camp');
+  else callMerc();
+  if (!ok) {
+    el.classList.remove('shake');
+    void el.offsetWidth;
+    el.classList.add('shake');
+  }
+  renderHunters();
+});
+
+/** Etiquettes des chasseurs (nom, et une replique quand on passe), et la zone de l'armurerie. */
+const huntTalks = new Map<Hunter, { el: HTMLElement; say: number; next: number }>();
+function placeHunter(h: Hunter, dt: number): void {
+  let t = huntTalks.get(h);
+  if (!t) {
+    const el = document.createElement('div');
+    el.className = 'name-label';
+    labels.appendChild(el);
+    t = { el, say: 0, next: 4 + Math.random() * 8 };
+    huntTalks.set(h, t);
+  }
+  const q = h.human.root.position;
+  const d = Math.hypot(q.x - player.position.x, q.z - player.position.z);
+  t.next -= dt;
+  if (d < 4 && t.next <= 0 && t.say <= 0) {
+    t.say = 3.5;
+    t.next = 18 + Math.random() * 20;
+    t.el.innerHTML = `<b>${h.def.name}</b><span>${h.def.lines[Math.floor(Math.random() * h.def.lines.length)]}</span>`;
+    t.el.classList.add('talk');
+  }
+  if (t.say > 0) {
+    t.say -= dt;
+    if (t.say <= 0) t.el.classList.remove('talk');
+  } else if (t.el.innerHTML !== `<b>${h.def.name}</b>`) t.el.innerHTML = `<b>${h.def.name}</b>`;
+  if (d > 11 || !h.human.root.visible) { t.el.classList.add('off'); return; }
+  placeLabel(t.el, q.x, 2.5, q.z);
+}
+function placeHunters(dt: number): void {
+  for (const h of hunters) placeHunter(h, dt);
+  if (merc) placeHunter(merc, dt);
+  const open = isBuilt('armory');
+  huntRing.visible = open;
+  if (!open || !near(HUNT_PAD.x, HUNT_PAD.z, 12)) { huntLabel.classList.add('off'); return; }
+  const html = `<span class="pl-icon">🤠</span><span class="pl-name">Chasseurs de prime</span><span class="pl-cost">${save.hunters.length}/${huntSlots()}</span>`;
+  if (huntLabel.innerHTML !== html) huntLabel.innerHTML = html;
+  placeLabel(huntLabel, HUNT_PAD.x, 0.3, HUNT_PAD.z - 1.4);
 }
 
 // ---------------------------------------------------------------- objectifs
@@ -1646,12 +1930,13 @@ wearOutfit(save.outfit);
 });
 
 /** Le panneau du bas : ameliorations a l'etabli, ou choix des objets a la reserve. */
-type Panel = 'bench' | 'reserve' | null;
+type Panel = 'bench' | 'reserve' | 'hunters' | null;
 let panel: Panel = null;
 function setPanel(p: Panel): void {
   if (p === panel) {
     if (p === 'bench') refreshSheetButtons();
     else if (p === 'reserve') renderReserve();
+    else if (p === 'hunters') renderHunters();
     return;
   }
   panel = p;
@@ -1659,11 +1944,14 @@ function setPanel(p: Panel): void {
   handleY = null;
   sheetRest();
   ui.sheet.classList.remove('min');
-  setText(ui.sheetTitle, p === 'bench' ? '🔨 Établi' : p === 'reserve' ? '📦 Réserve' : '');
+  setText(ui.sheetTitle, p === 'bench' ? '🔨 Établi' : p === 'reserve' ? '📦 Réserve' : p === 'hunters' ? '🛡️ Armurerie' : '');
   document.body.classList.toggle('sheet-open', sheetOpen);
   ui.sheetBody.scrollTop = 0;
   if (p === 'bench') renderSheet();
-  else if (p === 'reserve') {
+  else if (p === 'hunters') {
+    huntKey = '';
+    renderHunters();
+  } else if (p === 'reserve') {
     resKey = '';
     renderReserve();
     if (!save.seen.includes('hint:reserve')) {
@@ -2790,7 +3078,8 @@ function interact(dt: number): void {
       persist();
       continue;
     }
-    if (!settled || payClock > 0 || !near(dp.x, dp.z, 1.45)) continue;
+    if (!dp.armed && !near(dp.x, dp.z, 1.6)) dp.armed = true;
+    if (!dp.armed || !settled || payClock > 0 || !near(dp.x, dp.z, 1.45)) continue;
     const rem = dynRemaining(dp);
     const paid = save.fixPaid[dp.key]!;
     const target = () => new THREE.Vector3(dp.x, 0.2, dp.z);
@@ -2818,7 +3107,9 @@ function interact(dt: number): void {
   // Etabli : le panneau d'ameliorations s'ouvre quand on se tient devant.
   const atBench = structAlive('bench') && near(L.benchZone.x, L.benchZone.z, 1.5);
   const atReserve = near(reserve.zone.x, reserve.zone.z, 1.3);
-  setPanel(atBench ? 'bench' : atReserve ? 'reserve' : null);
+  // Armurerie : le panneau des chasseurs de prime.
+  const atHunt = isBuilt('armory') && near(HUNT_PAD.x, HUNT_PAD.z, 1.5);
+  setPanel(atBench ? 'bench' : atReserve ? 'reserve' : atHunt ? 'hunters' : null);
 }
 
 /** Le troncon que le joueur est en train de reparer (pour son etiquette). */
@@ -2849,6 +3140,13 @@ let wallToast = 0;
 function onWallHit(s: Section, at: THREE.Vector3): void {
   particles.burst(at, [0xc68a4f, 0x7a5a3a, 0xd9b07a], 5, { speed: 3, up: 2, size: 0.1, life: 0.5 });
   warn(`${s.site === 'farm' ? 'fw' : 'w'}${s.id}`, s.x, wallTop(s, 2.4, 3.6), s.z);
+  // Les chasseurs de prime de cette zone accourent ; ils ne changent de troncon que si le
+  // leur n'est plus frappe depuis 4 s (sinon ils courraient d'un coup a l'autre).
+  const hw = hotWall[s.site === 'farm' ? 'farm' : 'camp'];
+  if (hw.s === s || save.playTime - hw.t >= 4) {
+    hw.s = s;
+    hw.t = save.playTime;
+  }
   const near0 = Math.hypot(at.x - player.position.x, at.z - player.position.z) < 14;
   if (near0) sfx.sfxChop();
   if (s.hp <= 0 && performance.now() - wallToast > 4000) {
@@ -3309,12 +3607,12 @@ function updateCombat(dt: number): void {
       // Comme la grande tour, leurs degats suivent la menace (sinon elles chatouillent la horde).
       shoot(cz, c.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false, true);
     });
-    // Tours de garde de la ferme : memes tirs, elles couvrent les champs et le moulin.
+    // Tours de garde de la ferme : memes tirs, toute la palissade de la ferme, jamais le camp.
     for (const t of farmTowers) {
       if (!isBuilt(t.site.id)) continue;
       t.clock -= dt;
       if (t.clock > 0) continue;
-      const fz = horde.nearest(t.at, FARM_TOWER_RANGE);
+      const fz = horde.nearest(t.at, FARM_TOWER_RANGE, FARM_TOWER_MAXX);
       if (!fz) continue;
       t.clock = 0.8 / (1 + 0.08 * lv('tower'));
       shoot(fz, t.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false, true);
@@ -3773,6 +4071,8 @@ function step(dt: number, time: number): void {
   helperCtx.night = (save.cycle && save.phase === 'night') || isBroken('shelter');
   const cdt = dt * crewMul();
   for (const h of helpers) h.update(cdt, helperCtx);
+  updateHunters(dt);
+  drainHints();
 
   flyers.update(dt);
   particles.update(dt);
@@ -3955,6 +4255,7 @@ function drawFrame(): void {
   placeFloaters(dt);
   placeEventLabels();
   placeCrew(dt);
+  placeHunters(dt);
   for (const dp of dynPads.values()) placeLabel(dp.label, dp.x, 0.3, dp.z - 1.4);
   // Palissade : une seule etiquette, celle du troncon abime le plus proche.
   let wallLabel: Section | null = repairTarget;
@@ -4059,7 +4360,8 @@ requestAnimationFrame(frame);
 (window as unknown as { __bastion: unknown }).__bastion = {
   player, save: () => save, SIM, market, beds, pads, horde, trees, scraps, helpers, saw, cook, palisade,
   renderer, reserve, pumps, fields, mill,
-  farm: () => farmWall, farmTowers, world, zombieWalls,
+  farm: () => farmWall, farmTowers,
+  hunters, merc: () => merc, hireHunter, setHuntZone, huntPost, huntDmg, renderHunters,
   give: (n: number) => { save.coins += n; },
   build: (id: string) => { const p = pads.find((x) => x.def.id === id); if (p) { save.paid[id] = { ...p.def.cost }; build(p); } },
   setObj: (n: number) => { save.obj = n; renderObjective(); },

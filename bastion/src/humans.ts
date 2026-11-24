@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mergeColored } from './bake';
-import { C, blob, box, group, lathe, mat, mixHex, puff, sphere, type Profile } from './kit';
+import { C, blob, box, group, lathe, mat, mixHex, puff, rbox, sphere, type Profile } from './kit';
 
 export interface HumanLook {
   shirt: number;
@@ -16,6 +16,11 @@ export interface HumanLook {
   skin?: number;
   hat?: number;
   scale?: number;
+  /** Forme imposee du haut (torsoParts.style) et du couvre-chef (0 chapeau a bord) : sinon tirees de l'apparence. */
+  top?: number;
+  hatStyle?: number;
+  /** Long manteau (pans du dos et des cotes, ouvert devant), fusionne au tronc. */
+  coat?: number;
 }
 
 /** Ombre au sol partagee par tous les personnages (pas de geometrie par client qui passe). */
@@ -340,6 +345,17 @@ export function legParts(o: LegOpts): THREE.Group {
   return g;
 }
 
+/** Pans d'un long manteau, repere du personnage : ouvert devant pour laisser passer les jambes. */
+function coatParts(color: number): THREE.Group {
+  const back = rbox(0.6, 0.62, 0.05, color, 0.025, 0, 0.5, -0.25);
+  back.rotation.x = 0.12;
+  const l = rbox(0.05, 0.62, 0.36, color, 0.025, -0.31, 0.5, -0.06);
+  l.rotation.z = -0.1;
+  const r = rbox(0.05, 0.62, 0.36, color, 0.025, 0.31, 0.5, -0.06);
+  r.rotation.z = 0.1;
+  return group(back, l, r);
+}
+
 // ---------------------------------------------------------------- apparence
 
 /** Hachage reproductible d'une apparence : coiffure, vetements, teint, chaussures. */
@@ -374,9 +390,11 @@ export class Human {
     // Les boucles ne passent pas sous un chapeau.
     const hairStyle = look.hat !== undefined && st.hair === 1 ? 0 : st.hair;
     const id = `${look.shirt}|${look.pants}|${look.hair}|${look.hat ?? ''}|${skin}`;
+    const top = look.top ?? st.top;
+    const hatStyle = look.hatStyle ?? st.hat;
 
     const leg = (): THREE.Mesh => fusedMesh(`hl|${look.pants}|${shoe}`, () => legParts({ pants: look.pants, shoe }));
-    const arm = (): THREE.Mesh => fusedMesh(`ha|${look.shirt}|${skin}|${st.top}`, () => armParts({ sleeve: look.shirt, skin, short: st.top === 1 }));
+    const arm = (): THREE.Mesh => fusedMesh(`ha|${look.shirt}|${skin}|${top}`, () => armParts({ sleeve: look.shirt, skin, short: top === 1 }));
     this.legL = group(leg());
     this.legR = group(leg());
     this.legL.position.set(-0.16, 0.66, 0);
@@ -387,13 +405,15 @@ export class Human {
     this.armR = group(arm(), this.hand);
     this.armL.position.set(-0.4, 1.22, 0);
     this.armR.position.set(0.4, 1.22, 0);
-    const trunk = fusedMesh(`hb|${id}|${hairStyle}|${st.top}|${st.hat}`, () => {
+    const trunk = fusedMesh(`hb|${id}|${hairStyle}|${top}|${hatStyle}|${look.coat ?? ''}`, () => {
       const head = headParts({
         skin, hair: look.hair, hairStyle,
-        hat: look.hat !== undefined ? { tint: look.hat, style: st.hat } : undefined,
+        hat: look.hat !== undefined ? { tint: look.hat, style: hatStyle } : undefined,
       });
       head.position.set(0, 1.56, 0);
-      return group(torsoParts({ shirt: look.shirt, pants: look.pants, style: st.top }), head);
+      const g = group(torsoParts({ shirt: look.shirt, pants: look.pants, style: top }), head);
+      if (look.coat !== undefined) g.add(coatParts(look.coat));
+      return g;
     });
     this.body.add(trunk, this.legL, this.legR, this.armL, this.armR);
     this.root.add(this.body);

@@ -428,3 +428,8 @@ body.night .vignette { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,
 .res-actions .btn { flex: 1 1 0; min-width: 0; white-space: normal; line-height: 1.15; padding: 8px 6px; font-size: 14px; }
 .btn.wood { background: linear-gradient(180deg, #d9a070, #b9784a); box-shadow: 0 4px 0 #8d5a30; }
 .btn.wood:disabled { background: #c8b89c; box-shadow: 0 4px 0 #a39070; }
+
+/* ---------------------------------------------------------------- chasseurs de prime (armurerie) */
+.btn.zone { min-width: 0; padding: 6px 8px; font-size: 13px; }
+.btn.zone:not(.on):not(:disabled) { background: linear-gradient(180deg, #f2e4c8, #e2cfa8); box-shadow: 0 4px 0 #c3ab80; color: var(--ink); text-shadow: none; }
+.btn.zone:disabled { opacity: .55; }

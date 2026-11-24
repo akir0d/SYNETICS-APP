@@ -309,6 +309,33 @@ export interface Customer {
   sad: boolean;
 }
 
+/**
+ * Ce qui encombre la route : le bus et l'epave de voiture. Les clients les contournent au
+ * lieu de passer au travers (demi-longueur hw le long de la route, demi-largeur hd).
+ */
+const ROAD_BLOCKS = [
+  { x: L.bus.x, z: L.bus.z, hw: 4.0, hd: 1.6 },
+  { x: L.scrap[0]!.x, z: L.scrap[0]!.z, hw: 2.2, hd: 1.3 },
+];
+
+/** Points de passage pour aller de x1 a x2 le long de la route a la hauteur z, sans rien traverser. */
+function roadDetour(x1: number, x2: number, z: number): THREE.Vector3[] {
+  const dir = Math.sign(x2 - x1) || 1;
+  const lo = Math.min(x1, x2);
+  const hi = Math.max(x1, x2);
+  const out: THREE.Vector3[] = [];
+  const hits = ROAD_BLOCKS.filter((b) => Math.abs(z - b.z) < b.hd + 0.6 && b.x + b.hw > lo && b.x - b.hw < hi)
+    .sort((a, b) => (a.x - b.x) * dir);
+  for (const b of hits) {
+    // On passe du cote ou l'on se trouve deja (au sud si l'on est au sud du milieu).
+    const zz = z >= b.z ? b.z + b.hd + 0.9 : b.z - b.hd - 0.9;
+    const a = b.x - dir * (b.hw + 0.8);
+    const c = b.x + dir * (b.hw + 0.8);
+    out.push(new THREE.Vector3(a, 0, zz), new THREE.Vector3(c, 0, zz), new THREE.Vector3(c + dir * 1.2, 0, z));
+  }
+  return out;
+}
+
 export class Market {
   readonly bins: Bins;
   readonly customers: Customer[] = [];
@@ -413,7 +440,7 @@ export class Market {
     const front = L.lanes[lane]![0]!;
     this.customers.push({
       human: h, lane, want, need, got: 0, state: 'arrive', label, buyClock: 0, happy: 0, wait: 0, sad: false,
-      path: [new THREE.Vector3(front.x, 0, ROAD_Z + 0.8)],
+      path: [...roadDetour(side * 36, front.x, ROAD_Z + 0.8), new THREE.Vector3(front.x, 0, ROAD_Z + 0.8)],
     });
   }
 
@@ -498,7 +525,7 @@ export class Market {
     // Chaque file repart de son cote, sans traverser l'autre.
     const side = c.lane === 0 || !this.eastOpen ? -1 : 1;
     const x = L.lanes[c.lane]![0]!.x + (c.lane === 0 ? -0.9 : 0.9);
-    c.path = [new THREE.Vector3(x, 0, ROAD_Z - 0.6), new THREE.Vector3(side * 40, 0, ROAD_Z - 0.6)];
+    c.path = [new THREE.Vector3(x, 0, ROAD_Z - 0.6), ...roadDetour(x, side * 40, ROAD_Z - 0.6), new THREE.Vector3(side * 40, 0, ROAD_Z - 0.6)];
   }
 }
 

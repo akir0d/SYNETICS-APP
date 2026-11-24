@@ -37,6 +37,10 @@ export interface OfflineInput {
   cashCap: number;
   /** Places libres dans la reserve. */
   reserveRoom: number;
+  /** Pieces gagnees au plus pendant une absence (quelques minutes de jeu actif). */
+  coinCap: number;
+  /** Objets ranges au plus dans la reserve pendant une absence. */
+  itemCap: number;
   /** Duree d'un cycle jour + nuit (secondes), 0 si les nuits n'ont pas commence. */
   cycleLen: number;
 }
@@ -121,9 +125,12 @@ export function simulateOffline(i: OfflineInput): OfflineResult {
   coins = Math.floor(coins * i.sellMul);
   const capped = !i.jobs.cashier && coins > i.cashCap;
   if (capped) coins = i.cashCap;
+  // Jouer doit toujours rapporter plus que s'absenter : le gain est plafonne.
+  const limited = coins > i.coinCap;
+  if (limited) coins = i.coinCap;
 
   // ---- ce qui reste va dans la reserve (dans la limite des places)
-  let room = i.reserveRoom;
+  let room = Math.min(i.reserveRoom, i.itemCap);
   const store = (src: Partial<Record<ItemType, number>>) => {
     for (const t of Object.keys(src) as ItemType[]) {
       const n = Math.min(Math.floor(src[t] ?? 0), room);
@@ -147,6 +154,7 @@ export function simulateOffline(i: OfflineInput): OfflineResult {
   else if (!any) tip = '👩‍🌾 Recrute des survivants : ils produisent même quand tu n’es pas là.';
   else if (!i.jobs.porter) tip = '🧑‍🌾 Sans porteur, la récolte reste dans la réserve. Recrute Momo pour qu’elle se vende.';
   else if (capped) tip = '👩‍💼 La caisse a débordé : avec une caissière, rien ne se perd.';
+  else if (limited) tip = '📋 Plafond atteint : le contremaître (établi) augmente ce que le camp gagne sans toi.';
   else if (room <= 0) tip = '📦 La réserve était pleine : agrandis-la à l’établi.';
   else if (i.away > i.maxAway + 600) tip = '📋 Ton absence a dépassé la limite : le contremaître (établi) la repousse.';
   else if (buy > 30) tip = '🧺 Les clients manquaient de produits : remplis les bacs avant de partir.';

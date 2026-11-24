@@ -370,3 +370,52 @@ body.night .vignette { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,
 .float-num.small { font-size: 15px; }
 .float-num.gem { color: #9fe6ff; text-shadow: 0 2px 0 #2a6a86, 0 0 6px rgba(0,0,0,.35); }
 .boost-bar span.convoy { background: linear-gradient(180deg, #d9a43a, #b07a1a); box-shadow: 0 2px 0 #7a5208; }
+
+/* ---- fleches vers ce qui se fait attaquer hors de l'ecran */
+.edge-arrow { position: fixed; left: 0; top: 0; z-index: 5; width: 46px; height: 46px; pointer-events: none; will-change: transform; }
+.edge-arrow i { position: absolute; left: 0; top: 0; width: 46px; height: 46px; }
+.edge-arrow i::after {
+  content: ''; position: absolute; right: -13px; top: 50%; margin-top: -10px;
+  border-left: 15px solid #d8392b; border-top: 10px solid transparent; border-bottom: 10px solid transparent;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.35));
+}
+.edge-arrow span {
+  position: absolute; left: 0; top: 0; width: 46px; height: 46px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 21px;
+  background: rgba(216, 57, 43, .92); border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35);
+  animation: edgePulse .7s ease-in-out infinite;
+}
+@keyframes edgePulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+
+/* ---- panneau du bas (etabli, reserve) : defile au doigt, se replie par sa poignee */
+.sheet-body { min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+.sheet-handle {
+  flex: none; height: 30px; display: flex; align-items: center; justify-content: center;
+  pointer-events: auto; touch-action: none; cursor: grab;
+}
+.sheet-handle i {
+  display: block; width: 64px; height: 8px; border-radius: 4px;
+  background: var(--cream); border: 2px solid var(--wood); box-shadow: 0 2px 0 var(--wood-dark);
+}
+.sheet-open .sheet.min { transform: translateY(calc(100% - 78px - var(--safe-bottom))); }
+.sheet.min .sheet-body { overflow: hidden; }
+
+.res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; margin: 6px 0 8px; }
+.res-item {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; padding: 6px 4px 5px;
+  border-radius: 14px; background: #fff; border: 2px solid #ead7b4; box-shadow: 0 3px 0 #d9c39a; color: var(--ink);
+  font-family: inherit;
+}
+.res-item:active { transform: translateY(2px); box-shadow: 0 1px 0 #d9c39a; }
+.res-item span { font-size: 26px; line-height: 1.1; }
+.res-item b { font-size: 17px; font-weight: 800; line-height: 1.1; }
+.res-item small { font-size: 11px; opacity: .7; line-height: 1.1; }
+.res-item em {
+  position: absolute; top: -7px; right: -4px; padding: 0 5px; border-radius: 8px; font-style: normal;
+  font-size: 9.5px; font-weight: 800; color: #fff; background: #d98a1a; border: 1.5px solid #fff;
+}
+.res-item.need { border-color: #e0a23a; background: #fff6df; }
+.res-item.poor { opacity: .55; }
+.res-actions { display: flex; gap: 6px; }
+.res-actions .btn { flex: 1; padding: 9px 6px; font-size: 14px; }
+.btn.wood { background: linear-gradient(180deg, #d9a070, #b9784a); box-shadow: 0 4px 0 #8d5a30; }

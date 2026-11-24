@@ -169,7 +169,7 @@ export class Tracers {
 
   constructor(private readonly scene: THREE.Scene) {}
 
-  fire(from: THREE.Vector3, to: THREE.Vector3): void {
+  fire(from: THREE.Vector3, to: THREE.Vector3, width = 0.09): void {
     // Les traits sont recycles : pas de materiau ni de geometrie neuve a chaque tir.
     let it = this.items.find((t) => !t.busy);
     if (!it) {
@@ -177,6 +177,8 @@ export class Tracers {
         const mat = new THREE.MeshBasicMaterial({
           color: 0xfff1a8, vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending,
           depthWrite: false, side: THREE.DoubleSide,
+          // Pas de brouillard : un tir au loin (tour d'angle en haut de l'ecran, la nuit) reste visible.
+          fog: false,
         });
         const line = new THREE.Mesh(this.geo, mat);
         line.frustumCulled = false;
@@ -187,7 +189,7 @@ export class Tracers {
       }
     }
     const len = from.distanceTo(to);
-    it.line.scale.set(0.09, 0.09, len);
+    it.line.scale.set(width, width, len);
     it.line.position.copy(from).lerp(to, 0.5);
     it.line.lookAt(to);
     it.mat.opacity = 1;

@@ -88,7 +88,7 @@ export const LEVELS: LevelDef[] = [
   { id: 'saw', name: 'Scierie', icon: '🪚', needs: 'sawmill', base: 200, effect: (l) => `Cadence +${15 * l} %` },
   { id: 'cook', name: 'Cuisine', icon: '🍲', needs: 'kitchen', base: 250, effect: (l) => `Cadence +${15 * l} %` },
   { id: 'reserve', name: 'Réserve', icon: '📦', needs: 'shelter', base: 220, effect: (l) => `${240 + 60 * l} places · absence +${15 * l} min` },
-  { id: 'foreman', name: 'Contremaître', icon: '📋', needs: 'farmer', base: 300, effect: (l) => `Hors ligne : rendement ${30 + 2 * l} %, jusqu'à ${2 + l} h` },
+  { id: 'foreman', name: 'Contremaître', icon: '📋', needs: 'farmer', base: 300, effect: (l) => `Hors ligne : rendement ${Math.round(15 + 1.5 * l)} %, plafond +${10 * l} %, jusqu'à ${1 + l / 2} h` },
   { id: 'tower', name: 'Tour de guet', icon: '🗼', needs: 'tower', base: 300, effect: (l) => `Dégâts +${l}, tirs +${8 * l} %` },
   { id: 'mill', name: 'Moulin', icon: '🍞', needs: 'mill', base: 400, effect: (l) => `Cadence +${15 * l} %` },
 ];

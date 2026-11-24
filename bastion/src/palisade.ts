@@ -60,12 +60,17 @@ export interface Section {
   inflight: number;
   /** La porte nord n'existe qu'une fois restauree. */
   enabled: boolean;
+  /** Troncon sans visuel propre (derriere le comptoir de l'etal) : il bloque et se repare. */
+  hidden?: boolean;
   gate?: GateParts;
 }
 
 interface GateParts {
   left: THREE.Object3D;
   right: THREE.Object3D;
+  /** Battants intact, abime, tres abime (un seul visible selon les points de vie). */
+  leftV: THREE.Object3D[];
+  rightV: THREE.Object3D[];
   broken: THREE.Object3D;
   /** +1 : s'ouvre vers l'interieur, -1 : vers l'exterieur. */
   swing: number;
@@ -606,20 +611,52 @@ function pikeStates(len: number, H: number, seed: number): THREE.Group[] {
 }
 
 /** Un battant de porte en rondins, charniere a l'origine, s'etendant vers +x*dir. */
-function door(width: number, H: number, dir: number, seed: number): THREE.Group {
+/**
+ * Un battant de porte en pieux. `dmg` : 0 intact, 1 abime (pieux casses, traverse qui
+ * pend, eclats), 2 tres abime (trous, pieux arraches, echarpe tombee, battant qui s'affaisse).
+ */
+function door(width: number, H: number, dir: number, seed: number, dmg = 0): THREE.Group {
   const r = rng(seed);
+  const d = rng(seed * 31 + 7 + dmg * 101);
   const g = new THREE.Group();
   const n = Math.max(3, Math.round(width / 0.3));
   const bars = [0.45, H - 0.45];
+  const brokenK = dmg === 0 ? 0 : dmg === 1 ? 0.35 : 0.6;
   for (let i = 0; i < n; i++) {
     const x = dir * (i + 0.5) * (width / n);
-    g.add(put(pikeMesh(0.145, q(H * (0.95 + r() * 0.08), 0.08), BARK[i % BARK.length]!, []), x, 0, 0));
+    const full = q(H * (0.95 + r() * 0.08), 0.08);
+    // Tres abime : un ou deux pieux arraches, on voit a travers.
+    if (dmg === 2 && i > 0 && i < n - 1 && d() < 0.3) continue;
+    if (d() < brokenK) {
+      // Pieu casse net : plus court, avec un eclat de bois clair qui depasse.
+      const h = full * (0.42 + d() * 0.3);
+      g.add(put(cyl(0.13, 0.145, h, BARK[i % BARK.length]!, 12), x, h / 2, 0));
+      const sp = put(cone(0.07, 0.3, CUT, 5), x + (d() - 0.5) * 0.06, h + 0.1, (d() - 0.5) * 0.05);
+      sp.rotation.z = (d() - 0.5) * 0.9;
+      g.add(sp);
+      if (d() < 0.6) g.add(put(cone(0.05, 0.2, CUT, 4), x + 0.06, h + 0.05, 0.03));
+    } else {
+      g.add(put(pikeMesh(0.145, full, BARK[i % BARK.length]!, []), x, 0, 0));
+    }
   }
-  // Traverses et echarpe en planches epaisses, cote interieur.
-  for (const y of bars) g.add(plank(width, 0.17, 0.07, BEAM, (dir * width) / 2, y, 0.17));
-  const diag = plank(0.15, Math.hypot(width, H - 0.9), 0.06, 0x6a4c30, (dir * width) / 2, H / 2, 0.2);
-  diag.rotation.z = dir * Math.atan2(width, H - 0.9);
-  g.add(diag);
+  // Traverses et echarpe en planches epaisses, cote interieur (de travers quand ca casse).
+  bars.forEach((y, k) => {
+    const b = plank(width, 0.17, 0.07, BEAM, (dir * width) / 2, y, 0.17);
+    if (dmg > 0 && k === 1) b.rotation.z = dir * (dmg === 1 ? 0.07 : 0.16);
+    g.add(b);
+  });
+  if (dmg < 2) {
+    const diag = plank(0.15, Math.hypot(width, H - 0.9), 0.06, 0x6a4c30, (dir * width) / 2, H / 2, 0.2);
+    diag.rotation.z = dir * Math.atan2(width, H - 0.9);
+    g.add(diag);
+  }
+  // Eclats au pied de la porte.
+  for (let i = 0; i < dmg * 3; i++) {
+    const c = put(plank(0.3 + d() * 0.3, 0.04, 0.08, i % 2 ? CUT : BARK[0]!), dir * width * d(), 0.03, (d() - 0.5) * 0.8);
+    c.rotation.y = d() * 3;
+    g.add(c);
+  }
+  if (dmg === 2) g.rotation.z = -dir * 0.05;
   // Pentures de fer cote exterieur, et gonds.
   for (const y of bars) {
     g.add(plank(width * 0.5, 0.11, 0.035, 0x3f4246, dir * width * 0.25, y, -0.165));
@@ -680,7 +717,21 @@ export class Palisade {
     const postMesh = mergeColored(pg);
     scene.add(postMesh);
     this.extras.push(postMesh);
+
+    // L'etal : un troncon derriere le comptoir (le comptoir fait office de mur). Personne ne
+    // le traverse ; les zombies doivent le defoncer, et on le repare comme le reste. Ajoute
+    // en dernier : les points de vie des sauvegardes plus anciennes restent dans l'ordre.
+    const st = this.base('wall', s1, maxZ, s0, maxZ, WALL_HP);
+    st.h = LOW;
+    st.hidden = true;
+    st.root.visible = false;
+    st.repair = { x: s1 - 0.8, z: maxZ - 1.1 };
+    this.walls.push(st.seg);
+    this.refresh(st);
+    this.stall = st;
   }
+
+  readonly stall: Section;
 
   private frame(x1: number, z1: number, x2: number, z2: number) {
     const len = Math.hypot(x2 - x1, z2 - z1);
@@ -721,6 +772,7 @@ export class Palisade {
   private lvl = 0;
 
   private buildStates(s: Section): void {
+    if (s.hidden) return;
     for (const o of s.states) {
       s.root.remove(o);
       o.traverse((c) => { if ((c as THREE.Mesh).isMesh) (c as THREE.Mesh).geometry.dispose(); });
@@ -763,10 +815,19 @@ export class Palisade {
     s.root.add(mergeColored(frame));
     const leftPivot = new THREE.Group();
     leftPivot.position.x = -half + 0.2;
-    leftPivot.add(mergeColored(door(half - 0.2, h - 0.1, 1, s.id)));
     const rightPivot = new THREE.Group();
     rightPivot.position.x = half - 0.2;
-    rightPivot.add(mergeColored(door(half - 0.2, h - 0.1, -1, s.id + 1)));
+    const leftV: THREE.Object3D[] = [];
+    const rightV: THREE.Object3D[] = [];
+    for (let dmg = 0; dmg < 3; dmg++) {
+      const lv = mergeColored(door(half - 0.2, h - 0.1, 1, s.id, dmg));
+      const rv = mergeColored(door(half - 0.2, h - 0.1, -1, s.id + 1, dmg));
+      lv.visible = rv.visible = dmg === 0;
+      leftPivot.add(lv);
+      rightPivot.add(rv);
+      leftV.push(lv);
+      rightV.push(rv);
+    }
     const brokenG = new THREE.Group();
     for (const sx of [-1, 1]) {
       const d = door(half - 0.3, h - 0.1, 1, s.id + 3);
@@ -778,7 +839,7 @@ export class Palisade {
     const broken = mergeColored(brokenG);
     broken.visible = false;
     s.root.add(leftPivot, rightPivot, broken);
-    s.gate = { left: leftPivot, right: rightPivot, broken, swing, angle: Math.PI / 2, closed: false };
+    s.gate = { left: leftPivot, right: rightPivot, leftV, rightV, broken, swing, angle: Math.PI / 2, closed: false };
     this.gateWalls.push(s.seg);
     this.refresh(s);
     return s;
@@ -796,6 +857,10 @@ export class Palisade {
       g.left.visible = !down;
       g.right.visible = !down;
       g.broken.visible = down;
+      // Les battants montrent leurs degats : intact, abime, tres abime.
+      const v = st >= 3 ? 0 : st === 2 ? 1 : 2;
+      g.leftV.forEach((o, i) => { o.visible = i === v; });
+      g.rightV.forEach((o, i) => { o.visible = i === v; });
       s.seg.off = !s.enabled || down || !g.closed;
     }
   }
@@ -933,7 +998,7 @@ export class Palisade {
   initialHp(): number[] {
     const r = rng(42);
     return this.sections.map((s) => {
-      if (s.kind === 'gate') return s.max;
+      if (s.kind === 'gate' || s.hidden) return s.max;
       const k = r();
       return k < 0.14 ? 0 : k < 0.32 ? 10 : k < 0.48 ? 18 : WALL_HP;
     });

@@ -718,10 +718,22 @@ function placeEdgeArrows(): void {
 /** Largeur du camp a chaque niveau : il s'etend a l'est (niv. 2), puis a l'ouest (niv. 3). */
 const CAMP_SIZES = [{ minX: -13, maxX: 13 }, { minX: -13, maxX: 13 }, { minX: -13, maxX: 19 }, { minX: -19, maxX: 19 }, { minX: -19, maxX: 19 }];
 
+/**
+ * Tours d'angle : au niveau 2 du camp, la tour de guet part au coin sud-est ; les trois autres
+ * coins s'equipent ensuite (camp niveau 3), chantiers chers.
+ */
 const corners = [
-  { id: 'towerNE', x: 19.4, z: -11.4, from: 2 }, { id: 'towerSE', x: 19.4, z: 11.4, from: 2 },
+  { id: 'towerNE', x: 19.4, z: -11.4, from: 3 },
   { id: 'towerNW', x: -19.4, z: -11.4, from: 3 }, { id: 'towerSW', x: -19.4, z: 11.4, from: 3 },
 ].map((c) => ({ ...c, tower: watchTower(scene, c.x, c.z, false) }));
+const CORNER_COST: Record<string, Cost> = {
+  towerNE: { coins: 7000, plank: 30, scrap: 20 },
+  towerNW: { coins: 9000, plank: 40, scrap: 30 },
+  towerSW: { coins: 12000, stone: 60, scrap: 20 },
+};
+/** Ou la tour de guet s'installe quand le camp s'agrandit vers l'est. */
+const TOWER_CORNER = { x: 19.4, z: 11.4 };
+const TOWER_CORNER_PAD = { x: 18.3, z: 7.0 };
 const cornerClock: number[] = [];
 
 /** Les batiments des extensions, et le niveau qui les apporte. */
@@ -747,7 +759,7 @@ const EXT_DEFS = [
 ];
 for (const e of EXT_DEFS) scene.add(e.b.group);
 const TOWER_PADS: Record<string, { x: number; z: number }> = {
-  towerNE: { x: 17.6, z: -10.2 }, towerSE: { x: 18.3, z: 6.6 }, towerNW: { x: -17.6, z: -10.2 }, towerSW: { x: -17.6, z: 10.0 },
+  towerNE: { x: 17.6, z: -10.2 }, towerNW: { x: -17.6, z: -10.2 }, towerSW: { x: -17.6, z: 10.0 },
 };
 const EXT: ExtSite[] = [
   ...EXT_DEFS.map((e, i) => ({
@@ -756,7 +768,7 @@ const EXT: ExtSite[] = [
   })),
   ...corners.map((c, i) => ({
     id: c.id, name: 'une tour d’angle', icon: '🗼', lv: c.from, r: 1.2, x: c.x, z: c.z, pad: TOWER_PADS[c.id]!,
-    cost: c.from === 2 ? { coins: 2500, plank: 15, scrap: 10 } : { coins: 4000, plank: 20, scrap: 15 },
+    cost: CORNER_COST[c.id]!,
     group: c.tower.group, live: c.tower.live ?? [], site: buildSite(scene, c.x, c.z, 1.3, 950 + i),
   })),
 ];
@@ -825,9 +837,11 @@ function applyCampLevel(instant: boolean): void {
       scene.add(strip);
     }
   }
+  relocateTower(instant);
   // Chaque niveau ouvre ses emplacements : chantier a payer, ou batiment deja bati.
   for (const e of EXT) {
-    if (save.campLv < e.lv || extShown.has(e.id)) continue;
+    // Deja bati (anciennes parties) : on le garde, meme si son niveau a change depuis.
+    if ((save.campLv < e.lv && !isBuilt(e.id)) || extShown.has(e.id)) continue;
     extShown.add(e.id);
     world.solids.push({ x: e.x, z: e.z, r: e.r });
     if (isBuilt(e.id)) {
@@ -839,6 +853,55 @@ function applyCampLevel(instant: boolean): void {
     }
   }
   applyUpgrades();
+}
+
+/**
+ * Camp niveau 2 : la tour de guet quitte le milieu du camp pour le coin sud-est, d'ou elle
+ * couvre l'etal, la route et la nouvelle extension. Tout ce qui depend de sa place suit.
+ */
+let towerMoved = false;
+function relocateTower(instant: boolean): void {
+  if (towerMoved || save.campLv < 2) return;
+  towerMoved = true;
+  const dx = TOWER_CORNER.x - L.tower.x;
+  const dz = TOWER_CORNER.z - L.tower.z;
+  const solid = world.solids.find((c) => c.x === L.tower.x && c.z === L.tower.z);
+  if (solid) { solid.x += dx; solid.z += dz; }
+  const st = STRUCTS.find((x) => x.id === 'tower');
+  if (st) { st.x += dx; st.z += dz; }
+  for (const o of [tower.group, tower.light, tower.light.target, RUINS.tower]) {
+    if (!o) continue;
+    o.position.x += dx;
+    o.position.z += dz;
+    o.updateMatrixWorld(true);
+  }
+  tower.muzzle.x += dx;
+  tower.muzzle.z += dz;
+  L.tower.x = TOWER_CORNER.x;
+  L.tower.z = TOWER_CORNER.z;
+  // Zone de la tour (chantier ou reparation) : a cote, dans le camp.
+  const pd = PADS.find((p) => p.id === 'tower');
+  if (pd) {
+    pd.x = TOWER_CORNER_PAD.x;
+    pd.z = TOWER_CORNER_PAD.z;
+    const pad = pads.find((p) => p.def === pd);
+    if (pad) {
+      pad.ring.position.set(pd.x, 0.05, pd.z);
+      pad.fill.position.set(pd.x, 0.045, pd.z);
+    }
+  }
+  // Une reparation en cours suit la tour (ce qui a deja ete paye reste acquis).
+  const fix = dynPads.get('fix:tower');
+  if (fix && pd) {
+    fix.x = pd.x;
+    fix.z = pd.z;
+    fix.ring.position.set(pd.x, 0.05, pd.z);
+    fix.fill.position.set(pd.x, 0.045, pd.z);
+  }
+  if (!instant && isBuilt('tower')) {
+    restorer.run(null, tower.group);
+    toast('🗼 La tour de guet s’installe au coin du camp');
+  }
 }
 
 /** On paie un chantier de l'agrandissement : le batiment se monte sous nos yeux. */
@@ -1577,9 +1640,15 @@ function startBoost(id: BoostId, max = BOOST_MAX): void {
 const boostRoom = (id: BoostId, max: number) => (save.boosts[id] ?? 0) + 30 <= max;
 
 /** Pieces d'un coffre : quelques minutes de revenu, a la mesure de la progression. */
-const chestCoins = () => Math.round((100 + 12 * Math.pow(save.obj, 1.5)) / 10) * 10;
+/** Coffre gratuit (toutes les 4 h, calendrier) : un coup de pouce de 2 a 3 minutes de jeu, pas plus. */
+const chestCoins = () => Math.round((60 + 7 * Math.pow(save.obj, 1.4)) / 10) * 10;
 /** Ce que donne vraiment un coffre (contrat « ravitailleur fidele »). */
 const chestReward = () => Math.round((chestCoins() * (1 + 0.5 * ct('chest'))) / 10) * 10;
+/**
+ * Valeur de reference des recompenses achetees ou rares (sacs de pieces en gemmes, pack de
+ * depart, caches, largages, plafond hors ligne) : l'ancien coffre, qu'on ne baisse pas.
+ */
+const packCoins = () => Math.round((100 + 12 * Math.pow(save.obj, 1.5)) / 10) * 10;
 
 function gainGems(n: number): void {
   save.gems += n;
@@ -1789,8 +1858,8 @@ function renderShop(): void {
       h += card(o.icon, `${o.name} ${swatch}`, owned ? (o.gems < 0 ? 'Gagnée en convoi' : 'Dans ton sac') : 'Tenue', btns);
     }
     h += `<h3>Pièces</h3>`;
-    h += card('💰', 'Sac de pièces', `${chestReward() * 2} pièces`, `<button class="btn gem" data-coins="1">30 💎</button>`);
-    h += card('💰', 'Coffre de pièces', `${chestReward() * 10} pièces · le meilleur prix`, `<button class="btn gem" data-coins="2">120 💎</button>`);
+    h += card('💰', 'Sac de pièces', `${packCoins() * 2} pièces`, `<button class="btn gem" data-coins="1">30 💎</button>`);
+    h += card('💰', 'Coffre de pièces', `${packCoins() * 10} pièces · le meilleur prix`, `<button class="btn gem" data-coins="2">120 💎</button>`);
     h += `<h3>Offres</h3>`;
     for (const p of PRODUCTS) {
       if (p.once && owns(p.id)) continue;
@@ -1895,7 +1964,7 @@ function grantProduct(p: Product): void {
   }
   if (gems > 0) gainGems(gems);
   if (p.id === 'starter') {
-    grantCoins(chestReward() * 4, above(), 16);
+    grantCoins(packCoins() * 4, above(), 16);
     save.up.bag = Math.min(UPGRADES[0]!.costs.length, save.up.bag + 1);
     if (!save.outfits.includes('ranger')) save.outfits.push('ranger');
     applyUpgrades();
@@ -1962,7 +2031,7 @@ ui.shopBody.addEventListener('click', (e) => {
   } else if (d.coins) {
     const big = d.coins === '2';
     if (payGems(big ? 120 : 30)) {
-      grantCoins(chestReward() * (big ? 10 : 2), above(), 16);
+      grantCoins(packCoins() * (big ? 10 : 2), above(), 16);
       persist();
     }
   } else if (d.weapon) {
@@ -2797,7 +2866,7 @@ function endDayEvents(): void {
 
 /** Butin d'une cache (petit) ou d'un ravitaillement (gros). */
 function giveLoot(at: THREE.Vector3, big: boolean): void {
-  const coins = big ? Math.round(0.4 * chestCoins()) : 20 + Math.round(0.06 * chestCoins());
+  const coins = big ? Math.round(0.4 * packCoins()) : 20 + Math.round(0.06 * packCoins());
   grantCoins(coins, at, 10);
   const pool: ItemType[] = ['scrap', 'plank', 'log', 'scrap'];
   if (nav.eastOpen) pool.push('fuel');
@@ -3074,7 +3143,7 @@ function updateCombat(dt: number): void {
   // Tours d'angle (niveau du camp) : elles couvrent les flancs.
   if (night) {
     corners.forEach((c, i) => {
-      if (save.campLv < c.from || !isBuilt(c.id)) return;
+      if (!isBuilt(c.id)) return;
       cornerClock[i] = (cornerClock[i] ?? 0) - dt;
       if (cornerClock[i]! > 0) return;
       const cz = horde.nearest(new THREE.Vector3(c.x, 0, c.z), 15);
@@ -3167,7 +3236,7 @@ function showVictory(): void {
  */
 const maxAway = () => Math.min(12 * 3600, (1 + 0.5 * lv('foreman') + (isBuilt('warehouse') ? 1 : 0) + ct('radio')) * 3600 + 900 * lv('reserve'));
 const offlineEff = () => 0.15 + 0.015 * lv('foreman');
-const offlineCoinCap = () => Math.round((chestCoins() * 1.5 * (1 + 0.1 * lv('foreman'))) / 10) * 10;
+const offlineCoinCap = () => Math.round((packCoins() * 1.5 * (1 + 0.1 * lv('foreman'))) / 10) * 10;
 
 function fmtDur(secs: number): string {
   const m = Math.round(secs / 60);
@@ -3764,7 +3833,10 @@ applyCampLevel(true);
   palisade.setTier(save.wallTier);
   palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
   const full = palisade.sections.map((s) => s.max);
-  const hp = save.walls && save.walls.length === palisade.sections.length ? save.walls : save.campLv > 1 ? full : palisade.initialHp();
+  // Une sauvegarde plus ancienne a moins de troncons (l'etal a ete ajoute en dernier) : on
+  // reprend ce qu'elle connait, le reste est intact.
+  const saved = save.walls && save.walls.length > 0 && save.walls.length <= palisade.sections.length ? save.walls : null;
+  const hp = saved ? palisade.sections.map((s, i) => saved[i] ?? s.max) : save.campLv > 1 ? full : palisade.initialHp();
   palisade.sections.forEach((s, i) => palisade.setHp(s, hp[i]!));
 }
 for (const id of save.built) applyBuild(id, true);

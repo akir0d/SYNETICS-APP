@@ -404,3 +404,27 @@ export function foundryRuin(scene: THREE.Scene, x: number, z: number): THREE.Gro
   weeds(g, r, 5, 3.4);
   return finish(scene, g, x, z);
 }
+
+/**
+ * Un chantier de l'agrandissement du camp : dalle de terre battue, piquets et cordeau,
+ * planches empilees, quelques pierres et herbes. Il attend qu'on paie pour batir.
+ */
+export function buildSite(scene: THREE.Scene, x: number, z: number, rad: number, seed: number): THREE.Group {
+  const r = rng(seed);
+  const g = new THREE.Group();
+  g.add(cyl(rad * 0.92, rad, 0.08, 0xa0805a, 24, 0, 0.04, 0));
+  const k = rad * 0.72;
+  const corners: [number, number][] = [[-k, -k], [k, -k], [k, k], [-k, k]];
+  for (const [sx, sz] of corners) g.add(cyl(0.05, 0.065, 0.75, C.woodLight, 8, sx, 0.37, sz));
+  // Cordeau tendu entre les piquets.
+  const cord = 0xf0e6c8;
+  g.add(box(2 * k, 0.025, 0.025, cord, 0, 0.62, -k), box(2 * k, 0.025, 0.025, cord, 0, 0.62, k));
+  g.add(box(0.025, 0.025, 2 * k, cord, -k, 0.62, 0), box(0.025, 0.025, 2 * k, cord, k, 0.62, 0));
+  // Planches empilees, pretes a monter.
+  const tones = [C.wood, C.woodLight, C.woodDark, C.wood];
+  for (let i = 0; i < 4; i++) g.add(board(1.5, tones[i]!, -0.15 + (r() - 0.5) * 0.08, 0.12 + i * 0.075, -0.25 + i * 0.03, 0.05 * (i % 2 ? 1 : -1)));
+  g.add(at(crate(0.45), rad * 0.45, 0, rad * 0.35, 0.4));
+  rubble(g, r, 5, -rad * 0.4, rad * 0.35, rad * 0.6, STONES, 0.16);
+  weeds(g, r, 5, rad * 2.2);
+  return finish(scene, g, x, z, r() * 0.6 - 0.3);
+}

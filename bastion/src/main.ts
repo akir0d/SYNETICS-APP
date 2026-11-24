@@ -33,7 +33,7 @@ import { simulateOffline } from './offline';
 import { CREW, OUTFITS, RADIO, WEAPONS, type WeaponId } from './meta';
 import { Airdrop, CACHE_SPOTS, Cache, Caravan, DROP_SPOTS, RESCUE_SPOTS, Rescue, type Spot } from './events';
 import {
-  bedRuin, benchRuin, dockRuin, fieldRuin, foundryRuin, gateJunk, junkPile, kitchenRuin, millRuin, quarryRuin, sawmillRuin, shelterRuin, towerRuin,
+  bedRuin, benchRuin, buildSite, dockRuin, fieldRuin, foundryRuin, gateJunk, junkPile, kitchenRuin, millRuin, quarryRuin, sawmillRuin, shelterRuin, towerRuin,
 } from './ruins';
 import { BIN_CAP, CoinDrops, Converter, Market, Reserve } from './stations';
 import { campDirt, planarUV } from './textures';
@@ -699,36 +699,68 @@ function placeEdgeArrows(): void {
 const CAMP_SIZES = [{ minX: -13, maxX: 13 }, { minX: -13, maxX: 13 }, { minX: -13, maxX: 19 }, { minX: -19, maxX: 19 }, { minX: -19, maxX: 19 }];
 
 const corners = [
-  { x: 19.4, z: -11.4, from: 2 }, { x: 19.4, z: 11.4, from: 2 },
-  { x: -19.4, z: -11.4, from: 3 }, { x: -19.4, z: 11.4, from: 3 },
+  { id: 'towerNE', x: 19.4, z: -11.4, from: 2 }, { id: 'towerSE', x: 19.4, z: 11.4, from: 2 },
+  { id: 'towerNW', x: -19.4, z: -11.4, from: 3 }, { id: 'towerSW', x: -19.4, z: 11.4, from: 3 },
 ].map((c) => ({ ...c, tower: watchTower(scene, c.x, c.z, false) }));
 const cornerClock: number[] = [];
 
 /** Les batiments des extensions, et le niveau qui les apporte. */
-const EXT: { id: string; b: Building; lv: number; r: number }[] = [
-  { id: 'armory', b: armory(16.2, 4.5), lv: 2, r: 1.9 },
-  { id: 'house1', b: cabin(16, -2.6, -Math.PI / 2, 0x5f8a85), lv: 2, r: 1.7 },
-  { id: 'house2', b: cabin(16, -8.2, -Math.PI / 2, 0x9c4a3c), lv: 2, r: 1.7 },
-  { id: 'infirmary', b: infirmary(-16, 4), lv: 3, r: 2.4 },
-  { id: 'house3', b: cabin(-16, -2.6, Math.PI / 2, 0x6f7a4a), lv: 3, r: 1.7 },
-  { id: 'house4', b: cabin(-16, -8.2, Math.PI / 2, 0xb9874a), lv: 3, r: 1.7 },
-  { id: 'warehouse', b: warehouse(16, 9.0), lv: 4, r: 2.4 },
+/**
+ * Les chantiers de l'agrandissement : chaque niveau du camp ouvre des emplacements (dalle,
+ * piquets, planches) ; on paie a cote pour batir. Rien n'apparait tout fait.
+ */
+interface ExtSite {
+  id: string; name: string; icon: string; lv: number; r: number; x: number; z: number;
+  pad: { x: number; z: number }; cost: Cost; group: THREE.Object3D; live: THREE.Object3D[]; site: THREE.Object3D;
+}
+const extDef = (id: string, name: string, icon: string, lv: number, r: number, b: Building, pad: { x: number; z: number }, cost: Cost) => ({
+  id, name, icon, lv, r, pad, cost, b,
+});
+const EXT_DEFS = [
+  extDef('armory', 'l’armurerie', '🛡️', 2, 1.9, armory(16.2, 4.5), { x: 13.0, z: 4.5 }, { coins: 3000, plank: 20, scrap: 15 }),
+  extDef('house1', 'une maison', '🏡', 2, 1.7, cabin(16, -2.6, -Math.PI / 2, 0x5f8a85), { x: 13.0, z: -2.6 }, { coins: 1800, plank: 20 }),
+  extDef('house2', 'une maison', '🏡', 2, 1.7, cabin(16, -8.2, -Math.PI / 2, 0x9c4a3c), { x: 13.0, z: -8.2 }, { coins: 1800, plank: 20 }),
+  extDef('infirmary', 'l’infirmerie', '🩹', 3, 2.4, infirmary(-16, 4), { x: -12.6, z: 4.0 }, { coins: 5000, plank: 25, bread: 10 }),
+  extDef('house3', 'une maison', '🏡', 3, 1.7, cabin(-16, -2.6, Math.PI / 2, 0x6f7a4a), { x: -13.0, z: -2.6 }, { coins: 3000, plank: 25, scrap: 10 }),
+  extDef('house4', 'une maison', '🏡', 3, 1.7, cabin(-16, -8.2, Math.PI / 2, 0xb9874a), { x: -13.0, z: -8.2 }, { coins: 3000, plank: 25, scrap: 10 }),
+  extDef('warehouse', 'l’entrepôt', '🏬', 4, 2.4, warehouse(16, 9.0), { x: 12.9, z: 9.6 }, { coins: 8000, stone: 40, metal: 10 }),
 ];
-for (const e of EXT) scene.add(e.b.group);
+for (const e of EXT_DEFS) scene.add(e.b.group);
+const TOWER_PADS: Record<string, { x: number; z: number }> = {
+  towerNE: { x: 17.6, z: -10.2 }, towerSE: { x: 18.3, z: 6.6 }, towerNW: { x: -17.6, z: -10.2 }, towerSW: { x: -17.6, z: 10.0 },
+};
+const EXT: ExtSite[] = [
+  ...EXT_DEFS.map((e, i) => ({
+    id: e.id, name: e.name, icon: e.icon, lv: e.lv, r: e.r, x: e.b.group.position.x, z: e.b.group.position.z,
+    pad: e.pad, cost: e.cost, group: e.b.group, live: e.b.live ?? [], site: buildSite(scene, e.b.group.position.x, e.b.group.position.z, e.r, 900 + i),
+  })),
+  ...corners.map((c, i) => ({
+    id: c.id, name: 'une tour d’angle', icon: '🗼', lv: c.from, r: 1.2, x: c.x, z: c.z, pad: TOWER_PADS[c.id]!,
+    cost: c.from === 2 ? { coins: 2500, plank: 15, scrap: 10 } : { coins: 4000, plank: 20, scrap: 15 },
+    group: c.tower.group, live: c.tower.live ?? [], site: buildSite(scene, c.x, c.z, 1.3, 950 + i),
+  })),
+];
+for (const e of EXT) e.site.visible = false;
+/** Emplacements deja ouverts (collision posee une seule fois). */
 const extShown = new Set<string>();
+/** Les parties d'avant les chantiers avaient deja ces batiments : on les leur garde. */
+if (!save.seen.includes('ext-v1')) {
+  save.seen.push('ext-v1');
+  for (const e of EXT) if (save.campLv >= e.lv && !save.built.includes(e.id)) save.built.push(e.id);
+}
 
 /** Les artisans qui ont besoin d'une maison (fermiere et bucheron logent a l'abri). */
 const HOUSED = ['fisher', 'scav', 'porter', 'cashier'];
-const houses = () => (save.campLv >= 2 ? 2 : 0) + (save.campLv >= 3 ? 2 : 0);
+const houses = () => ['house1', 'house2', 'house3', 'house4'].filter((id) => isBuilt(id)).length;
 const freeHouse = () => houses() - HOUSED.filter((id) => isBuilt(id)).length > 0;
 
 /** Les niveaux du camp : ce que chacun coute et apporte. */
 const CAMP_LEVELS: { cost: Cost; title: string; done: string }[] = [
   { cost: { coins: 0 }, title: '', done: '' },
   { cost: { coins: 0 }, title: '', done: '' },
-  { cost: { coins: 6500, plank: 40, log: 30 }, title: 'Camp niv. 2 : extension est', done: 'Le camp s’agrandit : armurerie, 2 maisons, 2 tours' },
-  { cost: { coins: 11000, plank: 60, scrap: 40, bread: 20 }, title: 'Camp niv. 3 : extension ouest', done: 'Le camp s’agrandit : infirmerie, 2 maisons, 2 tours' },
-  { cost: { coins: 12000, stone: 100, metal: 30 }, title: 'Camp niv. 4 : bastion', done: 'Bastion : entrepôt et palissade renforcée' },
+  { cost: { coins: 5000, plank: 30, log: 30 }, title: 'Camp niv. 2 : extension est', done: 'Le camp s’agrandit ! Chantiers : armurerie, 2 maisons, 2 tours' },
+  { cost: { coins: 9000, plank: 50, scrap: 30, bread: 20 }, title: 'Camp niv. 3 : extension ouest', done: 'Le camp s’agrandit ! Chantiers : infirmerie, 2 maisons, 2 tours' },
+  { cost: { coins: 10000, stone: 80, metal: 25 }, title: 'Camp niv. 4 : bastion', done: 'Bastion : palissade renforcée ! Chantier : entrepôt' },
 ];
 const CAMP_PAD = { x: -3.6, z: 6.2 };
 const dirtStrips = new Set<number>();
@@ -773,20 +805,34 @@ function applyCampLevel(instant: boolean): void {
       scene.add(strip);
     }
   }
+  // Chaque niveau ouvre ses emplacements : chantier a payer, ou batiment deja bati.
   for (const e of EXT) {
     if (save.campLv < e.lv || extShown.has(e.id)) continue;
     extShown.add(e.id);
-    world.solids.push({ x: e.b.group.position.x, z: e.b.group.position.z, r: e.r });
-    if (instant) { restorer.instant(null, e.b.group); consolidate(e.b.group, e.b.live); }
-    else restorer.run(null, e.b.group, () => consolidate(e.b.group, e.b.live));
+    world.solids.push({ x: e.x, z: e.z, r: e.r });
+    if (isBuilt(e.id)) {
+      restorer.instant(e.site, e.group);
+      consolidate(e.group, e.live);
+    } else {
+      e.site.visible = true;
+      if (!instant) particles.burst(new THREE.Vector3(e.x, 0.6, e.z), [0xb9a58a, 0x9a8a72], 14, { speed: 3, up: 3, size: 0.2, life: 0.8 });
+    }
   }
-  corners.forEach((c) => {
-    if (save.campLv < c.from || c.tower.group.visible) return;
-    world.solids.push({ x: c.x, z: c.z, r: 1.2 });
-    if (instant) { restorer.instant(null, c.tower.group); consolidate(c.tower.group, c.tower.live); }
-    else restorer.run(null, c.tower.group, () => consolidate(c.tower.group, c.tower.live));
-  });
   applyUpgrades();
+}
+
+/** On paie un chantier de l'agrandissement : le batiment se monte sous nos yeux. */
+function buildExt(e: ExtSite): void {
+  if (isBuilt(e.id)) return;
+  save.built.push(e.id);
+  restorer.run(e.site, e.group, () => consolidate(e.group, e.live));
+  sfx.sfxBuild();
+  buzz(40);
+  shake = Math.max(shake, 0.2);
+  toast(`${e.icon} Chantier terminé : ${e.name.replace(/^une |^l’/, '')} !`);
+  applyUpgrades();
+  renderObjective();
+  persist();
 }
 
 // ---- zones dynamiques : reparations et niveau du camp
@@ -915,6 +961,12 @@ function updateConvoy(): void {
 
 /** Fait correspondre les zones affichees a l'etat : une par batiment demoli, une pour le camp, un convoi. */
 function syncDynPads(): void {
+  for (const e of EXT) {
+    const key = `ext:${e.id}`;
+    if (save.campLv < e.lv || isBuilt(e.id) || dynPads.has(key)) continue;
+    const name = e.name.replace(/^une |^l’/, '');
+    dynPads.set(key, makeDyn(key, e.pad.x, e.pad.z, e.cost, e.icon, `Bâtir : ${name}`, () => buildExt(e)));
+  }
   // Apres la victoire : un convoi a la fois, depuis l'arret du bus.
   const ckey = `convoy:${save.convoys}`;
   if (save.won && save.convoyAt === 0 && victoryT === 0 && bus.driving === 0 && !dynPads.has(ckey)) {
@@ -1039,7 +1091,11 @@ function currentObjective(): Objective | null {
 function objectiveBlock(): { icon: string; text: string; at: THREE.Vector3 } | null {
   const o = currentObjective();
   if (!o) return null;
-  if (o.house && !freeHouse()) return { icon: '🏠', text: `Agrandis le camp (🏰 près du feu) pour loger ${o.house}`, at: new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z) };
+  if (o.house && !freeHouse()) {
+    const site = EXT.find((e) => e.id.startsWith('house') && save.campLv >= e.lv && !isBuilt(e.id));
+    if (site) return { icon: '🏡', text: `Bâtis une maison pour loger ${o.house}`, at: new THREE.Vector3(site.pad.x, 0, site.pad.z) };
+    return { icon: '🏠', text: `Agrandis le camp (🏰 près du feu) pour loger ${o.house}`, at: new THREE.Vector3(CAMP_PAD.x, 0, CAMP_PAD.z) };
+  }
   if (o.crew && isBroken('shelter')) {
     const r = repairSpot('shelter');
     return { icon: '🔨', text: 'Répare l’abri : sans toit, les survivants ne travaillent plus', at: new THREE.Vector3(r.x, 0, r.z) };
@@ -1111,7 +1167,7 @@ function applyUpgrades(): void {
   player.stack.cap = 8 + 4 * save.up.bag;
   player.speedMul = 1 + 0.12 * save.up.boots;
   // L'infirmerie (niv. 3 du camp) : 40 points de vie de plus.
-  player.maxHp = 100 + 30 * save.up.health + (save.campLv >= 3 ? 40 : 0);
+  player.maxHp = 100 + 30 * save.up.health + (isBuilt('infirmary') ? 40 : 0);
   player.hp = Math.min(player.hp, player.maxHp);
   // Portes renforcees (niveau 4 du camp) : un cran de solidite en plus pour toute la palissade.
   palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
@@ -1401,7 +1457,7 @@ function applyMeta(dt: number): void {
   cook.speed = (1 + 0.15 * lv('cook')) * grow * tierK('kitchen');
   mill.speed = (1 + 0.15 * lv('mill')) * grow * tierK('mill');
   forge.speed = grow * tierK('foundry');
-  reserve.cap = 240 + 60 * lv('reserve') + 120 * (bt('shelter') - 1) + (save.campLv >= 4 ? 200 : 0);
+  reserve.cap = 240 + 60 * lv('reserve') + 120 * (bt('shelter') - 1) + (isBuilt('warehouse') ? 200 : 0);
   player.speedMul = (1 + 0.12 * save.up.boots) * (boostOn('speed') ? 1.4 : 1);
 }
 
@@ -1610,7 +1666,7 @@ function renderShop(): void {
     for (const wd of WEAPONS) {
       const owned = save.weapons.includes(wd.id);
       const on = save.weapon === wd.id;
-      const btns = !owned && save.campLv < 2 ? `<button class="btn" disabled>Armurerie (camp niv. 2)</button>`
+      const btns = !owned && !isBuilt('armory') ? `<button class="btn" disabled>Bâtis l’armurerie (camp niv. 2)</button>`
         : on ? `<button class="btn" disabled>Équipée</button>`
         : owned ? `<button class="btn" data-equip="${wd.id}">Équiper</button>`
           : `<button class="btn ${save.coins < wd.coins ? 'poor' : ''}" data-weapon="${wd.id}" data-pay="coin"><span class="coin"></span>${wd.coins}</button><button class="btn gem" data-weapon="${wd.id}" data-pay="gem">${wd.gems} 💎</button>`;
@@ -2908,7 +2964,7 @@ function updateCombat(dt: number): void {
   // Tours d'angle (niveau du camp) : elles couvrent les flancs.
   if (night) {
     corners.forEach((c, i) => {
-      if (save.campLv < c.from) return;
+      if (save.campLv < c.from || !isBuilt(c.id)) return;
       cornerClock[i] = (cornerClock[i] ?? 0) - dt;
       if (cornerClock[i]! > 0) return;
       const cz = horde.nearest(new THREE.Vector3(c.x, 0, c.z), 15);
@@ -2946,7 +3002,7 @@ function hurt(dt: number, contacts: number): void {
       else toast('💫 K.O. !');
     }
   } else if (contacts === 0) {
-    player.hp = Math.min(player.maxHp, player.hp + dt * (save.phase === 'night' ? 4 : 20) * (save.campLv >= 3 ? 2.5 : 1));
+    player.hp = Math.min(player.maxHp, player.hp + dt * (save.phase === 'night' ? 4 : 20) * (isBuilt('infirmary') ? 2.5 : 1));
   }
 }
 
@@ -2998,7 +3054,7 @@ function showVictory(): void {
  * contremaitre), absence comptee 1 h (+30 min par niveau, entrepot, relais radio, reserve),
  * et un plafond de pieces de l'ordre de 6 a 10 minutes de jeu actif.
  */
-const maxAway = () => Math.min(12 * 3600, (1 + 0.5 * lv('foreman') + (save.campLv >= 4 ? 1 : 0) + ct('radio')) * 3600 + 900 * lv('reserve'));
+const maxAway = () => Math.min(12 * 3600, (1 + 0.5 * lv('foreman') + (isBuilt('warehouse') ? 1 : 0) + ct('radio')) * 3600 + 900 * lv('reserve'));
 const offlineEff = () => 0.15 + 0.015 * lv('foreman');
 const offlineCoinCap = () => Math.round((chestCoins() * 1.5 * (1 + 0.1 * lv('foreman'))) / 10) * 10;
 

@@ -12,7 +12,7 @@ import { Flyers, Particles, Tracers } from './fx';
 import { Helper, type HelperCtx, type Job } from './helpers';
 import { ITEMS, coinMesh, itemMesh, type ItemType } from './items';
 import { LOOK, box, damp, easeOutBack, glow, guardShaders, rbox } from './kit';
-import { CAMP, L, insideFarm, insideStation } from './layout';
+import { CAMP, FARM, L, insideFarm, insideStation } from './layout';
 import { regions, type NavState } from './nav';
 import { Palisade, TIERS, logsNeeded, stateOf, unitHp, type Section } from './palisade';
 import type { Segment } from './physics';
@@ -809,8 +809,7 @@ function rebuildPalisade(): void {
   palisade.dispose();
   palisade = new Palisade(scene, labels);
   world.walls.push(...palisade.walls);
-  zombieWalls.length = 0;
-  zombieWalls.push(...world.walls, ...palisade.gateWalls);
+  syncZombieWalls();
   palisade.setTier(save.wallTier);
   palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
   if (northOn) palisade.enableNorth();
@@ -1072,6 +1071,154 @@ function syncDynPads(): void {
       toast(`🏰 ${lvl.done} !`);
       sfx.sfxVictory();
     }));
+  }
+  syncFarmPads();
+}
+
+
+// ---- la ferme fortifiee : palissade (pieux, puis pierre), porte, deux tours de garde
+
+/** Les deux niveaux de la palissade de la ferme : materiau (TIERS), cout, condition. */
+const FARM_WALL: { tier: number; cost: Cost; icon: string; title: string; done: string; ready: () => boolean }[] = [
+  {
+    tier: 2, cost: { coins: 3500, log: 50, plank: 20 }, icon: '🪓', title: 'Fortifier la ferme : palissade',
+    done: '🪓 La ferme est fortifiée : palissade de pieux, porte fermée la nuit', ready: () => isBuilt('mill'),
+  },
+  {
+    tier: 3, cost: { coins: 7000, stone: 100 }, icon: '🧱', title: 'Ferme : palissade en pierre',
+    done: '🧱 La palissade de la ferme passe à la pierre', ready: () => isBuilt('quarry'),
+  },
+];
+/** Chantier de la palissade : devant l'entree de la ferme, a gauche de la porte, hors du passage. */
+const FARM_WALL_PAD = { x: -38.6, z: 15.8 };
+const FARM_TOWER_COST: Cost = { coins: 3000, plank: 15, scrap: 10 };
+const FARM_TOWER_RANGE = 17;
+/**
+ * Tours de garde de la ferme (apres la palissade) : coin sud-est (porte, route, champs) et
+ * coin nord-ouest (moulin, flanc de la foret). Chantiers comme les tours d'angle du camp.
+ */
+const farmTowers = [
+  { id: 'farmTowerSE', x: -22.6, z: 13.4, pad: { x: -25.0, z: 15.8 } },
+  { id: 'farmTowerNW', x: -48.4, z: -9.4, pad: { x: -46.4, z: -7.2 } },
+].map((t, i) => {
+  const tw = watchTower(scene, t.x, t.z, false);
+  const site: ExtSite = {
+    id: t.id, name: 'une tour de garde', icon: '🗼', lv: 0, r: 1.2, x: t.x, z: t.z, pad: t.pad, cost: FARM_TOWER_COST,
+    group: tw.group, live: tw.live ?? [], site: buildSite(scene, t.x, t.z, 1.3, 970 + i),
+  };
+  site.site.visible = false;
+  return { site, tower: tw, at: new THREE.Vector3(t.x, 0, t.z), clock: 0, shown: false };
+});
+/** Groupe de la palissade de la ferme : la restauration la remonte d'un seul geste. */
+const farmRoot = new THREE.Group();
+scene.add(farmRoot);
+let farmWall: Palisade | null = null;
+
+// Jamais d'apparition dans la ferme fortifiee (ni juste devant ses murs).
+const campNoSpawn = horde.noSpawn;
+horde.noSpawn = (x, z) => campNoSpawn(x, z)
+  || (farmWall !== null && x > FARM.minX - 3 && x < FARM.maxX + 3 && z > FARM.minZ - 3 && z < FARM.maxZ + 3);
+
+const wallsBuf: Palisade[] = [];
+/** Les palissades en place : celle du camp, et celle de la ferme une fois batie. */
+function allWalls(): Palisade[] {
+  wallsBuf.length = 0;
+  wallsBuf.push(palisade);
+  if (farmWall) wallsBuf.push(farmWall);
+  return wallsBuf;
+}
+
+/** La palissade a laquelle appartient un troncon. */
+function wallOf(s: Section): Palisade {
+  return s.site === 'farm' && farmWall ? farmWall : palisade;
+}
+
+/** Hauteur d'une etiquette au-dessus d'un troncon : son enclos est bas au sud, haut ailleurs. */
+function wallTop(s: Section, low: number, high: number): number {
+  return s.z > (s.site === 'farm' ? FARM.maxZ : CAMP.maxZ) - 0.5 ? low : high;
+}
+
+/** Les zombies butent sur les murs et sur les portes fermees (camp et ferme) ; le joueur, jamais. */
+function syncZombieWalls(): void {
+  zombieWalls.length = 0;
+  zombieWalls.push(...world.walls, ...palisade.gateWalls);
+  if (farmWall) zombieWalls.push(...farmWall.gateWalls);
+}
+
+/** Debout sur une zone de paiement dynamique (chantier, reparation) : le bois y va, pas au mur. */
+function onDynPad(): boolean {
+  for (const dp of dynPads.values()) if (near(dp.x, dp.z, 1.45)) return true;
+  return false;
+}
+
+/** Bati la palissade de la ferme a son niveau (ou change son materiau) ; `instant` au chargement. */
+function applyFarmWall(instant: boolean): void {
+  const n = Math.min(save.farmLv, FARM_WALL.length);
+  if (n <= 0) return;
+  const tier = FARM_WALL[n - 1]!.tier;
+  const fence = world.farmFence;
+  if (!farmWall) {
+    farmWall = new Palisade(farmRoot, labels, 'farm', tier);
+    world.walls.push(...farmWall.walls);
+    syncZombieWalls();
+    // La cloture de bois disparait : la palissade la remplace.
+    for (const sg of fence.segs) sg.off = true;
+    // Les zombies ne contournent plus la ferme par sa porte : ils defoncent la palissade.
+    const i = navZombies.indexOf(R.farm);
+    if (i >= 0) navZombies.splice(i, 1);
+    if (instant) restorer.instant(fence.mesh, farmRoot);
+    else restorer.run(fence.mesh, farmRoot);
+  } else if (farmWall.tier !== tier) {
+    farmWall.setTier(tier);
+    if (!instant) restorer.run(null, farmRoot);
+  }
+  showFarmTowers(instant);
+}
+
+/** Les emplacements des tours de garde s'ouvrent avec la palissade de la ferme. */
+function showFarmTowers(instant: boolean): void {
+  if (save.farmLv < 1) return;
+  for (const t of farmTowers) {
+    if (t.shown) continue;
+    t.shown = true;
+    const e = t.site;
+    world.solids.push({ x: e.x, z: e.z, r: e.r });
+    if (isBuilt(e.id)) {
+      restorer.instant(e.site, e.group);
+      consolidate(e.group, e.live);
+    } else {
+      e.site.visible = true;
+      if (!instant) particles.burst(new THREE.Vector3(e.x, 0.6, e.z), [0xb9a58a, 0x9a8a72], 14, { speed: 3, up: 3, size: 0.2, life: 0.8 });
+    }
+  }
+}
+
+/** Chantiers de la ferme fortifiee : la palissade (un niveau a la fois), puis les deux tours. */
+function syncFarmPads(): void {
+  const fl = save.farmLv;
+  const fw = FARM_WALL[fl];
+  const key = `farm:wall:${fl + 1}`;
+  if (fw && fw.ready() && !dynPads.has(key)) {
+    dynPads.set(key, makeDyn(key, FARM_WALL_PAD.x, FARM_WALL_PAD.z, fw.cost, fw.icon, fw.title, () => {
+      save.farmLv = fl + 1;
+      applyFarmWall(false);
+      toast(fw.done);
+      sfx.sfxBuild();
+      buzz(40);
+      shake = Math.max(shake, 0.2);
+      renderObjective();
+    }));
+    if (fl === 0 && !save.seen.includes('hint:farmwall')) {
+      save.seen.push('hint:farmwall');
+      toast('🪓 Nouveau chantier devant la ferme : une palissade pour protéger les champs');
+    }
+  }
+  if (fl < 1) return;
+  for (const t of farmTowers) {
+    const e = t.site;
+    const k = `ext:${e.id}`;
+    if (isBuilt(e.id) || dynPads.has(k)) continue;
+    dynPads.set(k, makeDyn(k, e.pad.x, e.pad.z, e.cost, e.icon, 'Bâtir : tour de garde', () => buildExt(e)));
   }
 }
 
@@ -2554,9 +2701,18 @@ function interact(dt: number): void {
   // le bois va la ou on l'a voulu.
   const busyZone = near(L.shelf.x, L.shelf.z, 1.8) || near(reserve.zone.x, reserve.zone.z, 1.3)
     || pads.some((q) => q.shown && !isBuilt(q.def.id) && near(q.def.x, q.def.z, 1.6))
-    || [saw, cook, mill, forge].some((c) => c.built && near(c.input.x, c.input.z, 1.5));
-  const wallItem = palisade.repairItem;
-  repairTarget = !busyZone && player.stack.has(wallItem) ? palisade.repairable(p.x, p.z) : null;
+    || [saw, cook, mill, forge].some((c) => c.built && near(c.input.x, c.input.z, 1.5)) || onDynPad();
+  // Le troncon abime a portee, sur la palissade du camp ou sur celle de la ferme.
+  repairTarget = null;
+  let repairWall = palisade;
+  if (!busyZone) {
+    for (const pl of allWalls()) {
+      if (!player.stack.has(pl.repairItem)) continue;
+      const s = pl.repairable(p.x, p.z);
+      if (s) { repairTarget = s; repairWall = pl; break; }
+    }
+  }
+  const wallItem = repairWall.repairItem;
   if (settled && dropClock <= 0 && repairTarget) {
     const s = repairTarget;
     const item = player.stack.take((t) => t === wallItem);
@@ -2671,19 +2827,20 @@ let repairTarget: Section | null = null;
 function repairLanded(s: Section): void {
   s.inflight = Math.max(0, s.inflight - 1);
   const before = stateOf(s);
-  palisade.setHp(s, s.hp + unitHp(s));
+  const pl = wallOf(s);
+  pl.setHp(s, s.hp + unitHp(s));
   save.stats.repairs++;
   sfx.sfxChop();
   buzz(10);
   const at = new THREE.Vector3(s.x, 1.2, s.z);
   particles.burst(at, [0xc68a4f, 0xe0b077, 0xd9b07a], 10, { speed: 3, up: 3, size: 0.12, life: 0.6 });
   if (stateOf(s) !== before) {
-    palisade.bump(s);
+    pl.bump(s);
     particles.burst(at.setY(0.4), [0xb9a58a, 0x9a8a72], 12, { speed: 3, up: 2, size: 0.22, life: 0.7 });
   }
   if (s.hp >= s.max) {
     sfx.sfxBuild();
-    toast('🪵 Palissade consolidée');
+    toast(s.site === 'farm' ? `${ITEMS[pl.repairItem].icon} Palissade de la ferme consolidée` : '🪵 Palissade consolidée');
   }
 }
 
@@ -2691,12 +2848,12 @@ let wallToast = 0;
 /** Un coup de zombie sur la palissade : eclats de bois, et alerte si elle cede. */
 function onWallHit(s: Section, at: THREE.Vector3): void {
   particles.burst(at, [0xc68a4f, 0x7a5a3a, 0xd9b07a], 5, { speed: 3, up: 2, size: 0.1, life: 0.5 });
-  warn(`w${s.id}`, s.x, s.z > CAMP.maxZ - 0.5 ? 2.4 : 3.6, s.z);
+  warn(`${s.site === 'farm' ? 'fw' : 'w'}${s.id}`, s.x, wallTop(s, 2.4, 3.6), s.z);
   const near0 = Math.hypot(at.x - player.position.x, at.z - player.position.z) < 14;
   if (near0) sfx.sfxChop();
   if (s.hp <= 0 && performance.now() - wallToast > 4000) {
     wallToast = performance.now();
-    toast('⚠️ La palissade a cédé !');
+    toast(s.site === 'farm' ? '⚠️ La palissade de la ferme a cédé !' : '⚠️ La palissade a cédé !');
     buzz(60);
     if (near0) shake = Math.max(shake, 0.2);
   }
@@ -3152,6 +3309,16 @@ function updateCombat(dt: number): void {
       // Comme la grande tour, leurs degats suivent la menace (sinon elles chatouillent la horde).
       shoot(cz, c.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false, true);
     });
+    // Tours de garde de la ferme : memes tirs, elles couvrent les champs et le moulin.
+    for (const t of farmTowers) {
+      if (!isBuilt(t.site.id)) continue;
+      t.clock -= dt;
+      if (t.clock > 0) continue;
+      const fz = horde.nearest(t.at, FARM_TOWER_RANGE);
+      if (!fz) continue;
+      t.clock = 0.8 / (1 + 0.08 * lv('tower'));
+      shoot(fz, t.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false, true);
+    }
   }
 }
 
@@ -3283,10 +3450,12 @@ function offlineGains(): void {
     for (const [t, n] of Object.entries(r.binsSold) as [ItemType, number][]) for (let i = 0; i < n; i++) market.bins.take(t);
     for (const [t, n] of Object.entries(r.items) as [ItemType, number][]) for (let i = 0; i < n; i++) reserve.add(t);
     if (r.nights > 0) {
-      for (const sct of palisade.sections) {
-        if (!sct.enabled) continue;
-        const floor = Math.min(sct.hp, unitHp(sct));
-        palisade.setHp(sct, Math.max(floor, sct.hp - sct.max * 0.12 * r.nights));
+      for (const pl of allWalls()) {
+        for (const sct of pl.sections) {
+          if (!sct.enabled) continue;
+          const floor = Math.min(sct.hp, unitHp(sct));
+          pl.setHp(sct, Math.max(floor, sct.hp - sct.max * 0.12 * r.nights));
+        }
       }
     }
     const got = r.coins > 0 || Object.keys(r.items).length > 0;
@@ -3359,6 +3528,7 @@ function persist(): void {
   save.lastSeen = Date.now();
   save.clockHigh = Math.max(save.clockHigh, save.lastSeen);
   save.walls = palisade.hpList();
+  if (farmWall) save.farmWalls = farmWall.hpList();
   const bins: Partial<Record<ItemType, number>> = {};
   for (const b of market.bins.bins) if (b.count > 0) bins[b.type] = b.count;
   const res: Partial<Record<ItemType, number>> = {};
@@ -3560,8 +3730,9 @@ function step(dt: number, time: number): void {
   interact(dt);
   updateCycle(dt);
   updateCombat(dt);
-  const contacts = horde.update(dt, player.position, zombieWalls, world.solids, nightK, palisade, onWallHit, navZombies, STRUCTS, onStructHit);
+  const contacts = horde.update(dt, player.position, zombieWalls, world.solids, nightK, allWalls(), onWallHit, navZombies, STRUCTS, onStructHit);
   palisade.update(dt, save.cycle && save.phase === 'night', time);
+  farmWall?.update(dt, save.cycle && save.phase === 'night', time);
   hurt(dt, contacts);
   drops.update(dt, player.position, (v) => earn(v));
 
@@ -3787,21 +3958,26 @@ function drawFrame(): void {
   for (const dp of dynPads.values()) placeLabel(dp.label, dp.x, 0.3, dp.z - 1.4);
   // Palissade : une seule etiquette, celle du troncon abime le plus proche.
   let wallLabel: Section | null = repairTarget;
+  const wl = allWalls();
   if (!wallLabel) {
     let bd = 7;
-    for (const s of palisade.sections) {
-      if (!s.enabled || s.hp >= s.max) continue;
-      const d = palisade.distanceTo(s, player.position.x, player.position.z);
-      if (d < bd) { bd = d; wallLabel = s; }
+    for (const pl of wl) {
+      for (const s of pl.sections) {
+        if (!s.enabled || s.hp >= s.max) continue;
+        const d = pl.distanceTo(s, player.position.x, player.position.z);
+        if (d < bd) { bd = d; wallLabel = s; }
+      }
     }
   }
-  for (const s of palisade.sections) {
-    if (s !== wallLabel) { s.label.classList.add('off'); continue; }
-    const html = `${ITEMS[palisade.repairItem].icon} ${logsNeeded(s)}`;
-    if (s.label.innerHTML !== html) s.label.innerHTML = html;
-    s.label.classList.toggle('broken', s.hp <= 0);
-    s.label.classList.toggle('active', s === repairTarget);
-    placeLabel(s.label, s.x, s.z > CAMP.maxZ - 0.5 ? 2.2 : 3.4, s.z);
+  for (const pl of wl) {
+    for (const s of pl.sections) {
+      if (s !== wallLabel) { s.label.classList.add('off'); continue; }
+      const html = `${ITEMS[pl.repairItem].icon} ${logsNeeded(s)}`;
+      if (s.label.innerHTML !== html) s.label.innerHTML = html;
+      s.label.classList.toggle('broken', s.hp <= 0);
+      s.label.classList.toggle('active', s === repairTarget);
+      placeLabel(s.label, s.x, wallTop(s, 2.2, 3.4), s.z);
+    }
   }
   for (const c of market.customers) {
     const left = c.need - c.got;
@@ -3842,6 +4018,14 @@ applyCampLevel(true);
 for (const id of save.built) applyBuild(id, true);
 // Ce que les zombies avaient demoli reste en ruine jusqu'a reparation.
 for (const id of [...save.broken]) wreck(id, true);
+// La ferme fortifiee et l'etat de ses troncons (une liste d'une autre longueur : intacte).
+applyFarmWall(true);
+{
+  // (cast : l'analyse de flux ne voit pas l'affectation faite par applyFarmWall)
+  const fw = farmWall as Palisade | null;
+  const hp = save.farmWalls;
+  if (fw && hp && hp.length === fw.sections.length) fw.sections.forEach((s, i) => fw.setHp(s, hp[i] ?? s.max));
+}
 for (const b of TIERABLE) {
   if (!isBuilt(b.id) || bt(b.id) <= 1) continue;
   try { applyBuildingTier(b.id); } catch (err) { console.error(err); }
@@ -3875,6 +4059,7 @@ requestAnimationFrame(frame);
 (window as unknown as { __bastion: unknown }).__bastion = {
   player, save: () => save, SIM, market, beds, pads, horde, trees, scraps, helpers, saw, cook, palisade,
   renderer, reserve, pumps, fields, mill,
+  farm: () => farmWall, farmTowers, world, zombieWalls,
   give: (n: number) => { save.coins += n; },
   build: (id: string) => { const p = pads.find((x) => x.def.id === id); if (p) { save.paid[id] = { ...p.def.cost }; build(p); } },
   setObj: (n: number) => { save.obj = n; renderObjective(); },

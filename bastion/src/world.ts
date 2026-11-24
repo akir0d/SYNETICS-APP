@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeColored } from './bake';
 import {
   C, at, blob, box, capsule, cyl, glow, group, groundMat, lathe, mat, mesh, mixHex, paint, plank, puff, rbox, rcyl,
   rng, shadow, uniqueMat, vgrad, vmat,
@@ -31,6 +32,11 @@ export interface World {
   bounds: number;
   /** Passages bloques tant qu'on ne les a pas degages (ou construits). */
   locks: { west: Segment; east: Segment; dock: Segment };
+  /**
+   * La cloture de bois de la ferme : un maillage a part (hors fusion du decor) et ses
+   * segments, qu'on retire quand la palissade de la ferme la remplace.
+   */
+  farmFence: { mesh: THREE.Object3D; segs: Segment[] };
   /** Materiau de l'etang (ses vaguelettes s'animent). */
   water: THREE.MeshPhongMaterial | null;
 }
@@ -58,6 +64,7 @@ export function buildWorld(scene: THREE.Scene): World {
     keep: new Set(),
     bounds: 54,
     locks: { west: { x1: 0, z1: 0, x2: 0, z2: 0 }, east: { x1: 0, z1: 0, x2: 0, z2: 0 }, dock: { x1: 0, z1: 0, x2: 0, z2: 0 } },
+    farmFence: { mesh: new THREE.Group(), segs: [] },
     water: null,
   };
   const r = rng(7);
@@ -985,7 +992,8 @@ function barGeo(): THREE.BufferGeometry {
   return _bar;
 }
 
-function railFence(scene: THREE.Scene, w: World, x1: number, z1: number, x2: number, z2: number, metal: boolean): void {
+/** Une cloture a lisses ; `into` : groupe ou la poser (sinon la scene). Renvoie sa collision. */
+function railFence(scene: THREE.Scene, w: World, x1: number, z1: number, x2: number, z2: number, metal: boolean, into?: THREE.Group): Segment {
   const len = Math.hypot(x2 - x1, z2 - z1);
   const n = Math.max(1, Math.round(len / 2.2));
   const g = new THREE.Group();
@@ -1028,18 +1036,28 @@ function railFence(scene: THREE.Scene, w: World, x1: number, z1: number, x2: num
       }
     }
   }
-  scene.add(shadow(g));
-  w.walls.push({ x1, z1, x2, z2 });
+  (into ?? scene).add(shadow(g));
+  const seg: Segment = { x1, z1, x2, z2 };
+  w.walls.push(seg);
+  return seg;
 }
 
 /** La ferme abandonnee, a l'ouest : enclos, maison effondree, meules, tracteur. */
 function farmZone(scene: THREE.Scene, w: World, r: () => number): void {
   const F = FARM;
-  railFence(scene, w, F.minX, F.minZ, F.maxX, F.minZ, false);
-  railFence(scene, w, F.minX, F.minZ, F.minX, F.maxZ, false);
-  railFence(scene, w, F.maxX, F.minZ, F.maxX, F.maxZ, false);
-  railFence(scene, w, F.minX, F.maxZ, F.gateX - F.gate, F.maxZ, false);
-  railFence(scene, w, F.gateX + F.gate, F.maxZ, F.maxX, F.maxZ, false);
+  // Fusionnee a part et gardee hors du decor fige : la palissade de la ferme la remplace.
+  const fence = new THREE.Group();
+  const segs = [
+    railFence(scene, w, F.minX, F.minZ, F.maxX, F.minZ, false, fence),
+    railFence(scene, w, F.minX, F.minZ, F.minX, F.maxZ, false, fence),
+    railFence(scene, w, F.maxX, F.minZ, F.maxX, F.maxZ, false, fence),
+    railFence(scene, w, F.minX, F.maxZ, F.gateX - F.gate, F.maxZ, false, fence),
+    railFence(scene, w, F.gateX + F.gate, F.maxZ, F.maxX, F.maxZ, false, fence),
+  ];
+  const fenceMesh = mergeColored(fence);
+  scene.add(fenceMesh);
+  w.keep.add(fenceMesh);
+  w.farmFence = { mesh: fenceMesh, segs };
   w.locks.west = { x1: F.gateX - F.gate, z1: F.maxZ, x2: F.gateX + F.gate, z2: F.maxZ };
   w.walls.push(w.locks.west);
   patch(scene, -35, 2, 12, 10, C.dirt, 0.012, r, 0.15);

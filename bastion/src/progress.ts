@@ -160,6 +160,11 @@ export interface Save {
   convoyAt: number;
   /** Renommee : +3 % sur les ventes par point (max 20). */
   renown: number;
+  // ---- la ferme fortifiee
+  /** Palissade de la ferme : 0 aucune (cloture de bois), 1 pieux tailles, 2 pierre. */
+  farmLv: number;
+  /** Points de vie de chaque troncon de la palissade de la ferme. */
+  farmWalls?: number[];
 }
 
 export interface Stock {
@@ -203,6 +208,7 @@ export function freshSave(): Save {
     wallTier: 1, bt: {}, wonDay: 0, objT: [],
     ads: { key: '', n: {} }, login: { step: 0, last: '', total: 0 }, questBonus: '', contracts: {}, firstBuy: false,
     monthly: { until: 0, last: '' }, clockHigh: Date.now(), seen: [], convoys: 0, convoyAt: 0, renown: 0,
+    farmLv: 0,
   };
 }
 
@@ -239,6 +245,8 @@ export function loadSave(): Save {
       monthly: { ...base.monthly, ...(d.monthly ?? {}) },
       seen: Array.isArray(d.seen) ? d.seen : [],
       clockHigh: typeof d.clockHigh === 'number' ? d.clockHigh : Date.now(),
+      farmLv: typeof d.farmLv === 'number' ? Math.max(0, Math.min(2, Math.floor(d.farmLv))) : 0,
+      farmWalls: Array.isArray(d.farmWalls) ? d.farmWalls : undefined,
       // Les parties d'avant les materiaux avaient deja des pieux taillés.
       wallTier: d.wallTier ?? ((d.v ?? 3) < 4 ? 2 : 1),
     };

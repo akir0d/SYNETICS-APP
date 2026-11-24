@@ -342,13 +342,15 @@ export class Horde {
   /**
    * Les zombies foncent droit sur le joueur. La palissade les arrete : ils cognent
    * alors le troncon qui les bloque jusqu'a le casser (`onWall` a chaque coup).
+   * Plusieurs palissades (camp, ferme fortifiee) : la premiere qui barre la route compte.
    */
   update(
     dt: number, player: THREE.Vector3, walls: Segment[], solids: Circle[], nightK: number,
-    palisade: Palisade, onWall: (s: Section, at: THREE.Vector3) => void, nav: Region[] = [],
+    palisade: Palisade | Palisade[], onWall: (s: Section, at: THREE.Vector3) => void, nav: Region[] = [],
     structs: Structure[] = [], onStruct: (s: Structure, at: THREE.Vector3, dmg: number) => void = () => undefined,
   ): number {
     let contact = 0;
+    const pals = Array.isArray(palisade) ? palisade : [palisade];
     if (this.active && this.toSpawn > 0) {
       this.spawnClock -= dt;
       if (this.spawnClock <= 0) {
@@ -399,7 +401,12 @@ export class Horde {
       const dist = goal === aim ? dir.length() : Math.max(1, dir.length());
       dir.normalize();
       z.phase += dt * (3 + z.speed);
-      const wall = palisade.blocking(pos, aim);
+      let wall: Section | null = null;
+      let wallOf: Palisade | null = null;
+      for (const pl of pals) {
+        wall = pl.blocking(pos, aim);
+        if (wall) { wallOf = pl; break; }
+      }
       const atStruct = z.target && !wall && Math.hypot(pos.x - z.target.x, pos.z - z.target.z) < z.target.reach;
       const step = z.speed * (0.7 + 0.3 * Math.abs(Math.sin(z.phase))) * dt;
       if (toPlayer < (z.brute ? 1.4 : 0.95)) contact += z.brute ? 3 : 1;
@@ -446,7 +453,7 @@ export class Horde {
         z.legR.rotation.x = 0;
         if (z.hit <= 0) {
           z.hit = WALL_RATE * (0.85 + Math.random() * 0.3);
-          palisade.damage(wall, WALL_HIT * (z.brute ? 5 : 1));
+          wallOf!.damage(wall, WALL_HIT * (z.brute ? 5 : 1));
           onWall(wall, pos.clone().setY(1.3));
         }
         continue;

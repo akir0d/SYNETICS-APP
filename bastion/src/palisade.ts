@@ -1,11 +1,12 @@
 // La palissade du camp : des rondins tailles en pointe, par troncons. Chaque troncon
 // a ses points de vie : les zombies le cassent la nuit, on le repare avec des rondins.
 // Les portes se ferment la nuit (pour les zombies seulement : le joueur passe toujours).
+// La meme classe entoure la ferme fortifiee (site 'farm') : une seule porte, au sud.
 
 import * as THREE from 'three';
 import { mergeColored } from './bake';
 import { C, blob, box, cone, corrugated, cyl, group, lathe, mixHex, paint, plank, rbox, rng, vgrad } from './kit';
-import { CAMP, L } from './layout';
+import { CAMP, FARM, L } from './layout';
 import type { Segment } from './physics';
 import { SCRAP_TONES } from './props';
 
@@ -34,9 +35,14 @@ const BEAM = 0x5e452c;
 const ROPE = 0xc8ab6e;
 const CHIP = 0xcfa36c;
 
+/** L'enclos qu'une palissade entoure. */
+export type WallSite = 'camp' | 'farm';
+
 export interface Section {
   id: number;
   kind: 'wall' | 'gate';
+  /** Palissade a laquelle le troncon appartient (alertes, etiquettes, reparation). */
+  site: WallSite;
   x: number;
   z: number;
   /** Normale vers l'interieur du camp. */
@@ -675,11 +681,25 @@ export class Palisade {
   readonly walls: Segment[] = [];
   /** Segments des portes : ils ne bloquent que les zombies, et seulement fermees. */
   readonly gateWalls: Segment[] = [];
+  /** Ferme : sa seule porte (au sud) sert de `north` comme de `south`. */
   readonly north: Section;
   private readonly extras: THREE.Object3D[] = [];
   readonly south: Section;
 
-  constructor(private readonly scene: THREE.Scene, private readonly labels: HTMLElement) {
+  /**
+   * `scene` : la scene (camp) ou un groupe (ferme, pour l'animation de construction).
+   * `tier` : materiau de depart (evite de construire deux fois les etats).
+   */
+  constructor(private readonly scene: THREE.Object3D, private readonly labels: HTMLElement, readonly site: WallSite = 'camp', tier = 1) {
+    this.tier = tier;
+    if (site === 'farm') {
+      this.south = this.farm();
+      this.north = this.south;
+      this.stall = null;
+      // Solidite du materiau de depart (troncons neufs, intacts).
+      this.applyMax();
+      return;
+    }
     const { minX, maxX, minZ, maxZ, gate } = CAMP;
     const s0 = L.stall.x - L.stall.w / 2;
     const s1 = L.stall.x + L.stall.w / 2;
@@ -693,15 +713,7 @@ export class Palisade {
       { x1: -gate, z1: maxZ, x2: minX, z2: maxZ, h: LOW },
       { x1: minX, z1: maxZ, x2: minX, z2: minZ, h: HIGH },
     ];
-    for (const run of runs) {
-      const len = Math.hypot(run.x2 - run.x1, run.z2 - run.z1);
-      const k = Math.max(1, Math.round(len / 2.6));
-      for (let i = 0; i < k; i++) {
-        const a = i / k;
-        const b = (i + 1) / k;
-        this.addWall(run.x1 + (run.x2 - run.x1) * a, run.z1 + (run.z2 - run.z1) * a, run.x1 + (run.x2 - run.x1) * b, run.z1 + (run.z2 - run.z1) * b, run.h);
-      }
-    }
+    this.addRuns(runs, 2.6);
     this.north = this.addGate(-gate, minZ, gate, minZ, HIGH, 1);
     this.north.enabled = false;
     this.north.root.visible = false;
@@ -731,7 +743,48 @@ export class Palisade {
     this.stall = st;
   }
 
-  readonly stall: Section;
+  /** Le troncon cache de l'etal (camp seulement). */
+  readonly stall: Section | null;
+
+  /**
+   * La ferme : murs hauts au nord, a l'est et a l'ouest, bas au sud (on voit les champs), une
+   * porte au sud cote route. Troncons un peu plus longs que ceux du camp (moins de maillages).
+   */
+  private farm(): Section {
+    const { minX, maxX, minZ, maxZ, gateX, gate } = FARM;
+    const g0 = gateX - gate;
+    const g1 = gateX + gate;
+    const runs: RunDef[] = [
+      { x1: minX, z1: minZ, x2: maxX, z2: minZ, h: HIGH },
+      { x1: maxX, z1: minZ, x2: maxX, z2: maxZ, h: HIGH },
+      { x1: maxX, z1: maxZ, x2: g1, z2: maxZ, h: LOW },
+      { x1: g0, z1: maxZ, x2: minX, z2: maxZ, h: LOW },
+      { x1: minX, z1: maxZ, x2: minX, z2: minZ, h: HIGH },
+    ];
+    this.addRuns(runs, 3.2);
+    const gs = this.addGate(g1, maxZ, g0, maxZ, LOW, -1);
+    const pg = new THREE.Group();
+    for (const [x, z] of [[minX, minZ], [maxX, minZ], [minX, maxZ], [maxX, maxZ]] as const) {
+      pg.add(put(pikeMesh(0.3, q(HIGH + 0.4), BARK[0]!, [0.65, HIGH - 0.75], 16), x, 0, z));
+    }
+    const postMesh = mergeColored(pg);
+    this.scene.add(postMesh);
+    this.extras.push(postMesh);
+    return gs;
+  }
+
+  /** Decoupe chaque course en troncons d'environ `step` de long. */
+  private addRuns(runs: RunDef[], step: number): void {
+    for (const run of runs) {
+      const len = Math.hypot(run.x2 - run.x1, run.z2 - run.z1);
+      const k = Math.max(1, Math.round(len / step));
+      for (let i = 0; i < k; i++) {
+        const a = i / k;
+        const b = (i + 1) / k;
+        this.addWall(run.x1 + (run.x2 - run.x1) * a, run.z1 + (run.z2 - run.z1) * a, run.x1 + (run.x2 - run.x1) * b, run.z1 + (run.z2 - run.z1) * b, run.h);
+      }
+    }
+  }
 
   private frame(x1: number, z1: number, x2: number, z2: number) {
     const len = Math.hypot(x2 - x1, z2 - z1);
@@ -752,7 +805,7 @@ export class Palisade {
     label.className = 'wall-label off';
     this.labels.appendChild(label);
     const s: Section = {
-      id: this.sections.length, kind, x: f.x, z: f.z, nx: f.nx, nz: f.nz, len: f.len,
+      id: this.sections.length, kind, site: this.site, x: f.x, z: f.z, nx: f.nx, nz: f.nz, len: f.len,
       seg: { x1, z1, x2, z2 }, h: 0, hp: max, max, root, states: [], shake: 0, pop: 0, repair, label, inflight: 0, enabled: true,
     };
     this.sections.push(s);

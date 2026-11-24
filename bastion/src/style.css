@@ -151,7 +151,7 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; background: 
 .sheet-body h2 { margin: 0 0 6px; font-size: 20px; font-weight: 800; }
 .card {
   display: flex; align-items: center; gap: 10px; padding: 7px 8px; margin-top: 6px; border-radius: 14px;
-  background: #fff; border: 2px solid #ead7b4;
+  background: #fff; border: 2px solid #ead7b4; color: var(--ink);
 }
 .card-icon { flex: none; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; background: #f6e7c8; }
 .card-main { flex: 1; min-width: 0; }
@@ -390,15 +390,23 @@ body.night .vignette { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,
 /* ---- panneau du bas (etabli, reserve) : defile au doigt, se replie par sa poignee */
 .sheet-body { min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .sheet-handle {
-  flex: none; height: 30px; display: flex; align-items: center; justify-content: center;
+  flex: none; align-self: center; width: 160px; height: 40px; padding: 5px 0 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   pointer-events: auto; touch-action: none; cursor: grab;
 }
+.sheet-title { font-size: 13px; font-weight: 800; line-height: 1.1; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.7); white-space: nowrap; }
+/* Seuls le panneau visible et la poignee captent les touches ; le reste laisse passer le joystick. */
+.sheet-open .sheet { pointer-events: none; }
+.sheet-open .sheet-body { pointer-events: auto; }
 .sheet-handle i {
   display: block; width: 64px; height: 8px; border-radius: 4px;
   background: var(--cream); border: 2px solid var(--wood); box-shadow: 0 2px 0 var(--wood-dark);
 }
-.sheet-open .sheet.min { transform: translateY(calc(100% - 78px - var(--safe-bottom))); }
-.sheet.min .sheet-body { overflow: hidden; }
+.sheet-open .sheet.min { transform: translateY(calc(100% - 88px - var(--safe-bottom))); }
+.sheet.min .sheet-body { overflow: hidden; cursor: pointer; }
+.sheet.min .sheet-body .btn, .sheet.min .sheet-body .res-item { pointer-events: none; }
+.sheet-body .note { margin: 2px 2px 4px; font-size: 12.5px; line-height: 1.25; opacity: .7; }
+.sheet-body h2 .lv { font-size: 13px; font-weight: 700; opacity: .55; margin-left: 4px; }
 
 .res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; margin: 6px 0 8px; }
 .res-item {
@@ -417,5 +425,6 @@ body.night .vignette { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,
 .res-item.need { border-color: #e0a23a; background: #fff6df; }
 .res-item.poor { opacity: .55; }
 .res-actions { display: flex; gap: 6px; }
-.res-actions .btn { flex: 1; padding: 9px 6px; font-size: 14px; }
+.res-actions .btn { flex: 1 1 0; min-width: 0; white-space: normal; line-height: 1.15; padding: 8px 6px; font-size: 14px; }
 .btn.wood { background: linear-gradient(180deg, #d9a070, #b9784a); box-shadow: 0 4px 0 #8d5a30; }
+.btn.wood:disabled { background: #c8b89c; box-shadow: 0 4px 0 #a39070; }

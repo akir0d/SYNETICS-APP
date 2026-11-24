@@ -107,13 +107,21 @@ export function simulateOffline(i: OfflineInput): OfflineResult {
   let buy = RATE.customers * work;
   let coins = 0;
   const binsSold: Partial<Record<ItemType, number>> = {};
+  // Jouer doit toujours rapporter plus que s'absenter : le gain est plafonne (et la caisse
+  // deborde sans caissiere). Le plafond s'applique pendant la vente : ce qui n'est pas paye
+  // reste dans les bacs (ou part a la reserve), rien n'est detruit.
+  const capCoins = Math.min(i.coinCap, i.jobs.cashier ? Infinity : i.cashCap);
+  const limit = capCoins / Math.max(1e-6, i.sellMul); // en pieces avant le multiplicateur
+  let hit = false;
   const sell = (from: Partial<Record<ItemType, number>>, track: boolean) => {
     // Les plus chers d'abord : ce sont ceux que les clients reclament le plus.
     const order = (Object.keys(from) as ItemType[]).sort((a, b) => ITEMS[b].price - ITEMS[a].price);
     for (const t of order) {
       if (buy <= 0) break;
-      const n = Math.min(Math.floor(from[t] ?? 0), Math.floor(buy));
-      if (n <= 0) continue;
+      let n = Math.min(Math.floor(from[t] ?? 0), Math.floor(buy));
+      const fit = Math.max(0, Math.floor((limit - coins) / ITEMS[t].price));
+      if (fit < n) { n = fit; hit = true; }
+      if (n <= 0) continue; // un moins cher peut encore combler le reste
       buy -= n;
       from[t] = (from[t] ?? 0) - n;
       coins += n * ITEMS[t].price;
@@ -122,12 +130,9 @@ export function simulateOffline(i: OfflineInput): OfflineResult {
   };
   sell({ ...i.bins }, true);
   sell(shelf, false);
-  coins = Math.floor(coins * i.sellMul);
-  const capped = !i.jobs.cashier && coins > i.cashCap;
-  if (capped) coins = i.cashCap;
-  // Jouer doit toujours rapporter plus que s'absenter : le gain est plafonne.
-  const limited = coins > i.coinCap;
-  if (limited) coins = i.coinCap;
+  coins = Math.max(0, Math.min(capCoins, Math.floor(coins * i.sellMul)));
+  const capped = hit && !i.jobs.cashier && i.cashCap < i.coinCap;
+  const limited = hit && !capped;
 
   // ---- ce qui reste va dans la reserve (dans la limite des places)
   let room = Math.min(i.reserveRoom, i.itemCap);

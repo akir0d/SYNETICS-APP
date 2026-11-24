@@ -247,7 +247,7 @@ const ui = {
   gems: $('.gems b'), gemsPill: $('.gems'), shop: $('.shop'), shopBody: $('.shop-body'), shopBtn: $('.shop-btn'),
   boostBar: $('.boost-bar'),
   objective: $('.objective'), objIcon: $('.objective .oi'), objText: $('.objective .ot'),
-  toast: $('.toast'), modal: $('.modal'), sheetBody: $('.sheet-body'), sheet: $('.sheet'), sheetHandle: $('.sheet-handle'),
+  toast: $('.toast'), modal: $('.modal'), sheetBody: $('.sheet-body'), sheet: $('.sheet'), sheetHandle: $('.sheet-handle'), sheetTitle: $('.sheet-title'),
   joy: $('.joy'), knob: $('.joy-knob'), hp: $('.hpbar'), hpFill: $('.hpbar i'),
   adPill: $<HTMLButtonElement>('.ad-pill'),
   menuBtn: $('.menu-btn'), menu: $('.menu'), sound: $<HTMLButtonElement>('.menu .m-sound'), reset: $<HTMLButtonElement>('.menu .m-reset'),
@@ -652,6 +652,8 @@ function edgeArrow(i: number): HTMLElement {
   }
   return el;
 }
+/** Lignes de la barre des boosts (mise a jour par renderMetaHud) : les fleches passent dessous. */
+let boostRows = 0;
 function placeEdgeArrows(): void {
   const W = window.innerWidth;
   const H = window.innerHeight;
@@ -663,10 +665,26 @@ function placeEdgeArrows(): void {
     if (picked.some((p) => Math.hypot(p.x - w.x, p.z - w.z) < 6)) continue;
     picked.push(w);
   }
-  // Marges : le haut et le bas de l'ecran sont pris par l'interface.
-  const M = 34;
-  const TOP = 130;
-  const BOTTOM = 100;
+  if (!picked.length) {
+    for (const el of edgeArrows) el.classList.add('off');
+    return;
+  }
+  // Marges : le haut et le bas de l'ecran sont pris par l'interface. Elles bornent le centre
+  // de la fleche, donc on compte sa taille (disque de 46 px et sa pointe).
+  const R = 26;
+  const M = 12 + R;
+  const TOP = 120 + R + 8; // objectif et porte-monnaie finissent vers 120 px
+  // Panneau ouvert (etabli, reserve) : ce qu'il cache compte comme hors de l'ecran. Lu
+  // seulement quand il y a une alerte, pour ne pas forcer une mise en page a chaque image.
+  const sheetTop = sheetOpen ? ui.sheet.getBoundingClientRect().top : H;
+  const botY = Math.max(TOP + 60, Math.min(H - 100, sheetTop - 30));
+  // A gauche, la barre des boosts ; a droite, la boutique et la pastille de pub.
+  const leftTop = boostRows > 0 ? 118 + boostRows * 27 + R : TOP;
+  const shopOn = !ui.shopBtn.classList.contains('off');
+  const adOn = !ui.adPill.classList.contains('off');
+  const rightLimit = adOn ? H - 185 - R : shopOn ? H - 140 - R : Infinity;
+  const cx = W / 2;
+  const cy = Math.min(H / 2, (TOP + botY) / 2);
   let n = 0;
   for (const w of picked) {
     projected.set(w.x, 1, w.z).project(camera);
@@ -675,17 +693,19 @@ function placeEdgeArrows(): void {
     const py = behind ? -projected.y : projected.y;
     const sx = (px * 0.5 + 0.5) * W;
     const sy = (-py * 0.5 + 0.5) * H;
-    if (!behind && sx > M && sx < W - M && sy > TOP && sy < H - BOTTOM) continue;
-    const cx = W / 2;
-    const cy = H / 2;
+    if (!behind && sx > M && sx < W - M && sy > TOP && sy < botY) continue;
     const dx = sx - cx;
     const dy = sy - cy || -1;
     const kx = dx > 0 ? (W - M - cx) / dx : dx < 0 ? (M - cx) / dx : Infinity;
-    const ky = dy > 0 ? (H - BOTTOM - cy) / dy : (TOP - cy) / dy;
+    const ky = dy > 0 ? (botY - cy) / dy : (TOP - cy) / dy;
     const k = Math.min(kx, ky);
+    let ax = cx + dx * k;
+    let ay = cy + dy * k;
+    if (ax < W / 2 && ay < leftTop) ay = leftTop;
+    if (ax > W - 100 && ay > rightLimit) { ax = W - M; ay = rightLimit; }
     const el = edgeArrow(n++);
     el.classList.remove('off');
-    el.style.transform = `translate(${(cx + dx * k).toFixed(1)}px, ${(cy + dy * k).toFixed(1)}px) translate(-50%, -50%)`;
+    el.style.transform = `translate(${ax.toFixed(1)}px, ${ay.toFixed(1)}px) translate(-50%, -50%)`;
     (el.firstChild as HTMLElement).style.transform = `rotate(${Math.atan2(dy, dx).toFixed(3)}rad)`;
   }
   for (let i = n; i < edgeArrows.length; i++) edgeArrows[i]!.classList.add('off');
@@ -1203,39 +1223,73 @@ function renderSheet(): void {
 
 // ---- reserve : on choisit ce qu'on prend
 
-/** Ordre fixe des objets dans le panneau (les boutons ne bougent pas sous le doigt). */
+/** Ordre des objets dans le panneau (les boutons ne bougent pas sous le doigt). */
 const RES_ORDER: ItemType[] = ['log', 'plank', 'scrap', 'stone', 'metal', 'fuel', 'carrot', 'tomato', 'wheat', 'soup', 'bread', 'fish'];
+/** Vide quand le panneau vient d'ouvrir : la grille est alors reconstruite une fois. */
 let resKey = '';
+/** Types deja affiches depuis l'ouverture, dans l'ordre d'apparition (on ajoute a la fin seulement). */
+let resShown: ItemType[] = [];
+
+function resButton(t: ItemType): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.className = 'res-item';
+  b.dataset.take = t;
+  b.innerHTML = `<span>${ITEMS[t].icon}</span><b data-res-n></b><small>${ITEMS[t].name}</small><em hidden>chantier</em>`;
+  return b;
+}
 
 function renderReserve(): void {
-  const need = neededNow();
-  const present = RES_ORDER.filter((t) => (reserve.counts.get(t) ?? 0) > 0);
-  const key = present.join(',') + '|' + present.filter((t) => need.has(t)).join(',');
-  if (key !== resKey) {
-    resKey = key;
-    const grid = present.length
-      ? `<div class="res-grid">${present.map((t) => `<button class="res-item ${need.has(t) ? 'need' : ''}" data-take="${t}">
-          <span>${ITEMS[t].icon}</span><b data-res-n="${t}"></b><small>${ITEMS[t].name}</small>${need.has(t) ? '<em>chantier</em>' : ''}</button>`).join('')}</div>`
-      : `<p class="note">Vide pour l'instant : tes survivants y déposent ce qu'ils récoltent.</p>`;
+  if (!resKey) {
+    // Construit une seule fois par ouverture ; ensuite tout se met a jour en place.
+    resKey = 'built';
+    resShown = [];
     ui.sheetBody.innerHTML = `<h2>📦 Réserve <span class="lv" data-res-total></span></h2>
-      <p class="note" data-res-bag></p>${grid}
-      <div class="res-actions"><button class="btn" data-take-need>🔨 Tout pour les chantiers</button><button class="btn wood" data-store>⬇️ Déposer mon sac</button></div>`;
+      <p class="note" data-res-bag></p>
+      <p class="note" data-res-empty>Vide pour l'instant : tes survivants y déposent ce qu'ils récoltent.</p>
+      <div class="res-grid"></div>
+      <div class="res-actions"><button class="btn" data-take-need>🔨 Pour les chantiers</button><button class="btn wood" data-store>⬇️ Vider mon sac</button></div>`;
+  }
+  const grid = ui.sheetBody.querySelector<HTMLElement>('.res-grid');
+  if (!grid) return;
+  const need = neededNow();
+  for (const t of RES_ORDER) {
+    if ((reserve.counts.get(t) ?? 0) > 0 && !resShown.includes(t)) {
+      resShown.push(t);
+      grid.appendChild(resButton(t));
+    }
   }
   const room = freeSpace();
-  for (const t of present) {
-    const b = ui.sheetBody.querySelector<HTMLElement>(`[data-res-n="${t}"]`);
-    if (b) setText(b, String(reserve.counts.get(t) ?? 0));
-  }
-  ui.sheetBody.querySelectorAll<HTMLElement>('[data-take]').forEach((b) => b.classList.toggle('poor', room <= 0));
+  let needAny = false;
+  grid.querySelectorAll<HTMLButtonElement>('[data-take]').forEach((b) => {
+    const t = b.dataset.take as ItemType;
+    const n = reserve.counts.get(t) ?? 0;
+    const needed = need.has(t) && n > 0;
+    if (needed) needAny = true;
+    const nEl = b.querySelector<HTMLElement>('[data-res-n]');
+    if (nEl) setText(nEl, String(n));
+    b.classList.toggle('need', needed);
+    const em = b.querySelector<HTMLElement>('em');
+    if (em) em.hidden = !needed;
+    b.disabled = n === 0;
+    b.classList.toggle('poor', room <= 0 || n === 0);
+  });
+  const empty = ui.sheetBody.querySelector<HTMLElement>('[data-res-empty]');
+  if (empty) empty.hidden = resShown.length > 0;
   const total = ui.sheetBody.querySelector<HTMLElement>('[data-res-total]');
   if (total) setText(total, `${reserve.total}/${reserve.cap}`);
   const bag = ui.sheetBody.querySelector<HTMLElement>('[data-res-bag]');
   if (bag) setText(bag, room <= 0 ? `Sac plein (${player.stack.count}/${player.stack.cap})` : `Sac : ${player.stack.count}/${player.stack.cap} · touche ce que tu veux prendre`);
   const needBtn = ui.sheetBody.querySelector<HTMLButtonElement>('[data-take-need]');
-  if (needBtn) needBtn.disabled = room <= 0 || !present.some((t) => need.has(t));
+  if (needBtn) needBtn.disabled = room <= 0 || !needAny;
   const store = ui.sheetBody.querySelector<HTMLButtonElement>('[data-store]');
   if (store) store.disabled = player.stack.count === 0 || reserve.total >= reserve.cap;
 }
+
+/**
+ * Objets que le joueur a lui-meme deposes, par type : les reprendre ne compte pas comme une
+ * recuperation (sinon deposer puis reprendre son sac validerait la quete de la reserve).
+ */
+const selfStored = new Map<ItemType, number>();
 
 /** Prend dans la reserve ce qui passe le filtre, jusqu'a remplir le sac (les objets volent un par un). */
 function takeFromReserve(accept: (t: ItemType) => boolean): number {
@@ -1245,11 +1299,17 @@ function takeFromReserve(accept: (t: ItemType) => boolean): number {
     const t = reserve.take(accept);
     if (!t) break;
     got++;
+    // Le compteur ne depasse jamais ce que la reserve contenait (les chantiers et le porteur la vident aussi).
+    const mine = Math.min(selfStored.get(t) ?? 0, (reserve.counts.get(t) ?? 0) + 1 + reservePending);
+    const counts = mine <= 0;
+    if (!counts) selfStored.set(t, mine - 1);
     // Place reservee dans le sac tout de suite : rien d'autre ne peut la prendre en attendant.
     pendingIn++;
     setTimeout(() => {
       pendingIn = Math.max(0, pendingIn - 1);
-      giveToPlayer(t, reserve.topWorld(), () => { save.stats.chest++; });
+      // K.O. avant le depart : l'objet reste dans la reserve.
+      if (ko > 0) { reserve.add(t); return; }
+      giveToPlayer(t, reserve.topWorld(), counts ? () => { save.stats.chest++; } : undefined, () => reserve.add(t));
     }, i * 40);
   }
   return got;
@@ -1262,12 +1322,14 @@ function storeBag(): number {
     const it = player.stack.take(() => true);
     if (!it) break;
     putInReserve(it.type, it.pos);
+    selfStored.set(it.type, (selfStored.get(it.type) ?? 0) + 1);
     n++;
   }
   return n;
 }
 
 function reserveAction(el: HTMLElement): void {
+  if (ko > 0) return;
   const d = el.dataset;
   let n = 0;
   if (d.take) {
@@ -1384,7 +1446,10 @@ function setPanel(p: Panel): void {
   }
   panel = p;
   sheetOpen = p !== null;
+  handleY = null;
+  sheetRest();
   ui.sheet.classList.remove('min');
+  setText(ui.sheetTitle, p === 'bench' ? '🔨 Établi' : p === 'reserve' ? '📦 Réserve' : '');
   document.body.classList.toggle('sheet-open', sheetOpen);
   ui.sheetBody.scrollTop = 0;
   if (p === 'bench') renderSheet();
@@ -1398,22 +1463,61 @@ function setPanel(p: Panel): void {
   }
 }
 
-// Poignee du panneau : glisser vers le bas le replie, vers le haut (ou toucher) le deplie.
+// Poignee du panneau : le panneau suit le doigt ; glisser vers le bas le replie, vers le haut
+// (ou toucher) le deplie.
 let handleY: number | null = null;
+let handleBase = 0;
+let handleDy = 0;
+function sheetRest(): void {
+  ui.sheet.style.transition = '';
+  ui.sheet.style.transform = '';
+}
 ui.sheetHandle.addEventListener('pointerdown', (e) => {
   handleY = e.clientY;
+  handleDy = 0;
+  // Position de depart reelle : 0 si ouvert, le decalage du repli sinon.
+  handleBase = new DOMMatrix(getComputedStyle(ui.sheet).transform).m42;
+  ui.sheet.style.transition = 'none';
   ui.sheetHandle.setPointerCapture?.(e.pointerId);
 });
-ui.sheetHandle.addEventListener('pointerup', (e) => {
+ui.sheetHandle.addEventListener('pointermove', (e) => {
   if (handleY === null) return;
-  const dy = e.clientY - handleY;
+  handleDy = e.clientY - handleY;
+  const y = Math.min(ui.sheet.offsetHeight - 40, Math.max(0, handleBase + handleDy));
+  ui.sheet.style.transform = `translateY(${y}px)`;
+});
+ui.sheetHandle.addEventListener('pointerup', () => {
+  if (handleY === null) return;
   handleY = null;
+  sheetRest();
   const min = ui.sheet.classList.contains('min');
-  if (dy > 25) ui.sheet.classList.add('min');
-  else if (dy < -25) ui.sheet.classList.remove('min');
+  if (handleDy > 25) ui.sheet.classList.add('min');
+  else if (handleDy < -25) ui.sheet.classList.remove('min');
   else ui.sheet.classList.toggle('min', !min);
 });
-ui.sheetHandle.addEventListener('pointercancel', () => { handleY = null; });
+ui.sheetHandle.addEventListener('pointercancel', () => { handleY = null; sheetRest(); });
+
+// Tirer le contenu vers le bas quand la liste est en haut replie aussi le panneau. Evenements
+// tactiles passifs : le defilement (pan-y) reste intact.
+let bodyY: number | null = null;
+ui.sheetBody.addEventListener('touchstart', (e) => {
+  bodyY = ui.sheetBody.scrollTop <= 0 && !ui.sheet.classList.contains('min') ? e.touches[0]!.clientY : null;
+}, { passive: true });
+ui.sheetBody.addEventListener('touchmove', (e) => {
+  if (bodyY === null || ui.sheetBody.scrollTop > 0) return;
+  if (e.touches[0]!.clientY - bodyY > 40) {
+    ui.sheet.classList.add('min');
+    bodyY = null;
+  }
+}, { passive: true });
+ui.sheetBody.addEventListener('touchend', () => { bodyY = null; }, { passive: true });
+
+// Replie : toucher la bande visible deplie le panneau, sans declencher le bouton dessous.
+ui.sheetBody.addEventListener('click', (e) => {
+  if (!ui.sheet.classList.contains('min')) return;
+  e.stopPropagation();
+  ui.sheet.classList.remove('min');
+}, true);
 
 function refreshSheetButtons(): void {
   ui.sheetBody.querySelectorAll<HTMLElement>('[data-up]').forEach((b) => {
@@ -1591,6 +1695,7 @@ function renderMetaHud(): void {
     .map((b) => `<span>${b.icon} ${b.name} · ${Math.ceil(save.boosts[b.id]! / 60)} min</span>`).join('')
     + (save.convoyAt > nowT() ? `<span class="convoy">🚌 Convoi · ${fmtWait(save.convoyAt - nowT())}</span>` : '');
   if (ui.boostBar.innerHTML !== html) ui.boostBar.innerHTML = html;
+  boostRows = ui.boostBar.childElementCount;
   renderAdPill();
   maybeOffer();
   if (ui.shop.classList.contains('show')) renderShop();
@@ -2115,12 +2220,11 @@ let pendingIn = 0;
 const freeSpace = () => player.stack.cap - player.stack.count - pendingIn;
 
 /** Un objet vole vers le dos du joueur. */
-function giveToPlayer(t: ItemType, from: THREE.Vector3, onArrive?: () => void): void {
+function giveToPlayer(t: ItemType, from: THREE.Vector3, onArrive?: () => void, onFail?: () => void): void {
   pendingIn++;
   flyers.launch(itemMesh(t), from, () => player.stack.topWorld(), () => {
     pendingIn = Math.max(0, pendingIn - 1);
-    if (ko > 0) return;
-    player.stack.add(t);
+    if (ko > 0 || !player.stack.add(t)) { onFail?.(); return; }
     sfx.sfxPickup(player.stack.count);
     buzz(6);
     bump(ui.bagPill);
@@ -2891,31 +2995,37 @@ function updateCycle(dt: number): void {
   }
 }
 
-/** Eclair au sommet des tours quand elles tirent : on voit qu'elles defendent le camp. */
+/**
+ * Eclair au sommet des tours quand elles tirent : on voit qu'elles defendent le camp.
+ * Un seul halo par tour (cle = la bouche de la tour, un vecteur cree une fois) : seuls les
+ * tirs de tour l'appellent, jamais l'arme du joueur.
+ */
 const towerFlashes = new Map<THREE.Vector3, THREE.Sprite>();
 function towerFlash(at: THREE.Vector3): void {
   let s = towerFlashes.get(at);
   if (!s) {
     s = glow(0xffd27a, 2.4);
     (s.material as THREE.SpriteMaterial).fog = false;
-    s.position.copy(at);
     scene.add(s);
     towerFlashes.set(at, s);
   }
+  s.position.copy(at);
+  s.visible = true;
   (s.material as THREE.SpriteMaterial).opacity = 1;
 }
 function fadeTowerFlashes(dt: number): void {
   for (const s of towerFlashes.values()) {
     const m = s.material as THREE.SpriteMaterial;
     if (m.opacity > 0) m.opacity = Math.max(0, m.opacity - dt * 7);
+    s.visible = m.opacity > 0;
   }
 }
 
-function shoot(z: Zombie, from: THREE.Vector3, dmg: number, light = true): void {
+function shoot(z: Zombie, from: THREE.Vector3, dmg: number, light = true, isTower = false): void {
   const hit = horde.damage(z, dmg, from);
   if (!hit) return;
-  tracers.fire(from, hit.pos, light ? 0.09 : 0.14);
-  if (!light) towerFlash(from);
+  tracers.fire(from, hit.pos, isTower ? 0.14 : 0.09);
+  if (isTower) towerFlash(from);
   if (light) {
     muzzle.position.copy(from);
     muzzle.intensity = 45;
@@ -2958,7 +3068,7 @@ function updateCombat(dt: number): void {
     const tz = horde.nearest(new THREE.Vector3(L.tower.x, 0, L.tower.z), 16);
     if (tz) {
       towerClock = 0.7 / (1 + 0.08 * lv('tower'));
-      shoot(tz, tower.muzzle, 1 + Math.floor(threat() / 3) + lv('tower') + 2 * (bt('tower') - 1), false);
+      shoot(tz, tower.muzzle, 1 + Math.floor(threat() / 3) + lv('tower') + 2 * (bt('tower') - 1), false, true);
     }
   }
   // Tours d'angle (niveau du camp) : elles couvrent les flancs.
@@ -2971,7 +3081,7 @@ function updateCombat(dt: number): void {
       if (!cz) return;
       cornerClock[i] = 0.8 / (1 + 0.08 * lv('tower'));
       // Comme la grande tour, leurs degats suivent la menace (sinon elles chatouillent la horde).
-      shoot(cz, c.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false);
+      shoot(cz, c.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false, true);
     });
   }
 }
@@ -2994,6 +3104,7 @@ function hurt(dt: number, contacts: number): void {
     shake = Math.max(shake, 0.06);
     if (player.hp <= 0) {
       ko = 1.6;
+      setPanel(null); // le panneau (reserve, etabli) se ferme : plus rien a toucher pendant le K.O.
       const lost = player.stack.clear();
       pendingIn = 0;
       document.body.classList.add('ko');
@@ -3095,7 +3206,8 @@ function offlineGains(): void {
       conv: { saw: saw.built, cook: cook.built, mill: mill.built, forge: forge.built },
       bins, sellMul: sellMul() / (boostOn('sell') ? 2 : 1), crewMul: crewMul(),
       cashCap: 250 + 50 * lv('stall'), reserveRoom: Math.max(0, reserve.cap - reserve.total),
-      coinCap: offlineCoinCap(), itemCap: 40 + 8 * lv('foreman'),
+      // Un rapport pas encore encaisse compte deja dans le plafond : les bacs ne se vident pas pour rien.
+      coinCap: Math.max(0, offlineCoinCap() - (save.pendingOffline?.coins ?? 0)), itemCap: 40 + 8 * lv('foreman'),
       cycleLen: save.cycle ? dayLen(save.day) + nightLen(save.day) : 0,
     });
     // Les objets sont ranges tout de suite ; seules les pieces attendent qu'on les encaisse.
@@ -3114,7 +3226,7 @@ function offlineGains(): void {
       const { binsSold: _sold, ...rep } = r;
       void _sold;
       save.pendingOffline = p ? {
-        ...rep, coins: Math.min(Math.max(p.coins, offlineCoinCap()), p.coins + rep.coins), secs: p.secs + rep.secs, away: p.away + rep.away, nights: p.nights + rep.nights, wear: p.wear + rep.wear,
+        ...rep, coins: p.coins + rep.coins, secs: p.secs + rep.secs, away: p.away + rep.away, nights: p.nights + rep.nights, wear: p.wear + rep.wear,
         items: mergeItems(p.items, rep.items),
       } : rep;
     }

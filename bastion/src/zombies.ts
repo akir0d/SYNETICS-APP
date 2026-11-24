@@ -254,21 +254,41 @@ export class Horde {
     return this.alive + this.toSpawn;
   }
 
+  /**
+   * Ou un zombie n'a pas le droit de sortir de terre : derriere un mur (le camp, avec une
+   * marge, et ce que main.ts ajoute, comme la ferme fortifiee). Ils doivent passer la palissade.
+   */
+  noSpawn: (x: number, z: number) => boolean = (x, z) =>
+    x > CAMP.minX - 4 && x < CAMP.maxX + 4 && z > CAMP.minZ - 4 && z < CAMP.maxZ + 4;
+
   private spawn(z: Zombie, player: THREE.Vector3): void {
-    if (insideCamp(player.x, player.z)) {
-      // Ils sortent de terre tout autour du camp : surtout cote route, puis de la foret, puis des flancs.
-      const roll = Math.random();
-      if (roll < 0.45) z.root.position.set((Math.random() - 0.5) * 50, 0, 23 + Math.random() * 5);
-      else if (roll < 0.7) z.root.position.set((Math.random() - 0.5) * 24, 0, -18 - Math.random() * 6);
-      else z.root.position.set((Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 6), 0, (Math.random() - 0.5) * 20);
-    } else {
-      // Le joueur traine dehors : ils surgissent autour de lui.
-      const a = Math.random() * Math.PI * 2;
-      const d = 15 + Math.random() * 6;
-      z.root.position.set(player.x + Math.cos(a) * d, 0, player.z + Math.sin(a) * d);
+    const p = z.root.position;
+    const clamp = () => {
+      p.x = Math.max(-52, Math.min(52, p.x));
+      p.z = Math.max(-52, Math.min(52, p.z));
+    };
+    const around = () => {
+      if (insideCamp(player.x, player.z)) {
+        // Ils sortent de terre tout autour du camp : surtout cote route, puis de la foret, puis des flancs.
+        const roll = Math.random();
+        if (roll < 0.45) p.set((Math.random() - 0.5) * 50, 0, 23 + Math.random() * 5);
+        else if (roll < 0.7) p.set((Math.random() - 0.5) * 24, 0, CAMP.minZ - 7 - Math.random() * 6);
+        else p.set((Math.random() < 0.5 ? CAMP.minX - 7 - Math.random() * 6 : CAMP.maxX + 7 + Math.random() * 6), 0, (Math.random() - 0.5) * 20);
+      } else {
+        // Le joueur traine dehors : ils surgissent autour de lui.
+        const a = Math.random() * Math.PI * 2;
+        const d = 15 + Math.random() * 6;
+        p.set(player.x + Math.cos(a) * d, 0, player.z + Math.sin(a) * d);
+      }
+      clamp();
+    };
+    // Jamais derriere un mur : on retire au sort, puis au pire ils viennent de la route.
+    let tries = 0;
+    do around(); while (this.noSpawn(p.x, p.z) && ++tries < 12);
+    if (this.noSpawn(p.x, p.z)) {
+      p.set((Math.random() - 0.5) * 50, 0, 24 + Math.random() * 4);
+      clamp();
     }
-    z.root.position.x = Math.max(-52, Math.min(52, z.root.position.x));
-    z.root.position.z = Math.max(-52, Math.min(52, z.root.position.z));
     z.brute = this.brutes > 0 && this.toSpawn <= this.brutes + Math.floor(Math.random() * 3);
     if (z.brute) this.brutes--;
     z.hit = 0.5 + Math.random() * 0.5;

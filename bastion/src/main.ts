@@ -4366,4 +4366,7 @@ requestAnimationFrame(frame);
   build: (id: string) => { const p = pads.find((x) => x.def.id === id); if (p) { save.paid[id] = { ...p.def.cost }; build(p); } },
   setObj: (n: number) => { save.obj = n; renderObjective(); },
   night: () => { save.cycle = true; save.phase = 'day'; save.phaseT = dayLen(save.day); },
+  // Banc de deplacement : collisions, batiments, navigation, joystick.
+  world, ext: EXT, bld: B, watch: tower, bus, ruins: RUINS, pal: () => palisade, navAll, navState: nav, joy: joyVec,
+  gateBarrier, dockWalls, huntCtx,
 };

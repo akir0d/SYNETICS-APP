@@ -160,7 +160,8 @@ export function consolidate(g: THREE.Object3D, live: THREE.Object3D[] = []): voi
   const keep = new Set(live);
   const still = new THREE.Group();
   for (const c of [...g.children]) {
-    if (keep.has(c) || (c as THREE.Light).isLight || !(c as THREE.Mesh).isMesh && c.children.length === 0) continue;
+    // userData.keep : habillage qu'on change plus tard (tours en pierre ou en fer).
+    if (keep.has(c) || c.userData.keep || (c as THREE.Light).isLight || !(c as THREE.Mesh).isMesh && c.children.length === 0) continue;
     still.add(c);
   }
   if (still.children.length === 0) return;

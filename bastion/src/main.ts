@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
 import {
-  Bus, armory, cabin, dock, foundry, infirmary, kitchen, quarryShed, sawmill, shelter, warehouse, watchTower, windmill, workbench,
+  Bus, armory, cabin, dock, foundry, infirmary, kitchen, quarryShed, sawmill, shelter, towerSkin, warehouse, watchTower, windmill, workbench,
   type Building,
 } from './buildings';
 import { Flyers, Particles, Tracers } from './fx';
@@ -1186,6 +1186,19 @@ function onDynPad(): boolean {
 }
 
 /** Bati la palissade de la ferme a son niveau (ou change son materiau) ; `instant` au chargement. */
+/**
+ * Les tours prennent le materiau de leur mur : pierre des la palissade en pierre, fer avec le fer
+ * fondu ; la tour de guet suit aussi son propre niveau (etabli). Les tours de ferme suivent la
+ * palissade de la ferme.
+ */
+function refreshTowerSkins(): void {
+  const camp = save.wallTier >= 5 ? 2 : save.wallTier >= 3 ? 1 : 0;
+  towerSkin(tower.group, Math.max(camp, bt('tower') - 1));
+  for (const c of corners) towerSkin(c.tower.group, camp);
+  const farm = save.farmLv >= 2 ? 1 : 0;
+  for (const t of farmTowers) towerSkin(t.tower.group, farm);
+}
+
 function applyFarmWall(instant: boolean): void {
   const n = Math.min(save.farmLv, FARM_WALL.length);
   if (n <= 0) return;
@@ -1209,6 +1222,7 @@ function applyFarmWall(instant: boolean): void {
     if (!instant) restorer.run(null, farmRoot);
   }
   showFarmTowers(instant);
+  refreshTowerSkins();
 }
 
 /** Les emplacements des tours de garde s'ouvrent avec la palissade de la ferme. */
@@ -1877,6 +1891,7 @@ ui.sheetBody.addEventListener('click', (e) => {
     if (totalCost(remainingOf(up.pkey, up.cost)) === 0) {
       delete save.fixPaid[up.pkey];
       up.apply();
+      refreshTowerSkins();
       sfx.sfxBuild();
       buzz(40);
       particles.burst(player.position.clone().setY(2), [0xffd84a, 0xffffff, 0x9a9890], 40, { speed: 5, up: 6, size: 0.16 });
@@ -4329,6 +4344,7 @@ for (const id of save.built) applyBuild(id, true);
 for (const id of [...save.broken]) wreck(id, true);
 // La ferme fortifiee et l'etat de ses troncons (une liste d'une autre longueur : intacte).
 applyFarmWall(true);
+refreshTowerSkins();
 {
   // (cast : l'analyse de flux ne voit pas l'affectation faite par applyFarmWall)
   const fw = farmWall as Palisade | null;

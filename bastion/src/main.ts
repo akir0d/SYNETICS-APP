@@ -145,7 +145,9 @@ const B: Record<string, Building> = {
 for (const b of Object.values(B)) scene.add(b.group);
 B.tower = tower;
 const bus = new Bus(scene);
-world.solids.push({ x: L.bus.x - 2, z: L.bus.z, r: 1.4 }, { x: L.bus.x, z: L.bus.z, r: 1.4 }, { x: L.bus.x + 2, z: L.bus.z, r: 1.4 });
+/** Le bus : ses collisions disparaissent quand il est parti en convoi (plus de mur invisible). */
+const busSolids = [{ x: L.bus.x - 2, z: L.bus.z, r: 1.4, off: false }, { x: L.bus.x, z: L.bus.z, r: 1.4, off: false }, { x: L.bus.x + 2, z: L.bus.z, r: 1.4, off: false }];
+world.solids.push(...busSolids);
 
 // Les ruines occupent deja la place des batiments : memes collisions avant et apres
 // restauration, et la zone de paiement est a cote. Personne n'est jamais deplace.
@@ -452,6 +454,9 @@ function applyBuild(id: string, instant: boolean): void {
       break;
     case 'westRoad':
       world.locks.west.off = true;
+      // La porte est de la ferme (cote camp) s'ouvre en meme temps que son entree.
+      world.farmEastBar.seg.off = true;
+      world.farmEastBar.mesh.visible = false;
       nav.westOpen = true;
       restore(id, marker(L.farmGate.x, L.farmGate.z), instant);
       break;
@@ -755,7 +760,7 @@ const CORNER_COST: Record<string, Cost> = {
 };
 /** Ou la tour de guet s'installe quand le camp s'agrandit vers l'est. */
 const TOWER_CORNER = { x: 19.4, z: 11.4 };
-const TOWER_CORNER_PAD = { x: 18.3, z: 7.0 };
+const TOWER_CORNER_PAD = { x: 13.6, z: 6.9 };
 const cornerClock: number[] = [];
 
 /** Les batiments des extensions, et le niveau qui les apporte. */
@@ -1056,6 +1061,7 @@ function convoyBack(): void {
 }
 
 function updateConvoy(): void {
+  for (const c of busSolids) c.off = !bus.root.visible;
   if (bus.driving > 6) {
     // Le bus a quitte l'ecran : il reviendra au retour du convoi.
     bus.driving = 0;
@@ -1189,8 +1195,10 @@ function applyFarmWall(instant: boolean): void {
     farmWall = new Palisade(farmRoot, labels, 'farm', tier);
     world.walls.push(...farmWall.walls);
     syncZombieWalls();
-    // La cloture de bois disparait : la palissade la remplace.
+    // La cloture de bois disparait : la palissade la remplace (porte est comprise).
     for (const sg of fence.segs) sg.off = true;
+    world.farmEastBar.seg.off = true;
+    world.farmEastBar.mesh.visible = false;
     // Les zombies ne contournent plus la ferme par sa porte : ils defoncent la palissade.
     const i = navZombies.indexOf(R.farm);
     if (i >= 0) navZombies.splice(i, 1);
@@ -4325,7 +4333,8 @@ applyFarmWall(true);
   // (cast : l'analyse de flux ne voit pas l'affectation faite par applyFarmWall)
   const fw = farmWall as Palisade | null;
   const hp = save.farmWalls;
-  if (fw && hp && hp.length === fw.sections.length) fw.sections.forEach((s, i) => fw.setHp(s, hp[i] ?? s.max));
+  // Plus courte (porte est ajoutee ensuite, en dernier) : on reprend ce qu'elle connait.
+  if (fw && hp && hp.length > 0 && hp.length <= fw.sections.length) fw.sections.forEach((s, i) => fw.setHp(s, hp[i] ?? s.max));
 }
 for (const b of TIERABLE) {
   if (!isBuilt(b.id) || bt(b.id) <= 1) continue;
@@ -4368,5 +4377,5 @@ requestAnimationFrame(frame);
   night: () => { save.cycle = true; save.phase = 'day'; save.phaseT = dayLen(save.day); },
   // Banc de deplacement : collisions, batiments, navigation, joystick.
   world, ext: EXT, bld: B, watch: tower, bus, ruins: RUINS, pal: () => palisade, navAll, navState: nav, joy: joyVec,
-  gateBarrier, dockWalls, huntCtx,
+  gateBarrier, dockWalls, huntCtx, ui,
 };

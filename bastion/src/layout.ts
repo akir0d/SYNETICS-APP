@@ -2,10 +2,14 @@
 // a l'est, l'etang au sud, la foret au nord. Toutes les positions au meme endroit.
 
 export const CAMP = { minX: -13, maxX: 13, minZ: -11, maxZ: 11, gate: 2.6 };
+/** Porte ouest du camp (vers la ferme) : au milieu du mur ouest, ou qu'il soit. */
+export const CAMP_WEST_GATE = { z: 0, half: 2.75 };
 export const ROAD_Z = 19;
 
 /** Enclos de la ferme (ouest) : entree cote route, bouchee tant qu'on ne l'a pas degagee. */
 export const FARM = { minX: -48, maxX: -23, minZ: -9, maxZ: 13, gateX: -34, gate: 2.4 };
+/** Porte est de la ferme (cote camp) : deux troncons de la palissade de ferme. */
+export const FARM_EAST_GATE = { z0: 3.571, z1: 9.857 };
 /** Enclos de la station-service (est) : la route le traverse, entree a l'ouest. */
 export const STATION = { minX: 24, maxX: 50, minZ: 5, maxZ: 31, gateZ: 19, gate: 3.2 };
 /** L'etang au sud de la route ; on y accede par le ponton. */
@@ -22,8 +26,9 @@ export const L = {
     [{ x: 5.6, z: 12.7 }, { x: 5.6, z: 13.9 }, { x: 5.6, z: 15.1 }, { x: 5.6, z: 16.3 }],
     [{ x: 8.6, z: 12.7 }, { x: 8.6, z: 13.9 }, { x: 8.6, z: 15.1 }, { x: 8.6, z: 16.3 }],
   ],
+  // Ecartes pour laisser de vraies allees (plus de 1 m libre) entre carottes et tomates.
   beds: [
-    { x: -9.6, z: -6.6 }, { x: -9.6, z: -3.1 }, { x: -6.0, z: -6.6 }, { x: -6.0, z: -3.1 },
+    { x: -10.3, z: -7.0 }, { x: -10.3, z: -2.8 }, { x: -5.4, z: -7.0 }, { x: -5.4, z: -2.8 },
   ],
   kitchen: { x: -9.2, z: 4.6 },
   kitchenIn: { x: -6.9, z: 6.7 },
@@ -70,9 +75,9 @@ export const L = {
    * en se tenant devant le chantier, puis le batiment se restaure sous ses yeux.
    */
   pads: {
-    bed2: { x: -9.6, z: -0.5 },
-    bed3: { x: -3.2, z: -6.6 },
-    bed4: { x: -6.0, z: -0.5 },
+    bed2: { x: -10.3, z: -0.2 },
+    bed3: { x: -2.5, z: -7.0 },
+    bed4: { x: -5.4, z: -0.2 },
     gate: { x: 0, z: -8.3 },
     bench: { x: 8.6, z: 1.6 },
     sawmill: { x: 6.4, z: -6.4 },

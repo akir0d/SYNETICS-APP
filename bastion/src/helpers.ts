@@ -8,7 +8,7 @@ import type { ItemType } from './items';
 import { C, cyl, group, rbox } from './kit';
 import { L } from './layout';
 import { route, type Region } from './nav';
-import { collide, type Circle, type Segment } from './physics';
+import { collide, slide, type Circle, type Segment } from './physics';
 import type { Bed, ChopTree, ScrapSource } from './resources';
 
 export type Job = 'farmer' | 'lumber' | 'scav' | 'fisher' | 'porter' | 'cashier';
@@ -92,8 +92,11 @@ export class Helper {
     const p = this.human.root.position;
     const wp = route(p, dest, ctx.nav);
     const final = wp === dest;
+    const fx = p.x;
+    const fz = p.z;
     const arrived = this.human.walkTo(wp, 3.6, dt, final ? stop : 0.4) && final;
     collide(p, 0.4, ctx.walls, ctx.solids, 52);
+    if (!arrived) slide(p, fx, fz, wp.x - fx, wp.z - fz, 3.6 * dt, 0.4, ctx.walls, ctx.solids, 52);
     // Coince contre un obstacle : on glisse un peu sur le cote.
     if (p.distanceTo(this.last) < dt * 0.4 && !arrived) {
       this.stuck += dt;

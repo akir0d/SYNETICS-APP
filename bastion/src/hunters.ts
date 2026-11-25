@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { Human, fusedMesh, type HumanLook } from './humans';
 import { C, cyl, group, rbox } from './kit';
 import { route, type Region } from './nav';
-import { collide, type Circle, type Segment } from './physics';
+import { collide, slide, type Circle, type Segment } from './physics';
 import type { Zombie } from './zombies';
 
 export type HuntZone = 'camp' | 'farm';
@@ -109,8 +109,11 @@ export class Hunter {
     const wp = route(p, dest, ctx.nav);
     const final = wp === dest;
     this.wp.copy(wp);
+    const fx = p.x;
+    const fz = p.z;
     const arrived = this.human.walkTo(this.wp, speed, dt, final ? 0.25 : 0.4) && final;
     collide(p, 0.4, ctx.walls, ctx.solids, 52);
+    if (!arrived) slide(p, fx, fz, this.wp.x - fx, this.wp.z - fz, speed * dt, 0.4, ctx.walls, ctx.solids, 52);
     // Coince contre un obstacle : il glisse un peu sur le cote.
     if (!arrived && p.distanceTo(this.last) < dt * 0.4) {
       this.stuck += dt;

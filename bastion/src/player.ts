@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { Stack } from './carry';
 import { armParts, fuseAll, headParts, legParts, onFront, oval, torsoParts, type Fused } from './humans';
 import { C, box, cone, cyl, damp, group, lathe, lookMat, pill, plank, sphere, type Profile } from './kit';
-import { collide, type Circle, type Segment } from './physics';
+import { collide, slide, type Circle, type Segment } from './physics';
 
 export type Tool = 'none' | 'axe' | 'hammer' | 'pick' | 'gun';
 export type Weapon = 'rifle' | 'shotgun' | 'crossbow';
@@ -255,6 +255,9 @@ export class Player {
     const len = Math.min(1, move.length());
     const maxSpeed = 6.2 * this.speedMul;
     this.speed = damp(this.speed, len * maxSpeed, 12, dt);
+    const fromX = this.root.position.x;
+    const fromZ = this.root.position.z;
+    let stepLen = 0;
     if (len > 0.05) {
       const want = Math.atan2(move.x, move.y);
       let diff = want - this.heading;
@@ -264,9 +267,11 @@ export class Player {
       const k = this.speed * dt * Math.min(1, len * 1.3) / Math.max(len, 1e-6);
       p.x += move.x * k;
       p.z += move.y * k;
+      stepLen = Math.hypot(move.x * k, move.y * k);
     }
     if (this.aiming) this.faceTowards(this.aiming.x, this.aiming.z, dt);
     collide(this.root.position, 0.45, walls, solids, bounds);
+    if (stepLen > 0) slide(this.root.position, fromX, fromZ, move.x, move.y, stepLen, 0.45, walls, solids, bounds);
     this.body.rotation.y = this.heading;
 
     const k = this.speed / maxSpeed;

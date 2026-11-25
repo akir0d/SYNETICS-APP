@@ -9,10 +9,10 @@ import {
   rng, shadow, uniqueMat, vgrad, vmat,
 } from './kit';
 import type { Profile } from './kit';
-import { CAMP, FARM, L, POND, ROAD_Z, STATION, insideCamp } from './layout';
+import { CAMP, FARM, FARM_EAST_GATE, L, POND, ROAD_Z, STATION, insideCamp } from './layout';
 import type { Circle, Segment } from './physics';
 import {
-  crate, drum, floodlight, gasBottle, hedgehog, jerrycan, jersey, paintedBoard, roofSheet, sandbags, sheet,
+  crate, drum, floodlight, hedgehog, jersey, paintedBoard, roofSheet, sandbags, sheet,
   tire, tireStack, wreck,
 } from './props';
 import { boulder, bush, deadTree, leafy, pine } from './flora';
@@ -37,6 +37,8 @@ export interface World {
    * segments, qu'on retire quand la palissade de la ferme la remplace.
    */
   farmFence: { mesh: THREE.Object3D; segs: Segment[] };
+  /** Barriere de la porte est de la ferme (ouverte avec l'entree de la ferme). */
+  farmEastBar: { mesh: THREE.Object3D; seg: Segment };
   /** Materiau de l'etang (ses vaguelettes s'animent). */
   water: THREE.MeshPhongMaterial | null;
 }
@@ -65,6 +67,7 @@ export function buildWorld(scene: THREE.Scene): World {
     bounds: 54,
     locks: { west: { x1: 0, z1: 0, x2: 0, z2: 0 }, east: { x1: 0, z1: 0, x2: 0, z2: 0 }, dock: { x1: 0, z1: 0, x2: 0, z2: 0 } },
     farmFence: { mesh: new THREE.Group(), segs: [] },
+    farmEastBar: { mesh: new THREE.Group(), seg: { x1: 0, z1: 0, x2: 0, z2: 0, off: true } },
     water: null,
   };
   const r = rng(7);
@@ -686,8 +689,9 @@ function workLight(scene: THREE.Scene, w: World): void {
   const lens = uniqueMat(0xfff7d6, 0xfff2cc);
   lens.emissiveIntensity = 0.1;
   w.bulbMats.push(lens);
-  const x = -3.6;
-  const z = -2.8;
+  // Hors des allees des potagers et du chemin feu de camp -> porte nord.
+  const x = -1.6;
+  const z = -3.8;
   const pole = floodlight(3.8, lens);
   pole.rotation.y = 0.75;
   scene.add(shadow(at(pole, x, 0, z)));
@@ -706,11 +710,12 @@ function workLight(scene: THREE.Scene, w: World): void {
     rail.rotation.z = Math.PI / 2;
     gen.add(rail);
   }
-  scene.add(shadow(at(gen, x - 1.1, 0, z - 0.6, 0.3)));
-  const cable = box(0.04, 0.03, 1.2, 0x1f1f1f, x - 0.5, 0.02, z - 0.3);
+  scene.add(shadow(at(gen, x - 0.3, 0, z - 0.75, 0.3)));
+  const cable = box(0.04, 0.03, 0.6, 0x1f1f1f, x - 0.15, 0.02, z - 0.35);
   cable.rotation.y = 0.9;
   scene.add(cable);
-  w.solids.push({ x, z, r: 0.25 }, { x: x - 1.1, z: z - 0.6, r: 0.6 });
+  // Mat et groupe dans un seul cercle : ni fente ni creux ou l'on se coince, on glisse autour.
+  w.solids.push({ x: x - 0.2, z: z - 0.45, r: 0.9 });
   const light = new THREE.PointLight(0xfff0d0, 0, 14, 1.5);
   light.position.set(0, 3, 0.6);
   scene.add(light);
@@ -749,13 +754,9 @@ function campProps(scene: THREE.Scene, w: World): void {
     scene.add(shadow(at(o, x, 0, z, ry)));
     if (solid > 0) w.solids.push({ x, z, r: solid });
   };
-  // Mur ouest : reserve de caisses et bidons, panneau a croix rouge.
-  put(group(at(crate(0.7), 0, 0, 0), at(crate(0.6, C.woodLight), 0.05, 0.7, 0.02, 0.3), at(crate(0.6), 0, 0, 0.75, 0.1)), -12.1, -1.6, 0, 0.8);
-  put(group(at(jerrycan(), 0.0, 0, 0), at(jerrycan(0x3f6a3a), 0.25, 0, 0.12, 0.4), at(jerrycan(), -0.3, 0, 0.1, -0.3)), -12.2, 0.4, Math.PI / 2, 0.4);
-  put(paintedBoard('cross'), -12.3, 2.4, Math.PI / 2, 0.3);
-  // Mur est : pneus, bouteilles de gaz, bache.
+  // Le mur ouest reste degage : sa porte mene a la ferme. Mur est : une pile de pneus
+  // (le reste genait l'acces a l'armurerie une fois le camp agrandi).
   put(tireStack(4, 5), 12.1, -0.6, 0, 0.5);
-  put(group(at(gasBottle(), 0, 0, 0), at(gasBottle(), 0.36, 0, 0.1), at(crate(0.55), 0.1, 0, -0.55, 0.2)), 12.1, 4.4, 0, 0.6);
   // Nord : nids de sacs de sable de part et d'autre de la porte.
   put(sandbags(1.8, 3, 7), -5.6, -10.2, 0, 0);
   w.solids.push({ x: -6.2, z: -10.2, r: 0.5 }, { x: -5.0, z: -10.2, r: 0.5 });
@@ -883,7 +884,8 @@ function surroundings(scene: THREE.Scene, w: World, r: () => number): void {
     scene.add(r() < 0.5 ? bush(r, 0.5 + r() * 0.5, x, z) : boulder(r, 0.4 + r() * 0.5, x, z));
   }
   // Herissons anti-vehicules devant le camp : on sait ce qui rode ici.
-  const hogs: [number, number][] = [[-9.6, 13.4], [-6.4, 14.0], [10.4, 13.6], [12.8, 13.2], [22, -9], [22.4, 8.5], [-21.5, 9], [-20.5, -13]];
+  // Hors des chemins : porte sud -> ouest, et couloir camp-ferme (porte est de la ferme).
+  const hogs: [number, number][] = [[16.5, 14.6], [18.6, 15.4], [10.4, 13.6], [12.8, 13.2], [22, -9], [22.4, 8.5], [-27.5, 16.4], [-20.5, -13]];
   for (const [x, z] of hogs) {
     scene.add(shadow(at(hedgehog(), x, 0, z, r() * 3)));
     w.solids.push({ x, z, r: 0.7 });
@@ -1050,7 +1052,9 @@ function farmZone(scene: THREE.Scene, w: World, r: () => number): void {
   const segs = [
     railFence(scene, w, F.minX, F.minZ, F.maxX, F.minZ, false, fence),
     railFence(scene, w, F.minX, F.minZ, F.minX, F.maxZ, false, fence),
-    railFence(scene, w, F.maxX, F.minZ, F.maxX, F.maxZ, false, fence),
+    // Mur est en deux, autour de la porte est (cote camp).
+    railFence(scene, w, F.maxX, F.minZ, F.maxX, FARM_EAST_GATE.z0, false, fence),
+    railFence(scene, w, F.maxX, FARM_EAST_GATE.z1, F.maxX, F.maxZ, false, fence),
     railFence(scene, w, F.minX, F.maxZ, F.gateX - F.gate, F.maxZ, false, fence),
     railFence(scene, w, F.gateX + F.gate, F.maxZ, F.maxX, F.maxZ, false, fence),
   ];
@@ -1058,6 +1062,13 @@ function farmZone(scene: THREE.Scene, w: World, r: () => number): void {
   scene.add(fenceMesh);
   w.keep.add(fenceMesh);
   w.farmFence = { mesh: fenceMesh, segs };
+  // La porte est reste barree (meme cloture) tant que l'entree de la ferme n'est pas degagee.
+  const bar = new THREE.Group();
+  const barSeg = railFence(scene, w, F.maxX, FARM_EAST_GATE.z0, F.maxX, FARM_EAST_GATE.z1, false, bar);
+  const barMesh = mergeColored(bar);
+  scene.add(barMesh);
+  w.keep.add(barMesh);
+  w.farmEastBar = { mesh: barMesh, seg: barSeg };
   w.locks.west = { x1: F.gateX - F.gate, z1: F.maxZ, x2: F.gateX + F.gate, z2: F.maxZ };
   w.walls.push(w.locks.west);
   patch(scene, -35, 2, 12, 10, C.dirt, 0.012, r, 0.15);

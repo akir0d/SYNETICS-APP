@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { mergeColored } from './bake';
 import { C, blob, box, cone, corrugated, cyl, group, lathe, mixHex, paint, plank, rbox, rng, vgrad } from './kit';
-import { CAMP, FARM, L } from './layout';
+import { CAMP, CAMP_WEST_GATE, FARM, FARM_EAST_GATE, L } from './layout';
 import type { Segment } from './physics';
 import { SCRAP_TONES } from './props';
 
@@ -741,6 +741,30 @@ export class Palisade {
     this.walls.push(st.seg);
     this.refresh(st);
     this.stall = st;
+
+    // Porte ouest, vers la ferme : les deux troncons du milieu du mur ouest s'effacent et une
+    // porte prend leur place. Ajoutee apres l'etal (ordre des points de vie sauvegardes).
+    const wg = CAMP_WEST_GATE;
+    for (const s of this.sections) {
+      if (s.kind === 'wall' && !s.hidden && Math.abs(s.x - minX) < 0.01 && Math.abs(s.z - wg.z) < wg.half) this.cut(s);
+    }
+    this.west = this.addGate(minX, wg.z + wg.half, minX, wg.z - wg.half, HIGH, 1);
+  }
+
+  /** Porte ouest du camp, porte est de la ferme. */
+  west: Section | null = null;
+
+  /** Un troncon remplace par une porte : il ne compte plus (ni collision, ni reparation). */
+  private cut(s: Section): void {
+    s.enabled = false;
+    s.hidden = true;
+    s.root.visible = false;
+    for (const o of s.states) {
+      s.root.remove(o);
+      o.traverse((c) => { if ((c as THREE.Mesh).isMesh) (c as THREE.Mesh).geometry.dispose(); });
+    }
+    s.states = [];
+    s.seg.off = true;
   }
 
   /** Le troncon cache de l'etal (camp seulement). */
@@ -763,6 +787,12 @@ export class Palisade {
     ];
     this.addRuns(runs, 3.2);
     const gs = this.addGate(g1, maxZ, g0, maxZ, LOW, -1);
+    // Porte est (cote camp) : deux troncons du mur est cedent la place a une porte.
+    const eg = FARM_EAST_GATE;
+    for (const s of this.sections) {
+      if (s.kind === 'wall' && Math.abs(s.x - maxX) < 0.01 && s.z > eg.z0 && s.z < eg.z1) this.cut(s);
+    }
+    this.west = this.addGate(maxX, eg.z0, maxX, eg.z1, HIGH, 1);
     const pg = new THREE.Group();
     for (const [x, z] of [[minX, minZ], [maxX, minZ], [minX, maxZ], [maxX, maxZ]] as const) {
       pg.add(put(pikeMesh(0.3, q(HIGH + 0.4), BARK[0]!, [0.65, HIGH - 0.75], 16), x, 0, z));
@@ -903,7 +933,7 @@ export class Palisade {
     const st = stateOf(s);
     if (s.kind === 'wall') {
       s.states.forEach((o, i) => { o.visible = i === st; });
-      s.seg.off = st === 0;
+      s.seg.off = !s.enabled || st === 0;
     } else {
       const g = s.gate!;
       const down = st === 0;

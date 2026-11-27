@@ -128,6 +128,10 @@ export interface Save {
   /** Materiau de la palissade : 1 bois simple, 2 pieux, 3 pierre, 4 ferraille, 5 fer fondu. */
   wallTier: number;
   /** Niveau de construction des batiments : 1 bois, 2 pierre, 3 metal. */
+  /** Niveau (1 a 10) des batiments qui s'ameliorent eux-memes : potagers, champs, scierie... */
+  blv: Record<string, number>;
+  /** Niveau (1 a 10) de chaque arme, plafonne par celui de l'armurerie. */
+  wlv: Record<string, number>;
   bt: Record<string, number>;
   /** Ce qui traine dans le camp : sac, reserve, bacs de l'etal, caisse, machines. */
   stock?: Stock;
@@ -210,7 +214,7 @@ export function freshSave(): Save {
     gems: 0, owned: [], lv: {}, boosts: {}, chestAt: 0, quests: { key: '', list: [] }, gemAds: { key: '', n: 0 },
     broken: [], fixPaid: {}, campLv: 1,
     weapons: ['rifle'], weapon: 'rifle', outfits: ['base'], outfit: 'base', caches: {}, rescued: 0, radio: [],
-    wallTier: 1, bt: {}, wonDay: 0, objT: [],
+    wallTier: 1, bt: {}, blv: {}, wlv: {}, wonDay: 0, objT: [],
     ads: { key: '', n: {} }, login: { step: 0, last: '', total: 0 }, questBonus: '', contracts: {}, firstBuy: false,
     monthly: { until: 0, last: '' }, clockHigh: Date.now(), seen: [], convoys: 0, convoyAt: 0, renown: 0,
     farmLv: 0, hunters: [], merc: 0,
@@ -243,6 +247,8 @@ export function loadSave(): Save {
       caches: { ...(d.caches ?? {}) },
       radio: Array.isArray(d.radio) ? d.radio : [],
       bt: { ...(d.bt ?? {}) },
+      blv: { ...(d.blv ?? {}) },
+      wlv: { ...(d.wlv ?? {}) },
       objT: Array.isArray(d.objT) ? d.objT : [],
       ads: d.ads && typeof d.ads.n === 'object' ? d.ads : base.ads,
       login: { ...base.login, ...(d.login ?? {}) },

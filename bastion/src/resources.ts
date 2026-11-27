@@ -1,7 +1,7 @@
 // Ce qu'on recolte : potagers, arbres a abattre, epaves a demonter.
 
 import * as THREE from 'three';
-import { C, at, blob, box, capsule, corrugated, cyl, damp, group, lathe, mixHex, paint, plank, rbox, rcyl, rng, shadow, sphere, torus, vgrad } from './kit';
+import { C, at, blob, box, capsule, corrugated, cyl, damp, group, lathe, mat, mixHex, paint, plank, rbox, rcyl, rng, shadow, sphere, torus, vgrad } from './kit';
 import { L } from './layout';
 import type { Circle, Segment } from './physics';
 import { mergeColored } from './bake';
@@ -27,8 +27,13 @@ export class Bed {
   readonly walls: Segment[];
   unlocked = false;
   readonly growTime: number;
-  /** Multiplicateur de pousse (niveau des cultures, boosts). */
+  /** Multiplicateur de pousse (niveau du bac, boosts). */
   growMul = 1;
+  /** Aspect du bac (1 a 5, suit son niveau d'amelioration) ; le decor est a part des plantes. */
+  stage = 0;
+  private readonly deco = new THREE.Group();
+  private readonly cols: number;
+  private readonly rows: number;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, readonly kind: Crop, readonly w = BED_W, readonly d = BED_D) {
     this.growTime = GROW[kind];
@@ -36,10 +41,10 @@ export class Bed {
     const base = kind === 'wheat' ? 0.12 : 0.44;
     const cols = Math.max(2, Math.round((w - 0.3) / 0.64));
     const rows = Math.max(2, Math.round((d - 0.3) / 0.55));
-    // Le cadre puis la terre : deux pieces fusionnees (partagees entre bacs de meme taille),
-    // qui tombent l'une apres l'autre quand on restaure le bac.
-    if (kind === 'wheat') g.add(shared(`field${w},${d},${rows}`, () => fieldFence(w, d)), shared(`furrows${w},${d},${rows}`, () => fieldSoil(w, d, rows)));
-    else g.add(shared(`bed${w},${d}`, () => bedFrame(w, d)), shared(`soil${w},${d},${cols},${rows}`, () => bedSoil(w, d, cols, rows)));
+    this.cols = cols;
+    this.rows = rows;
+    // Le decor (cadre, terre, serre...) change avec le niveau du bac : il vit dans son groupe.
+    g.add(this.deco);
     const r = rng(Math.round(x * 13 + z * 7));
     for (let i = 0; i < rows; i++) {
       for (let j = 0; j < cols; j++) {
@@ -60,6 +65,7 @@ export class Bed {
     // Les plantes recoivent les ombres mais n'en projettent pas : invisible vu de haut, et
     // ~150 appels de dessin en moins dans la passe d'ombre (le cadre et la terre gardent la leur).
     for (const p of this.plants) p.obj.traverse((o) => { o.castShadow = false; });
+    this.setStage(1);
     g.position.set(x, 0, z);
     g.visible = false;
     scene.add(g);
@@ -78,6 +84,33 @@ export class Bed {
   unlock(): void {
     this.unlocked = true;
     this.group.visible = true;
+  }
+
+  /** Groupe du decor : c'est lui que l'on anime quand le bac change d'aspect. */
+  get decoGroup(): THREE.Group {
+    return this.deco;
+  }
+
+  /**
+   * Change l'aspect du bac (1 a 5). Potager : terre nue, bordures de planches, bac en bois, bac
+   * sureleve arrose, serre en verre. Champ : friche, bordures, cloture, irrigation en pierre,
+   * grande serre. Les plantes suivent la hauteur de la terre ; les collisions ne changent pas.
+   */
+  setStage(stage: number): void {
+    const st = Math.max(1, Math.min(5, Math.round(stage)));
+    if (st === this.stage) return;
+    this.stage = st;
+    for (const c of [...this.deco.children]) this.deco.remove(c);
+    const { w, d, cols, rows } = this;
+    const made = this.kind === 'wheat'
+      ? shared(`fieldS${st},${w},${d},${rows}`, () => fieldDeco(w, d, rows, st))
+      : shared(`bedS${st},${w},${d},${cols},${rows}`, () => bedDeco(w, d, cols, rows, st));
+    for (const c of [...made.children]) this.deco.add(c);
+    const base = this.kind === 'wheat' ? 0.12 : BED_BASE[st - 1]!;
+    for (const p of this.plants) {
+      p.obj.userData.base = base;
+      p.obj.position.y = base;
+    }
   }
 
   /** Distance d'un point au bord du bac. */
@@ -162,6 +195,173 @@ function plantModel(kind: Crop, v: number): THREE.Group {
 const TONES = [C.wood, mixHex(C.wood, C.woodLight, 0.45), mixHex(C.wood, C.woodDark, 0.3)];
 
 /** Cadre du bac : deux rangs de planches biseautees, poteaux d'angle plus sombres. */
+function rot<T extends THREE.Object3D>(o: T, x: number, y = 0, z = 0): T {
+  o.rotation.set(x, y, z);
+  return o;
+}
+
+/** Hauteur de la terre (base des plantes) pour chaque aspect du potager. */
+const BED_BASE = [0.16, 0.26, 0.44, 0.62, 0.62];
+const GLASS = 0xd6eef2;
+const STEEL = 0x5a6066;
+
+/** Les cinq aspects d'un potager (pieces fusionnees ; le verre reste a part, transparent). */
+function bedDeco(w: number, d: number, cols: number, rows: number, stage: number): THREE.Group {
+  const g = new THREE.Group();
+  if (stage === 1) {
+    // Terre nue : une butte retournee a la pelle, quelques cailloux.
+    g.add(paint(rbox(w - 0.2, 0.16, d - 0.2, C.soil, 0.08, 0, 0.08, 0), 'soil1', (_x, y, _z, out) => {
+      out.lerpColors(SOIL_DEEP, SOIL_TOP, smooth((y + 0.08) / 0.16));
+    }));
+    mounds(g, w, d, cols, rows, 0.15);
+    for (const [sx, sz] of [[-0.5, 0.45], [0.48, -0.5], [0.2, 0.55]] as const) g.add(blob(0.07, 0x8f8a80, sx * w, 0.04, sz * d));
+    return mergeColored(g, 0.05);
+  }
+  if (stage === 2) {
+    // Bordures : une planche couchee de chaque cote, la terre un peu plus haut.
+    let k = 0;
+    for (const s of [-1, 1]) {
+      g.add(plank(w, 0.18, 0.11, TONES[k++ % 3]!, 0, 0.09, s * (d / 2 - 0.055)));
+      g.add(plank(0.11, 0.18, d - 0.22, TONES[k++ % 3]!, s * (w / 2 - 0.055), 0.09, 0));
+    }
+    g.add(paint(rbox(w - 0.24, 0.22, d - 0.24, C.soil, 0.08, 0, 0.11, 0), 'soil2', (_x, y, _z, out) => {
+      out.lerpColors(SOIL_DEEP, SOIL_TOP, smooth((y + 0.11) / 0.22));
+    }));
+    mounds(g, w, d, cols, rows, 0.25);
+    return mergeColored(g, 0.05);
+  }
+  if (stage === 3) {
+    g.add(bedFrame(w, d), bedSoil(w, d, cols, rows));
+    return g;
+  }
+  // Niveaux 7-8 : bac sureleve de trois planches sur pieds, tuyau d'arrosage goutte a goutte.
+  const raised = new THREE.Group();
+  const t = 0.13;
+  let k = 0;
+  for (const y of [0.11, 0.31, 0.51]) {
+    for (const s of [-1, 1]) {
+      raised.add(plank(w - 0.06, 0.19, t, TONES[k++ % 3]!, 0, y, s * (d / 2 - t / 2)));
+      raised.add(plank(t, 0.19, d - 2 * t - 0.01, TONES[k++ % 3]!, s * (w / 2 - t / 2), y, 0));
+    }
+  }
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) raised.add(plank(0.19, 0.72, 0.19, C.woodDark, sx * (w / 2 - 0.09), 0.36, sz * (d / 2 - 0.09)));
+  const soil = bedSoil(w, d, cols, rows);
+  soil.position.y = 0.18;
+  raised.add(soil);
+  raised.add(rot(cyl(0.035, 0.035, w - 0.3, 0x3f6a8a, 10, 0, 0.66, -d / 2 + 0.2), 0, 0, Math.PI / 2));
+  for (let i = 0; i < 5; i++) raised.add(sphere(0.03, 0x2d4a60, -w / 2 + 0.35 + i * ((w - 0.7) / 4), 0.64, -d / 2 + 0.2, 6));
+  raised.add(cyl(0.05, 0.05, 0.12, 0xc9412f, 10, w / 2 - 0.05, 0.7, -d / 2 + 0.2));
+  g.add(mergeColored(raised, 0.05));
+  if (stage === 5) {
+    // Serre : ossature d'acier et verre (un seul maillage transparent pour les parois et le toit).
+    const H = 1.35;
+    const fw = w + 0.2;
+    const fd = d + 0.2;
+    const frame = new THREE.Group();
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) frame.add(box(0.07, H, 0.07, STEEL, sx * fw / 2, H / 2, sz * fd / 2));
+    for (const sz of [-1, 1]) frame.add(box(fw, 0.06, 0.06, STEEL, 0, H, sz * fd / 2));
+    for (const sx of [-1, 1]) frame.add(box(0.06, 0.06, fd, STEEL, sx * fw / 2, H, 0));
+    frame.add(box(fw, 0.06, 0.06, STEEL, 0, H + 0.45, 0));
+    for (const sz of [-1, 1]) {
+      const r = box(fw, 0.05, Math.hypot(fd / 2, 0.45), STEEL, 0, H + 0.225, sz * fd / 4);
+      r.rotation.x = sz * Math.atan2(0.45, fd / 2);
+      r.scale.set(1, 1, 0.08);
+      frame.add(r);
+    }
+    g.add(mergeColored(frame, 0.04));
+    g.add(glassHouse(fw, fd, H, 0.45));
+  }
+  return g;
+}
+
+/** Les cinq aspects d'un champ de ble. */
+function fieldDeco(w: number, d: number, rows: number, stage: number): THREE.Group {
+  const g = new THREE.Group();
+  g.add(fieldSoil(w, d, rows));
+  if (stage === 2) {
+    const b = new THREE.Group();
+    for (const s of [-1, 1]) {
+      b.add(plank(w + 0.1, 0.16, 0.1, TONES[1]!, 0, 0.08, s * (d / 2 + 0.05)));
+      b.add(plank(0.1, 0.16, d, TONES[2]!, s * (w / 2 + 0.05), 0.08, 0));
+    }
+    g.add(mergeColored(b, 0.05));
+  } else if (stage === 3) {
+    g.add(fieldFence(w, d));
+  } else if (stage >= 4) {
+    // Bordure de pierres taillees et rigole d'irrigation le long d'un cote, avec sa pompe.
+    const s4 = new THREE.Group();
+    const n = Math.round(w / 0.55);
+    for (const sz of [-1, 1]) for (let i = 0; i < n; i++) s4.add(box(w / n - 0.04, 0.2, 0.22, [0x9c988e, 0x8b877d, 0xa9a59a][(i + (sz > 0 ? 1 : 0)) % 3]!, -w / 2 + (i + 0.5) * (w / n), 0.1, sz * (d / 2 + 0.12)));
+    const m = Math.round(d / 0.55);
+    for (const sx of [-1, 1]) for (let i = 0; i < m; i++) s4.add(box(0.22, 0.2, d / m - 0.04, [0x8b877d, 0xa9a59a, 0x9c988e][i % 3]!, sx * (w / 2 + 0.12), 0.1, -d / 2 + (i + 0.5) * (d / m)));
+    s4.add(box(w, 0.05, 0.16, 0x4f8fb0, 0, 0.16, -d / 2 - 0.12));
+    s4.add(rbox(0.22, 0.7, 0.22, 0x3f6a8a, 0.05, w / 2 + 0.35, 0.35, -d / 2 - 0.12), rot(cyl(0.03, 0.03, 0.4, 0x2d2d2d, 8, w / 2 + 0.35, 0.78, -d / 2 + 0.02), Math.PI / 2.5, 0, 0));
+    g.add(mergeColored(s4, 0.05));
+    if (stage === 5) {
+      // Grande serre en tunnel : arceaux d'acier et bache de verre.
+      const R = d / 2 + 0.35;
+      const hoops = new THREE.Group();
+      for (let i = 0; i < 4; i++) {
+        const hp = new THREE.Mesh(new THREE.TorusGeometry(R, 0.04, 6, 18, Math.PI), mat(STEEL));
+        hp.rotation.y = Math.PI / 2;
+        hp.position.x = -w / 2 + (i / 3) * w;
+        hoops.add(hp);
+      }
+      g.add(mergeColored(hoops, 0.03));
+      const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(R, R, w + 0.1, 20, 1, true, -Math.PI / 2, Math.PI), mat(GLASS, { opacity: 0.26, double: true }));
+      tunnel.rotation.z = Math.PI / 2;
+      tunnel.castShadow = false;
+      g.add(tunnel);
+    }
+  }
+  return g;
+}
+
+/** Une butte de terre sous chaque plante. */
+function mounds(g: THREE.Group, w: number, d: number, cols: number, rows: number, y: number): void {
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+      const px = (j - (cols - 1) / 2) * ((w - 0.5) / Math.max(1, cols - 1));
+      const pz = (i - (rows - 1) / 2) * ((d - 0.5) / Math.max(1, rows - 1));
+      const m = blob(0.14, mixHex(C.soil, 0x8a5a34, 0.4), px, y, pz);
+      m.scale.set(1.15, 0.36, 1.15);
+      g.add(m);
+    }
+  }
+}
+
+/** Parois et toit a deux pentes en verre, d'un seul maillage transparent. */
+function glassHouse(w: number, d: number, H: number, ridge: number): THREE.Mesh {
+  const hw = w / 2;
+  const hd = d / 2;
+  const v = [
+    // parois (4 rectangles)
+    -hw, 0, -hd, hw, 0, -hd, hw, H, -hd, -hw, H, -hd,
+    -hw, 0, hd, hw, 0, hd, hw, H, hd, -hw, H, hd,
+    -hw, 0, -hd, -hw, 0, hd, -hw, H, hd, -hw, H, -hd,
+    hw, 0, -hd, hw, 0, hd, hw, H, hd, hw, H, -hd,
+    // toit (2 pans) et pignons (2 triangles)
+    -hw, H, -hd, hw, H, -hd, hw, H + ridge, 0, -hw, H + ridge, 0,
+    -hw, H, hd, hw, H, hd, hw, H + ridge, 0, -hw, H + ridge, 0,
+  ];
+  const idx: number[] = [];
+  for (let q = 0; q < 6; q++) {
+    const o = q * 4;
+    idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  }
+  const base = 24;
+  v.push(-hw, H, -hd, -hw, H, hd, -hw, H + ridge, 0, hw, H, -hd, hw, H, hd, hw, H + ridge, 0);
+  idx.push(base, base + 1, base + 2, base + 3, base + 4, base + 5);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, mat(GLASS, { opacity: 0.28, double: true }));
+  m.castShadow = false;
+  m.receiveShadow = false;
+  return m;
+}
+
 function bedFrame(w: number, d: number): THREE.Group {
   const g = new THREE.Group();
   const t = 0.13;

@@ -465,3 +465,25 @@ body.night .vignette { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,
 .labels > .max-label, .labels > .up-badge { margin: 0; }
 @keyframes upBob { 0%, 100% { margin-top: 0; } 50% { margin-top: -6px; } }
 .bubble.vip { background: linear-gradient(180deg, #fff3b0, #ffd23a); border-color: #d89a10; color: #5a3a00; font-weight: 800; }
+
+/* ---- batiments a niveaux : panneau et badges */
+.bld { background: #fff8e8; border: 3px solid var(--wood); border-radius: 16px; padding: 10px 12px 12px; margin: 2px 0 10px; box-shadow: 0 3px 0 var(--wood-dark); }
+.bld-head { display: flex; align-items: center; gap: 10px; }
+.bld-icon { font-size: 34px; line-height: 1; }
+.bld-name { font-size: 18px; font-weight: 800; }
+.bld-name .lv { font-size: 13px; font-weight: 700; opacity: .6; margin-left: 4px; }
+.bld-stage { font-size: 13px; font-weight: 700; color: #8a5a2a; }
+.pips { display: flex; gap: 4px; margin: 8px 0 6px; }
+.pips i { flex: 1; height: 9px; border-radius: 5px; background: #e8d6b0; position: relative; }
+.pips i.on { background: linear-gradient(90deg, #ffd84a, #f0a830); }
+.pips i.st::before { content: '✨'; position: absolute; top: -15px; left: -6px; font-size: 10px; }
+.bld-row { display: flex; gap: 8px; align-items: baseline; font-size: 13px; margin: 2px 0; }
+.bld-row span { min-width: 52px; opacity: .6; font-weight: 700; }
+.bld-row.next b { color: #2f8a2f; }
+.bld-look { margin: 6px 0 4px; padding: 5px 8px; border-radius: 10px; background: #fff0b8; font-size: 13px; }
+.bld-look.dim { background: #f2e8d2; opacity: .8; }
+.bld-cost { margin-top: 6px; font-size: 14px; font-weight: 700; }
+.bld .btn.big { width: 100%; margin-top: 8px; font-size: 17px; padding: 10px; }
+.up-next { font-size: 11.5px; color: #2f8a2f; }
+.bld-badge { pointer-events: auto; cursor: pointer; }
+.bld-badge.look { background: radial-gradient(circle, #ffe98a, #f0a830); box-shadow: 0 3px 0 #b87a10; }

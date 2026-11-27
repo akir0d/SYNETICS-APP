@@ -83,10 +83,7 @@ export interface LevelDef {
 export const MAX_LEVEL = 15;
 
 export const LEVELS: LevelDef[] = [
-  { id: 'crops', name: 'Cultures', icon: '🌱', needs: null, base: 120, effect: (l) => `Récolte double : ${5 * l} % de chances` },
   { id: 'stall', name: 'Étal', icon: '🧺', needs: null, base: 150, effect: (l) => `Prix de vente +${5 * l} %` },
-  { id: 'saw', name: 'Scierie', icon: '🪚', needs: 'sawmill', base: 200, effect: (l) => `Cadence +${15 * l} %` },
-  { id: 'cook', name: 'Cuisine', icon: '🍲', needs: 'kitchen', base: 250, effect: (l) => `Cadence +${15 * l} %` },
   { id: 'reserve', name: 'Réserve', icon: '📦', needs: 'shelter', base: 220, effect: (l) => `${240 + 60 * l} places · absence +${15 * l} min` },
   { id: 'foreman', name: 'Contremaître', icon: '📋', needs: 'farmer', base: 300, effect: (l) => `Hors ligne : rendement ${Math.round(15 + 1.5 * l)} %, plafond +${10 * l} %, jusqu'à ${1 + l / 2} h` },
   { id: 'tower', name: 'Tour de guet', icon: '🗼', needs: 'tower', base: 300, effect: (l) => `Dégâts +${l}, tirs +${8 * l} %` },
@@ -174,7 +171,7 @@ export interface WeaponDef {
   /** Prix : en pieces, ou en gemmes pour aller plus vite. */
   coins: number;
   gems: number;
-  /** Caracteristiques selon le niveau « Fusil » de l'etabli. */
+  /** Caracteristiques selon le niveau de l'arme moins un (0 a 9, voir blevels.ts). */
   range: (lvl: number) => number;
   interval: (lvl: number) => number;
   damage: (lvl: number) => number;
@@ -184,11 +181,11 @@ export interface WeaponDef {
 
 export const WEAPONS: WeaponDef[] = [
   { id: 'rifle', name: 'Fusil', icon: '🔫', desc: 'Précis, cadence rapide', coins: 0, gems: 0,
-    range: (l) => 10 + l, interval: (l) => 0.32 - 0.03 * l, damage: (l) => 1 + l, targets: 1 },
+    range: (l) => 10 + 0.5 * l, interval: (l) => 0.32 - 0.015 * l, damage: (l) => 1 + 0.5 * l, targets: 1 },
   { id: 'shotgun', name: 'Fusil à pompe', icon: '💥', desc: 'Touche 4 zombies d’un coup, de près', coins: 9000, gems: 150,
-    range: (l) => 7 + 0.5 * l, interval: (l) => 0.62 - 0.03 * l, damage: (l) => 1 + l, targets: 4 },
+    range: (l) => 7 + 0.25 * l, interval: (l) => 0.62 - 0.015 * l, damage: (l) => 1 + 0.5 * l, targets: 4 },
   { id: 'crossbow', name: 'Arbalète', icon: '🏹', desc: 'Très longue portée, carreaux dévastateurs', coins: 20000, gems: 300,
-    range: (l) => 16 + l, interval: (l) => 0.7 - 0.04 * l, damage: (l) => 3 + 2 * l, targets: 1 },
+    range: (l) => 16 + 0.5 * l, interval: (l) => 0.7 - 0.02 * l, damage: (l) => 3 + l, targets: 1 },
 ];
 
 export interface OutfitDef { id: string; name: string; icon: string; gems: number; jacket: number; cap: number; pants: number }

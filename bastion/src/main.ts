@@ -5,6 +5,10 @@ import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
 import {
+  BDEFS, BMAX, WEAPON_NEED, bCost, bdef, bonusText, capOf, doubleOf, extraOf, growOf, huntBonusOf, needOf, speedOf, stageName, stageOf, wCost,
+  type BDef,
+} from './blevels';
+import {
   Bus, armory, cabin, dock, foundry, infirmary, kitchen, quarryShed, sawmill, shelter, towerSkin, warehouse, watchTower, windmill, workbench,
   type Building,
 } from './buildings';
@@ -338,6 +342,23 @@ function costIcons(c: Cost): string {
 
 let save: Save = loadSave();
 const isBuilt = (id: string) => save.built.includes(id);
+/** Les potagers puis les champs, dans l'ordre du tableau `beds`. */
+const BED_IDS = ['bed1', 'bed2', 'bed3', 'bed4', 'field1', 'field2', 'field3'] as const;
+/** Niveau (1 a 10) d'un batiment qui s'ameliore lui-meme, et d'une arme. */
+const blvOf = (id: string) => Math.max(1, Math.min(BMAX, Math.floor(save.blv[id] ?? 1)));
+const wlvOf = (id: string) => Math.max(1, Math.min(BMAX, Math.floor(save.wlv[id] ?? 1)));
+// Les parties d'avant les batiments a niveaux : niveaux de l'etabli, paliers en dur et fusil
+// sont repris dans les nouveaux niveaux (rien de ce qui a ete paye n'est perdu).
+if (!save.seen.includes('blv-v1')) {
+  save.seen.push('blv-v1');
+  const old = save.lv;
+  const up = (id: string, n: number) => { save.blv[id] = Math.max(save.blv[id] ?? 1, Math.max(1, Math.min(BMAX, n))); };
+  for (const id of BED_IDS) up(id, 1 + Math.round((old.crops ?? 0) * 0.6));
+  up('sawmill', 1 + Math.round((old.saw ?? 0) * 0.5) + 2 * ((save.bt.sawmill ?? 1) - 1));
+  up('kitchen', 1 + Math.round((old.cook ?? 0) * 0.5) + 2 * ((save.bt.kitchen ?? 1) - 1));
+  up('armory', Math.max(1 + save.up.gun, save.weapons.includes('crossbow') ? 5 : save.weapons.includes('shotgun') ? 3 : 1));
+  save.wlv.rifle = Math.max(save.wlv.rifle ?? 1, Math.min(BMAX, 1 + 2 * save.up.gun));
+}
 
 // ---------------------------------------------------------------- zones a debloquer
 
@@ -1312,7 +1333,7 @@ const hotWall: Record<HuntZone, { s: Section | null; t: number }> = { camp: { s:
 /** Places ouvertes : une avec l'armurerie, deux au camp niveau 3, trois au niveau 4. */
 const huntSlots = () => (isBuilt('armory') ? HUNTER_LV.filter((l) => save.campLv >= l).length : 0);
 /** Un peu plus fort qu'une tour d'angle, moins que le joueur ; il suit la menace et le niveau des tours. */
-const huntDmg = () => 2 + Math.floor(threat() / 4) + lv('tower');
+const huntDmg = () => 2 + Math.floor(threat() / 4) + lv('tower') + (isBuilt('armory') ? huntBonusOf(blvOf('armory')) : 0);
 /** La ferme n'est defendue qu'une fois fortifiee (sinon il reste au camp). */
 const zoneOf = (i: number): HuntZone => (save.hunters[i] === 'farm' && farmWall ? 'farm' : 'camp');
 const mercOn = () => save.cycle && save.merc === save.day;
@@ -1452,10 +1473,11 @@ function renderHunters(): void {
   const on = mercOn();
   const adOk = adLeft('hunter') > 0;
   const dmg = huntDmg();
-  const key = `${slots}|${save.hunters.join(',')}|${farmWall ? 1 : 0}|${on ? 1 : 0}|${adOk ? 1 : 0}|${save.cycle ? 1 : 0}|${dmg}`;
+  const key = `${slots}|${save.hunters.join(',')}|${farmWall ? 1 : 0}|${on ? 1 : 0}|${adOk ? 1 : 0}|${save.cycle ? 1 : 0}|${dmg}`
+    + `|${bldKeyOf('armory')}|${save.weapons.join(',')}|${save.weapon}|${WEAPONS.map((w) => wlvOf(w.id)).join(',')}`;
   if (key !== huntKey) {
     huntKey = key;
-    let h = `<h2>🤠 Chasseurs de prime <span class="lv">${save.hunters.length}/${HUNTERS.length}</span></h2>
+    let h = bldCard('armory') + weaponsHtml() + `<h2>🤠 Chasseurs de prime <span class="lv">${save.hunters.length}/${HUNTERS.length}</span></h2>
       <p class="note">Payé une seule fois, chacun défend toutes les nuits la zone que tu lui donnes, et court là où la palissade est attaquée.</p>`;
     HUNTERS.forEach((d, i) => {
       if (i < save.hunters.length) {
@@ -1486,6 +1508,7 @@ function renderHunters(): void {
   ui.sheetBody.querySelectorAll<HTMLElement>('[data-hire]').forEach((b) => {
     b.classList.toggle('poor', save.coins < (HUNTER_COST[Number(b.dataset.hire)] ?? 0));
   });
+  refreshBldButtons();
 }
 
 ui.sheetBody.addEventListener('click', (e) => {
@@ -1749,6 +1772,8 @@ function applyUpgrades(): void {
 }
 
 let sheetOpen = false;
+/** L'etabli : tout sauf le fusil (il s'ameliore a l'armurerie). */
+const BENCH_UPS = UPGRADES.filter((u) => u.id !== 'gun');
 function renderSheet(): void {
   const levels = LEVELS.filter((d) => !d.needs || isBuilt(d.needs)).map((d) => {
     const lvl = lv(d.id);
@@ -1762,7 +1787,8 @@ function renderSheet(): void {
     </div>`;
   }).join('');
   const scroll = ui.sheetBody.scrollTop;
-  ui.sheetBody.innerHTML = `<h2>🧱 Matériaux</h2>${materialCards()}<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + UPGRADES.map((u) => {
+  ui.sheetBody.innerHTML = `<p class="note">⬆️ Potagers, champs, scierie, cuisine et armurerie s’améliorent eux-mêmes : touche-les.</p>`
+    + `<h2>🧱 Matériaux</h2>${materialCards()}<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + BENCH_UPS.map((u) => {
     const lvl = save.up[u.id];
     const max = lvl >= u.costs.length;
     const cost = u.costs[lvl] ?? 0;
@@ -1992,13 +2018,14 @@ wearOutfit(save.outfit);
 });
 
 /** Le panneau du bas : ameliorations a l'etabli, ou choix des objets a la reserve. */
-type Panel = 'bench' | 'reserve' | 'hunters' | null;
+type Panel = 'bench' | 'reserve' | 'hunters' | 'bld' | null;
 let panel: Panel = null;
 function setPanel(p: Panel): void {
   if (p === panel) {
     if (p === 'bench') refreshSheetButtons();
     else if (p === 'reserve') renderReserve();
     else if (p === 'hunters') renderHunters();
+    else if (p === 'bld') renderBld();
     return;
   }
   panel = p;
@@ -2006,11 +2033,15 @@ function setPanel(p: Panel): void {
   handleY = null;
   sheetRest();
   ui.sheet.classList.remove('min');
-  setText(ui.sheetTitle, p === 'bench' ? '🔨 Établi' : p === 'reserve' ? '📦 Réserve' : p === 'hunters' ? '🛡️ Armurerie' : '');
+  const bd = p === 'bld' ? bdef(bldId) : undefined;
+  setText(ui.sheetTitle, p === 'bench' ? '🔨 Établi' : p === 'reserve' ? '📦 Réserve' : p === 'hunters' ? '🛡️ Armurerie' : bd ? `${bd.icon} ${bd.name}` : '');
   document.body.classList.toggle('sheet-open', sheetOpen);
   ui.sheetBody.scrollTop = 0;
   if (p === 'bench') renderSheet();
-  else if (p === 'hunters') {
+  else if (p === 'bld') {
+    bldKey = '';
+    renderBld();
+  } else if (p === 'hunters') {
     huntKey = '';
     renderHunters();
   } else if (p === 'reserve') {
@@ -2114,11 +2145,15 @@ const crewMul = () => 1 + 0.12 * ct('crew');
 function applyMeta(dt: number): void {
   for (const b of BOOSTS) if ((save.boosts[b.id] ?? 0) > 0) save.boosts[b.id] = Math.max(0, save.boosts[b.id]! - dt);
   const grow = boostOn('grow') ? 2 : 1;
-  for (const b of beds) b.growMul = grow;
+  // Chaque potager, chaque champ a son niveau : il pousse plus vite.
+  beds.forEach((b, i) => { b.growMul = grow * growOf(blvOf(BED_IDS[i]!)); });
   // Batiments en pierre puis en metal : +50 % de cadence a chaque palier.
   const tierK = (id: string) => 1 + 0.5 * (bt(id) - 1);
-  saw.speed = (1 + 0.15 * lv('saw')) * grow * tierK('sawmill');
-  cook.speed = (1 + 0.15 * lv('cook')) * grow * tierK('kitchen');
+  // Scierie et cuisine : leur niveau (touche-les pour les ameliorer).
+  saw.speed = speedOf(blvOf('sawmill')) * grow;
+  cook.speed = speedOf(blvOf('kitchen')) * grow;
+  saw.extra = extraOf(blvOf('sawmill'));
+  cook.extra = extraOf(blvOf('kitchen'));
   mill.speed = (1 + 0.15 * lv('mill')) * grow * tierK('mill');
   forge.speed = grow * tierK('foundry');
   reserve.cap = 240 + 60 * lv('reserve') + 120 * (bt('shelter') - 1) + (isBuilt('warehouse') ? 200 : 0);
@@ -2334,15 +2369,7 @@ function renderShop(): void {
         + `<button class="btn gem" data-boost="${b.id}" data-pay="gem" ${boostRoom(b.id, BOOST_MAX) ? '' : 'disabled'}>${b.gems} 💎</button>`);
     }
     h += `<h3>Armes</h3>`;
-    for (const wd of WEAPONS) {
-      const owned = save.weapons.includes(wd.id);
-      const on = save.weapon === wd.id;
-      const btns = !owned && !isBuilt('armory') ? `<button class="btn" disabled>Bâtis l’armurerie (camp niv. 2)</button>`
-        : on ? `<button class="btn" disabled>Équipée</button>`
-        : owned ? `<button class="btn" data-equip="${wd.id}">Équiper</button>`
-          : `<button class="btn ${save.coins < wd.coins ? 'poor' : ''}" data-weapon="${wd.id}" data-pay="coin"><span class="coin"></span>${wd.coins}</button><button class="btn gem" data-weapon="${wd.id}" data-pay="gem">${wd.gems} 💎</button>`;
-      h += card(wd.icon, wd.name, wd.desc, btns);
-    }
+    h += card('🛡️', 'À l’armurerie', isBuilt('armory') ? 'Débloque et améliore tes armes en touchant l’armurerie' : 'Bâtis l’armurerie (camp niv. 2) : armes à débloquer et à améliorer', '');
     h += `<h3>Tenues</h3>`;
     for (const o of OUTFITS) {
       const owned = save.outfits.includes(o.id);
@@ -2615,8 +2642,6 @@ const bt = (id: string) => save.bt[id] ?? 1;
 const BT_NAMES = ['Bois', 'Pierre', 'Métal'];
 /** Batiments qu'on peut construire en dur, et leur « poids » dans le cout. */
 const TIERABLE: { id: string; name: string; icon: string; w: number }[] = [
-  { id: 'sawmill', name: 'Scierie', icon: '🪚', w: 1 },
-  { id: 'kitchen', name: 'Cuisine', icon: '🍲', w: 1.2 },
   { id: 'tower', name: 'Tour de guet', icon: '🗼', w: 1.4 },
   { id: 'shelter', name: 'Abri', icon: '🏠', w: 1.5 },
   { id: 'mill', name: 'Moulin', icon: '🍞', w: 1.6 },
@@ -2751,6 +2776,362 @@ function applyBuildingTier(id: string): void {
   if (st) {
     st.max = STRUCT_HP[id]! * t;
     st.hp = st.max;
+  }
+}
+
+// ---------------------------------------------------------------- batiments a niveaux : on les touche pour les ameliorer
+
+/** Les potagers et champs, dans l'ordre du tableau `beds`. */
+const bedOfId = (id: string): Bed | undefined => {
+  const i = (BED_IDS as readonly string[]).indexOf(id);
+  return i >= 0 ? beds[i] : undefined;
+};
+const bBuilt = (id: string) => id === 'bed1' || isBuilt(id);
+const armoryExt = () => EXT.find((e) => e.id === 'armory')!;
+
+function bPos(id: string): { x: number; z: number } {
+  const bed = bedOfId(id);
+  if (bed) return bed.group.position;
+  if (id === 'armory') return armoryExt();
+  return B[id]!.group.position;
+}
+const bReach = (id: string) => (id.startsWith('field') ? 2.4 : id.startsWith('bed') ? 1.5 : id === 'sawmill' ? 2.0 : 1.9);
+
+interface BState { d: BDef; lv: number; next: number; max: boolean; locked: string; cost: Cost; rem: Cost; key: string }
+function bState(id: string): BState {
+  const d = bdef(id)!;
+  const lv = blvOf(id);
+  const next = lv + 1;
+  const max = lv >= BMAX;
+  const cost = max ? { coins: 0 } : bCost(d, next);
+  const key = `blv:${id}:${next}`;
+  let locked = '';
+  if (!max) {
+    const need = needOf(d, next);
+    if (isBroken(id)) locked = '🔧 Répare-le d’abord';
+    else if (next > capOf(save.campLv)) locked = `🏰 Camp niv. ${Math.ceil((next - 2) / 2)}`;
+    else if (need === 'quarry' && !isBuilt('quarry')) locked = '⛏️ Il faut la carrière';
+    else if (need === 'foundry' && !isBuilt('foundry')) locked = '🔥 Il faut la fonderie';
+  }
+  return { d, lv, next, max, locked, cost, rem: max ? cost : remainingOf(key, cost), key };
+}
+/** Tout est la (sac + reserve + pieces) pour finir le niveau d'un coup. */
+const bReady = (id: string) => {
+  if (!bBuilt(id)) return false;
+  const s = bState(id);
+  return !s.max && !s.locked && canAfford(s.rem);
+};
+/** On peut au moins deposer quelque chose. */
+const bCanDeposit = (s: BState) => !s.max && !s.locked
+  && (Math.min(save.coins, s.rem.coins) > 0 || (Object.keys(ITEMS) as ItemType[]).some((t) => (s.rem[t] ?? 0) > 0 && have(t) > 0) || totalCost(s.rem) === 0);
+
+/** L'aspect du modele suit le niveau : potagers et champs changent de bordure, les autres de pieces. */
+function applyLook(id: string, animate: boolean): void {
+  const st = stageOf(blvOf(id));
+  const bed = bedOfId(id);
+  if (bed) {
+    const before = bed.stage;
+    bed.setStage(st);
+    if (animate && before !== st) restorer.run(null, bed.decoGroup);
+    return;
+  }
+  if (id !== 'sawmill' && id !== 'kitchen' && id !== 'armory') return;
+  const nb = id === 'sawmill' ? sawmill(st) : id === 'kitchen' ? kitchen(st) : armory(0, 0, st, save.weapons);
+  const target = id === 'armory' ? armoryExt().group : B[id]!.group;
+  restorer.cancel(target);
+  for (const c of [...target.children]) {
+    target.remove(c);
+  }
+  for (const c of [...nb.group.children]) target.add(c);
+  const b: Building = { ...nb, group: target as THREE.Group };
+  if (id === 'armory') armoryExt().live = b.live ?? [];
+  else B[id] = b;
+  if (!bBuilt(id) || isBroken(id) || !target.visible) return;
+  if (animate) restorer.run(null, target, () => consolidate(target, b.live));
+  else consolidate(target, b.live);
+}
+
+function bLevelUp(id: string): void {
+  const s = bState(id);
+  delete save.fixPaid[s.key];
+  save.blv[id] = s.next;
+  const newLook = stageOf(s.next) !== stageOf(s.lv);
+  applyLook(id, newLook);
+  const p = bPos(id);
+  particles.burst(new THREE.Vector3(p.x, 1.4, p.z), [0xffd84a, 0xffffff, 0x9bf07a], newLook ? 60 : 30, { speed: 5, up: 6, size: 0.16 });
+  sfx.sfxBuild();
+  if (newLook) {
+    sfx.sfxVictory();
+    shake = Math.max(shake, 0.25);
+    objBanner(`✨ ${s.d.name} : ${stageName(s.d, s.next)}`, `Niveau ${s.next} · ${bonusText(s.d, s.next)}`);
+  } else toast(`⬆️ ${s.d.icon} ${s.d.name} niveau ${s.next}`);
+  buzz(newLook ? 60 : 30);
+  bldKey = '';
+  huntKey = '';
+  persist();
+}
+
+// ---- le panneau d'un batiment
+
+let bldId = '';
+let bldKey = '';
+/** Panneau ouvert d'un toucher (il reste ouvert tant qu'on ne s'eloigne pas). */
+let tapPanel: Panel = null;
+const tapFrom = new THREE.Vector3();
+
+function bldCard(id: string): string {
+  const s = bState(id);
+  const { d } = s;
+  const pips = Array.from({ length: BMAX }, (_, i) => `<i class="${i < s.lv ? 'on' : ''}${i % 2 === 0 && i > 0 ? ' st' : ''}"></i>`).join('');
+  let look = '';
+  if (!s.max) {
+    let nl = s.next;
+    while (nl < BMAX && stageOf(nl) === stageOf(s.lv)) nl++;
+    look = stageOf(nl) !== stageOf(s.lv)
+      ? `<div class="bld-look ${nl === s.next ? '' : 'dim'}">✨ ${nl === s.next ? 'Nouvel aspect' : `Aspect au niv. ${nl}`} : <b>${stageName(d, nl)}</b></div>` : '';
+  }
+  let foot: string;
+  if (s.max) foot = `<button class="btn" disabled>Niveau maximum</button>`;
+  else if (s.locked) foot = `<div class="bld-cost">${costIcons(s.cost)}</div><button class="btn" disabled>${s.locked}</button>`;
+  else {
+    const k = 1 - totalCost(s.rem) / Math.max(1, totalCost(s.cost));
+    foot = `<div class="bld-cost">${k > 0 ? 'Reste : ' : ''}${costIcons(s.rem)}</div>${k > 0 ? `<div class="bar"><i style="width:${Math.round(k * 100)}%"></i></div>` : ''}
+      <button class="btn big ${bCanDeposit(s) ? '' : 'poor'}" data-bup="${id}">${canAfford(s.rem) ? `⬆️ Niveau ${s.next}` : 'Déposer'}</button>`;
+  }
+  return `<div class="bld">
+    <div class="bld-head"><span class="bld-icon">${d.icon}</span><div><div class="bld-name">${d.name} <span class="lv">niv. ${s.lv}/${BMAX}</span></div>
+    <div class="bld-stage">${stageName(d, s.lv)}</div></div></div>
+    <div class="pips">${pips}</div>
+    <div class="bld-row"><span>Actuel</span><b>${bonusText(d, s.lv)}</b></div>
+    ${s.max ? '' : `<div class="bld-row next"><span>Niv. ${s.next}</span><b>${bonusText(d, s.next)}</b></div>`}
+    ${look}${foot}
+  </div>`;
+}
+
+function bldKeyOf(id: string): string {
+  const s = bState(id);
+  return `${id}|${s.lv}|${s.locked}|${JSON.stringify(save.fixPaid[s.key] ?? null)}|${canAfford(s.rem) ? 1 : 0}`;
+}
+
+function renderBld(): void {
+  if (!bldId) return;
+  const key = bldKeyOf(bldId);
+  if (key !== bldKey) {
+    bldKey = key;
+    const bed = bedOfId(bldId);
+    const note = bed ? `<p class="note">${bed.kind === 'wheat' ? 'Le blé' : 'Les légumes'} poussent plus vite à chaque niveau, et donnent parfois double.</p>` : '';
+    const scroll = ui.sheetBody.scrollTop;
+    ui.sheetBody.innerHTML = bldCard(bldId) + note;
+    ui.sheetBody.scrollTop = scroll;
+  }
+  refreshBldButtons();
+}
+
+/** Les boutons grisent sans tout reconstruire (un toucher n'est jamais perdu). */
+function refreshBldButtons(): void {
+  ui.sheetBody.querySelectorAll<HTMLElement>('[data-bup]').forEach((b) => b.classList.toggle('poor', !bCanDeposit(bState(b.dataset.bup!))));
+  ui.sheetBody.querySelectorAll<HTMLElement>('[data-wup]').forEach((b) => {
+    const id = b.dataset.wup!;
+    b.classList.toggle('poor', !canAfford(wCost(id, wlvOf(id) + 1)));
+  });
+  ui.sheetBody.querySelectorAll<HTMLElement>('[data-wbuy][data-pay="coin"]').forEach((b) => {
+    b.classList.toggle('poor', save.coins < (WEAPONS.find((w) => w.id === b.dataset.wbuy)?.coins ?? 0));
+  });
+}
+
+/** Les armes, a l'armurerie : chacune s'ameliore, jusqu'au niveau de l'armurerie. */
+function weaponsHtml(): string {
+  const alv = blvOf('armory');
+  let h = `<h2>🔫 Armes</h2>`;
+  for (const wd of WEAPONS) {
+    const owned = save.weapons.includes(wd.id);
+    const need = WEAPON_NEED[wd.id] ?? 1;
+    const wl = wlvOf(wd.id);
+    const i = wl - 1;
+    const stats = (j: number) => `dégâts ${+wd.damage(j).toFixed(1)} · portée ${+wd.range(j).toFixed(1)} m · ${(1 / wd.interval(j)).toFixed(1)} tirs/s`;
+    let btns: string;
+    let desc: string;
+    if (!owned) {
+      desc = `${wd.desc}${wd.targets > 1 ? ` · ${wd.targets} cibles` : ''}`;
+      btns = alv < need ? `<button class="btn" disabled>🛡️ Niv. ${need}</button>`
+        : `<button class="btn ${save.coins < wd.coins ? 'poor' : ''}" data-wbuy="${wd.id}" data-pay="coin"><span class="coin"></span>${fmt(wd.coins)}</button><button class="btn gem" data-wbuy="${wd.id}" data-pay="gem">${wd.gems} 💎</button>`;
+    } else {
+      desc = `${stats(i)[0]!.toUpperCase()}${stats(i).slice(1)}${wd.targets > 1 ? ` · ${wd.targets} cibles` : ''}`
+        + (wl < BMAX ? `<br><span class="up-next">Niv. ${wl + 1} : ${stats(wl)}</span>` : '');
+      const eq = save.weapon === wd.id ? `<button class="btn" disabled>Équipée</button>` : `<button class="btn" data-wequip="${wd.id}">Équiper</button>`;
+      let up: string;
+      if (wl >= BMAX) up = `<button class="btn" disabled>MAX</button>`;
+      else if (wl >= alv) up = `<button class="btn" disabled>🛡️ Niv. ${wl + 1}</button>`;
+      else {
+        const c = wCost(wd.id, wl + 1);
+        up = `<button class="btn ${canAfford(c) ? '' : 'poor'}" data-wup="${wd.id}">⬆️ ${costIcons(c)}</button>`;
+      }
+      btns = eq + up;
+    }
+    h += card(wd.icon, `${wd.name} <span class="lv">niv. ${owned ? wl : 0}/${BMAX}</span>`, desc, btns);
+  }
+  return h + `<p class="note">Chaque arme monte jusqu’au niveau de l’armurerie : améliore l’armurerie pour aller plus loin.</p>`;
+}
+
+/** Ouvre le panneau d'un batiment (toucher, ou badge ⬆️). */
+function openBld(id: string): void {
+  tapFrom.copy(player.position);
+  if (id === 'armory') {
+    tapPanel = 'hunters';
+    setPanel('hunters');
+    return;
+  }
+  tapPanel = 'bld';
+  if (bldId !== id) bldKey = '';
+  bldId = id;
+  if (panel === 'bld') {
+    const d = bdef(id)!;
+    setText(ui.sheetTitle, `${d.icon} ${d.name}`);
+    ui.sheet.classList.remove('min');
+    ui.sheetBody.scrollTop = 0;
+  }
+  setPanel('bld');
+  if (!save.seen.includes('hint:bld')) {
+    save.seen.push('hint:bld');
+    toast('⬆️ Dépose pièces et matériaux : le bâtiment monte de niveau');
+  }
+}
+
+/** Ce qu'on peut toucher : les batiments a niveaux deja bâtis et debout. */
+const tappable = () => BDEFS.map((d) => d.id as string).filter((id) => bBuilt(id) && !isBroken(id));
+
+function onTap(sx: number, sy: number): void {
+  let best = '';
+  let bd = Infinity;
+  for (const id of tappable()) {
+    const p = bPos(id);
+    const y = id.startsWith('bed') || id.startsWith('field') ? 0.3 : 1.0;
+    projected.set(p.x, y, p.z).project(camera);
+    if (projected.z > 1) continue;
+    const px = (projected.x * 0.5 + 0.5) * window.innerWidth;
+    const py = (-projected.y * 0.5 + 0.5) * window.innerHeight;
+    projected.set(p.x + bReach(id), y, p.z).project(camera);
+    const rad = Math.max(34, Math.abs((projected.x * 0.5 + 0.5) * window.innerWidth - px));
+    const d = Math.hypot(sx - px, sy - py) / rad;
+    if (d < 1 && d < bd) {
+      bd = d;
+      best = id;
+    }
+  }
+  if (best) {
+    openBld(best);
+    sfx.sfxDrop(2);
+  } else if (tapPanel) tapPanel = null;
+}
+
+ui.sheetBody.addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-bup],[data-wup],[data-wbuy],[data-wequip]');
+  if (!el || el.disabled || ko > 0) return;
+  const d = el.dataset;
+  const nope = () => {
+    sfx.sfxNope();
+    el.classList.remove('shake');
+    void el.offsetWidth;
+    el.classList.add('shake');
+  };
+  if (d.bup) {
+    const s = bState(d.bup);
+    if (s.max || s.locked) return nope();
+    const moved = depositInto(s.key, s.cost);
+    if (totalCost(remainingOf(s.key, s.cost)) === 0) bLevelUp(d.bup);
+    else if (moved > 0) {
+      sfx.sfxDrop(6);
+      buzz(15);
+      bldKey = '';
+      huntKey = '';
+      persist();
+    } else {
+      nope();
+      toast(`Il manque : ${costText(s.rem)}`);
+    }
+  } else if (d.wup) {
+    const id = d.wup;
+    const wl = wlvOf(id);
+    if (wl >= BMAX || wl >= blvOf('armory')) return nope();
+    const c = wCost(id, wl + 1);
+    if (!canAfford(c)) {
+      nope();
+      if (save.coins >= c.coins) toast(`Il manque : ${costText(c)}`);
+      return;
+    }
+    spend(c);
+    save.wlv[id] = wl + 1;
+    const wd = WEAPONS.find((w) => w.id === id)!;
+    toast(`${wd.icon} ${wd.name} niveau ${wl + 1} !`);
+    sfx.sfxBuild();
+    buzz(30);
+    particles.burst(player.position.clone().setY(1.6), [0xffd84a, 0xffffff], 30, { speed: 4, up: 5, size: 0.14 });
+    huntKey = '';
+    persist();
+  } else if (d.wbuy) {
+    const wd = WEAPONS.find((w) => w.id === d.wbuy)!;
+    if (save.weapons.includes(wd.id) || blvOf('armory') < (WEAPON_NEED[wd.id] ?? 1)) return;
+    const ok = d.pay === 'gem' ? payGems(wd.gems) : payCoins(wd.coins);
+    if (!ok) return nope();
+    save.weapons.push(wd.id);
+    save.wlv[wd.id] = Math.max(1, save.wlv[wd.id] ?? 1);
+    equipWeapon(wd.id);
+    applyLook('armory', false);
+    toast(`${wd.icon} ${wd.name} : à toi !`);
+    sfx.sfxVictory();
+    huntKey = '';
+    persist();
+  } else if (d.wequip) {
+    equipWeapon(d.wequip as WeaponId);
+    sfx.sfxDrop(3);
+    huntKey = '';
+    persist();
+  }
+  if (panel === 'hunters') renderHunters();
+  else if (panel === 'bld') renderBld();
+});
+
+// ---- les badges ⬆️ au-dessus des batiments qu'on peut ameliorer
+
+const bldBadges = new Map<string, HTMLElement>();
+let bldReady: string[] = [];
+let bldClock = 0;
+function placeBldBadges(): void {
+  bldClock -= 1;
+  if (bldClock <= 0) {
+    bldClock = 30;
+    bldReady = tappable().filter((id) => bReady(id) || (id === 'armory' && save.weapons.some((w) => {
+      const wl = wlvOf(w);
+      return wl < BMAX && wl < blvOf('armory') && canAfford(wCost(w, wl + 1));
+    })));
+    if (bldReady.length && !save.seen.includes('hint:bldtap')) {
+      save.seen.push('hint:bldtap');
+      toast('⬆️ Un bâtiment peut monter de niveau : touche-le, ou touche son badge');
+    }
+  }
+  for (const [id, el] of bldBadges) if (!bldReady.includes(id)) el.classList.add('off');
+  for (const id of bldReady) {
+    let el = bldBadges.get(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'up-badge bld-badge off';
+      el.textContent = '⬆️';
+      el.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        openBld(id);
+      });
+      labels.appendChild(el);
+      bldBadges.set(id, el);
+    }
+    const open = (panel === 'bld' && bldId === id) || (panel === 'hunters' && id === 'armory');
+    if (open) {
+      el.classList.add('off');
+      continue;
+    }
+    const p = bPos(id);
+    const s = bState(id);
+    el.classList.toggle('look', !s.max && stageOf(s.next) !== stageOf(s.lv));
+    placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') ? 1.3 : id === 'armory' ? 3.6 : 3.2, p.z);
   }
 }
 
@@ -2958,7 +3339,7 @@ function interact(dt: number): void {
 
   // Potagers : on recolte en longeant les bacs.
   if (harvestClock <= 0 && freeSpace() > 0) {
-    for (const b of beds) {
+    for (const [bi, b] of beds.entries()) {
       if (!b.unlocked || b.distance(p.x, p.z) > 0.95) continue;
       const from = b.harvestNear(p.x, p.z);
       if (from) {
@@ -2969,8 +3350,8 @@ function interact(dt: number): void {
           if (kind === 'wheat') save.stats.wheat++;
         };
         giveToPlayer(kind, from, got);
-        // Niveau « Cultures » : parfois, la plante donne double.
-        if (freeSpace() > 0 && Math.random() < 0.05 * lv('crops')) giveToPlayer(kind, from.clone().setY(from.y + 0.3), got);
+        // Niveau du potager (ou du champ) : parfois, la plante donne double.
+        if (freeSpace() > 0 && Math.random() < doubleOf(blvOf(BED_IDS[bi]!))) giveToPlayer(kind, from.clone().setY(from.y + 0.3), got);
         particles.burst(from, [0x7fdc5a, 0x5a3a20], 4, { speed: 2, up: 3, size: 0.08, life: 0.4 });
         break;
       }
@@ -3203,7 +3584,11 @@ function interact(dt: number): void {
   const atReserve = near(reserve.zone.x, reserve.zone.z, 1.3);
   // Armurerie : le panneau des chasseurs de prime.
   const atHunt = isBuilt('armory') && near(HUNT_PAD.x, HUNT_PAD.z, 1.5);
-  setPanel(atBench ? 'bench' : atReserve ? 'reserve' : atHunt ? 'hunters' : null);
+  const zone: Panel = atBench ? 'bench' : atReserve ? 'reserve' : atHunt ? 'hunters' : null;
+  // Un panneau ouvert d'un toucher reste ouvert tant qu'on ne s'eloigne pas de plus de 7 m.
+  if (zone) tapPanel = null;
+  else if (tapPanel && Math.hypot(p.x - tapFrom.x, p.z - tapFrom.z) > 7) tapPanel = null;
+  setPanel(zone ?? tapPanel);
 }
 
 /** Le troncon que le joueur est en train de reparer (pour son etiquette). */
@@ -3670,16 +4055,17 @@ function updateCombat(dt: number): void {
   muzzle.intensity = Math.max(0, muzzle.intensity - dt * 400);
   const night = save.phase === 'night' && save.cycle;
   const w = WEAPONS.find((x) => x.id === save.weapon) ?? WEAPONS[0]!;
-  const range = w.range(save.up.gun);
+  const wi = wlvOf(w.id) - 1;
+  const range = w.range(wi);
   const z = night && ko <= 0 ? horde.nearest(player.position, range) : null;
   aimTarget = z ? z.root.position : null;
   player.aiming = aimTarget;
   if (z && fireClock <= 0) {
-    fireClock = w.interval(save.up.gun);
+    fireClock = w.interval(wi);
     const fwd = new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
     const from = player.position.clone().addScaledVector(fwd, 0.9).setY(1.2);
     const targets = w.targets > 1 ? horde.nearestMany(player.position, range, w.targets) : [z];
-    targets.forEach((t, i) => shoot(t, from, w.damage(save.up.gun), i === 0));
+    targets.forEach((t, i) => shoot(t, from, w.damage(wi), i === 0));
     if (w.id === 'shotgun') shake = Math.max(shake, 0.08);
   }
   if (night && structAlive('tower') && towerClock <= 0) {
@@ -3966,10 +4352,15 @@ const joyVec = new THREE.Vector2();
 
 window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+/** Un toucher bref sans glisser : on touche un batiment (son panneau s'ouvre). */
+let tapT = 0;
+let tapMoved = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (joyId !== null) return;
   ui.menu.classList.remove('on');
   joyId = e.pointerId;
+  tapT = performance.now();
+  tapMoved = 0;
   joyOrigin.set(e.clientX, e.clientY);
   joyVec.set(0, 0);
   ui.joy.style.left = `${e.clientX}px`;
@@ -3982,6 +4373,7 @@ window.addEventListener('pointermove', (e) => {
   if (e.pointerId !== joyId) return;
   const R = 56;
   joyVec.set(e.clientX - joyOrigin.x, e.clientY - joyOrigin.y);
+  tapMoved = Math.max(tapMoved, joyVec.length());
   if (joyVec.length() > R) joyVec.setLength(R);
   ui.knob.style.transform = `translate(calc(-50% + ${joyVec.x}px), calc(-50% + ${joyVec.y}px))`;
   joyVec.divideScalar(R);
@@ -3989,6 +4381,9 @@ window.addEventListener('pointermove', (e) => {
 const endJoy = (e: PointerEvent) => {
   if (e.pointerId !== joyId) return;
   joyId = null;
+  if (e.type === 'pointerup' && performance.now() - tapT < 320 && tapMoved < 14) {
+    try { onTap(e.clientX, e.clientY); } catch (err) { console.error(err); }
+  }
   joyVec.set(0, 0);
   ui.joy.classList.remove('on');
 };
@@ -4293,7 +4688,7 @@ function placeHudBadges(): void {
   upClock -= 1;
   if (upClock <= 0) {
     upClock = 30;
-    upReady = structAlive('bench') && (UPGRADES.some((u) => { const c = u.costs[save.up[u.id]]; return c !== undefined && save.coins >= c; })
+    upReady = structAlive('bench') && (BENCH_UPS.some((u) => { const c = u.costs[save.up[u.id]]; return c !== undefined && save.coins >= c; })
       || LEVELS.some((d) => (!d.needs || isBuilt(d.needs)) && lv(d.id) < MAX_LEVEL && canAfford(levelPrice(d, lv(d.id)))));
   }
   if (upReady && panel !== 'bench') placeLabel(upEl!, L.bench.x, 3.2, L.bench.z);
@@ -4367,6 +4762,7 @@ function drawFrame(): void {
   camTarget.x = damp(camTarget.x, look ? camFocus.x : player.position.x, look ? 3.2 : 5, dt);
   camTarget.z = damp(camTarget.z, look ? camFocus.z : player.position.z, look ? 3.2 : 5, dt);
   placeHudBadges();
+  placeBldBadges();
   shake = Math.max(0, shake - dt);
   camera.position.copy(camTarget).addScaledVector(CAM_DIR, camDist);
   camera.position.x += (Math.random() - 0.5) * shake * 0.8;
@@ -4440,6 +4836,8 @@ function drawFrame(): void {
 
 boot('restauration de la partie');
 beds[0]!.unlock();
+// Chaque batiment a niveaux prend son aspect avant d'etre remonte (et fusionne).
+for (const d of BDEFS) applyLook(d.id, false);
 // Le camp a sa taille avant qu'on relise l'etat de chaque troncon.
 applyCampLevel(true);
 {
@@ -4507,4 +4905,6 @@ requestAnimationFrame(frame);
   // Banc de deplacement : collisions, batiments, navigation, joystick.
   world, ext: EXT, bld: B, watch: tower, bus, ruins: RUINS, pal: () => palisade, navAll, navState: nav, joy: joyVec,
   gateBarrier, dockWalls, huntCtx, ui,
+  // Batiments a niveaux.
+  bState, bLevelUp, depositInto, openBld, onTap, applyLook, blvOf, wlvOf, renderBld, panel: () => panel, tapPanel: () => tapPanel,
 };

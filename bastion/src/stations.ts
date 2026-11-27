@@ -141,6 +141,8 @@ export class Converter {
   busy = false;
   /** Multiplicateur de cadence (niveau du batiment, boosts). */
   speed = 1;
+  /** Chance d'un produit en plus a chaque fournee (niveau du batiment). */
+  extra = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -177,6 +179,7 @@ export class Converter {
     this.progress = 0;
     for (let i = 0; i < this.perOutput; i++) this.input.take();
     this.output.add(this.product);
+    if (this.extra > 0 && !this.output.full && Math.random() < this.extra) this.output.add(this.product);
     return true;
   }
 }

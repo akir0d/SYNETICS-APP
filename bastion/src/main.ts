@@ -257,7 +257,7 @@ const ui = {
   toast: $('.toast'), modal: $('.modal'), sheetBody: $('.sheet-body'), sheet: $('.sheet'), sheetHandle: $('.sheet-handle'), sheetTitle: $('.sheet-title'),
   joy: $('.joy'), knob: $('.joy-knob'), hp: $('.hpbar'), hpFill: $('.hpbar i'),
   adPill: $<HTMLButtonElement>('.ad-pill'),
-  menuBtn: $('.menu-btn'), menu: $('.menu'), sound: $<HTMLButtonElement>('.menu .m-sound'), reset: $<HTMLButtonElement>('.menu .m-reset'),
+  menuBtn: $('.menu-btn'), menu: $('.menu'), sound: $<HTMLButtonElement>('.menu .m-sound'), reset: $<HTMLButtonElement>('.menu .m-reset'), menuTitle: $('.menu .m-title'),
 };
 
 /** Instant du dernier toast (temps de jeu) : les astuces attendent que l'ecran soit libre. */
@@ -1560,7 +1560,8 @@ function placeHunters(dt: number): void {
   const open = isBuilt('armory');
   huntRing.visible = open;
   if (!open || !near(HUNT_PAD.x, HUNT_PAD.z, 12)) { huntLabel.classList.add('off'); return; }
-  const html = `<span class="pl-icon">🤠</span><span class="pl-name">Chasseurs de prime</span><span class="pl-cost">${save.hunters.length}/${huntSlots()}</span>`;
+  const alv = blvOf('armory');
+  const html = `<span class="pl-icon">🛡️</span><span class="pl-name">Armurerie · niv. ${alv}</span><span class="pl-cost">${alv < BMAX ? '⬆️ armes · ' : ''}🤠 ${save.hunters.length}/${huntSlots()}</span>`;
   if (huntLabel.innerHTML !== html) huntLabel.innerHTML = html;
   placeLabel(huntLabel, HUNT_PAD.x, 0.3, HUNT_PAD.z - 1.4);
 }
@@ -1787,7 +1788,7 @@ function renderSheet(): void {
     </div>`;
   }).join('');
   const scroll = ui.sheetBody.scrollTop;
-  ui.sheetBody.innerHTML = `<p class="note">⬆️ Potagers, champs, scierie, cuisine et armurerie s’améliorent eux-mêmes : touche-les.</p>`
+  ui.sheetBody.innerHTML = `<p class="note">⬆️ Potagers, champs, scierie, cuisine et armurerie s’améliorent eux-mêmes : arrête-toi sur la flèche ⬆️ devant eux.</p>`
     + `<h2>🧱 Matériaux</h2>${materialCards()}<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + BENCH_UPS.map((u) => {
     const lvl = save.up[u.id];
     const max = lvl >= u.costs.length;
@@ -2143,6 +2144,10 @@ const crewMul = () => 1 + 0.12 * ct('crew');
 
 /** Applique niveaux et boosts aux machines, cultures, reserve et au joueur (chaque image). */
 function applyMeta(dt: number): void {
+  if (testMode()) {
+    save.coins = Math.max(save.coins, 9_999_999);
+    save.gems = Math.max(save.gems, 99_999);
+  }
   for (const b of BOOSTS) if ((save.boosts[b.id] ?? 0) > 0) save.boosts[b.id] = Math.max(0, save.boosts[b.id]! - dt);
   const grow = boostOn('grow') ? 2 : 1;
   // Chaque potager, chaque champ a son niveau : il pousse plus vite.
@@ -2369,7 +2374,7 @@ function renderShop(): void {
         + `<button class="btn gem" data-boost="${b.id}" data-pay="gem" ${boostRoom(b.id, BOOST_MAX) ? '' : 'disabled'}>${b.gems} 💎</button>`);
     }
     h += `<h3>Armes</h3>`;
-    h += card('🛡️', 'À l’armurerie', isBuilt('armory') ? 'Débloque et améliore tes armes en touchant l’armurerie' : 'Bâtis l’armurerie (camp niv. 2) : armes à débloquer et à améliorer', '');
+    h += card('🛡️', 'À l’armurerie', isBuilt('armory') ? 'Débloque et améliore tes armes devant l’armurerie' : 'Bâtis l’armurerie (camp niv. 2) : armes à débloquer et à améliorer', '');
     h += `<h3>Tenues</h3>`;
     for (const o of OUTFITS) {
       const owned = save.outfits.includes(o.id);
@@ -2657,6 +2662,7 @@ const WALL_COSTS: Cost[] = [
 
 /** On paie avec ce qu'on porte et ce qui est dans la reserve. */
 function have(t: ItemType): number {
+  if (testMode()) return 99999;
   return player.stack.countOf(t) + (reserve.counts.get(t) ?? 0);
 }
 function canAfford(c: Cost): boolean {
@@ -2665,6 +2671,7 @@ function canAfford(c: Cost): boolean {
 }
 function spend(c: Cost): void {
   save.coins -= c.coins;
+  if (testMode()) return;
   for (const t of Object.keys(ITEMS) as ItemType[]) {
     let n = c[t] ?? 0;
     while (n > 0 && player.stack.take((x) => x === t)) n--;
@@ -2729,6 +2736,15 @@ function depositInto(key: string, cost: Cost): number {
   const rem = remainingOf(key, cost);
   const paid = (save.fixPaid[key] ??= { coins: 0 });
   let moved = 0;
+  if (testMode()) {
+    // Mode test : tout est verse d'un coup, sans rien prendre.
+    for (const k of Object.keys(rem) as (keyof Cost)[]) {
+      const n = rem[k] ?? 0;
+      paid[k] = (paid[k] ?? 0) + n;
+      moved += n;
+    }
+    return moved;
+  }
   const c = Math.min(save.coins, rem.coins);
   if (c > 0) { save.coins -= c; paid.coins += c; moved += c; }
   for (const t of Object.keys(ITEMS) as ItemType[]) {
@@ -2795,7 +2811,6 @@ function bPos(id: string): { x: number; z: number } {
   if (id === 'armory') return armoryExt();
   return B[id]!.group.position;
 }
-const bReach = (id: string) => (id.startsWith('field') ? 2.4 : id.startsWith('bed') ? 1.5 : id === 'sawmill' ? 2.0 : 1.9);
 
 interface BState { d: BDef; lv: number; next: number; max: boolean; locked: string; cost: Cost; rem: Cost; key: string }
 function bState(id: string): BState {
@@ -2997,32 +3012,8 @@ function openBld(id: string): void {
   }
 }
 
-/** Ce qu'on peut toucher : les batiments a niveaux deja bâtis et debout. */
+/** Les batiments a niveaux deja bâtis et debout. */
 const tappable = () => BDEFS.map((d) => d.id as string).filter((id) => bBuilt(id) && !isBroken(id));
-
-function onTap(sx: number, sy: number): void {
-  let best = '';
-  let bd = Infinity;
-  for (const id of tappable()) {
-    const p = bPos(id);
-    const y = id.startsWith('bed') || id.startsWith('field') ? 0.3 : 1.0;
-    projected.set(p.x, y, p.z).project(camera);
-    if (projected.z > 1) continue;
-    const px = (projected.x * 0.5 + 0.5) * window.innerWidth;
-    const py = (-projected.y * 0.5 + 0.5) * window.innerHeight;
-    projected.set(p.x + bReach(id), y, p.z).project(camera);
-    const rad = Math.max(34, Math.abs((projected.x * 0.5 + 0.5) * window.innerWidth - px));
-    const d = Math.hypot(sx - px, sy - py) / rad;
-    if (d < 1 && d < bd) {
-      bd = d;
-      best = id;
-    }
-  }
-  if (best) {
-    openBld(best);
-    sfx.sfxDrop(2);
-  } else if (tapPanel) tapPanel = null;
-}
 
 ui.sheetBody.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-bup],[data-wup],[data-wbuy],[data-wequip]');
@@ -3104,9 +3095,9 @@ function placeBldBadges(): void {
       const wl = wlvOf(w);
       return wl < BMAX && wl < blvOf('armory') && canAfford(wCost(w, wl + 1));
     })));
-    if (bldReady.length && !save.seen.includes('hint:bldtap')) {
-      save.seen.push('hint:bldtap');
-      toast('⬆️ Un bâtiment peut monter de niveau : touche-le, ou touche son badge');
+    if (bldReady.length && !save.seen.includes('hint:bldpad')) {
+      save.seen.push('hint:bldpad');
+      toast('⬆️ Un bâtiment peut monter de niveau : arrête-toi sur sa flèche au sol');
     }
   }
   for (const [id, el] of bldBadges) if (!bldReady.includes(id)) el.classList.add('off');
@@ -3134,6 +3125,120 @@ function placeBldBadges(): void {
     placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') ? 1.3 : id === 'armory' ? 3.6 : 3.2, p.z);
   }
 }
+
+// ---- les zones d'amelioration : on s'arrete sur la fleche ⬆️ devant le batiment
+
+/** Ou se tenir pour ameliorer chaque batiment (jamais sur une culture ni sur un passage etroit). */
+const UP_AT: Record<string, { x: number; z: number }> = {
+  bed1: { x: -7.85, z: -9.5 }, bed2: L.pads.bed2, bed3: L.pads.bed3, bed4: L.pads.bed4,
+  field1: L.pads.field1, field2: L.pads.field2, field3: L.pads.field3,
+  sawmill: { x: 9.6, z: -8.6 }, kitchen: L.pads.kitchen,
+};
+const UP_RING = new THREE.RingGeometry(0.82, 1.02, 40);
+/** Une fleche couchee au sol, pointe vers le haut de l'ecran. */
+const UP_ARROW = (() => {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0.55);
+  s.lineTo(0.42, 0.08);
+  s.lineTo(0.17, 0.08);
+  s.lineTo(0.17, -0.45);
+  s.lineTo(-0.17, -0.45);
+  s.lineTo(-0.17, 0.08);
+  s.lineTo(-0.42, 0.08);
+  s.closePath();
+  return new THREE.ShapeGeometry(s);
+})();
+const upMat = new THREE.MeshBasicMaterial({ color: 0xffd84a, transparent: true, opacity: 0.8, depthWrite: false });
+const upReadyMat = new THREE.MeshBasicMaterial({ color: 0x8cf06a, transparent: true, opacity: 0.95, depthWrite: false });
+interface UpPad { id: string; x: number; z: number; ring: THREE.Mesh; arrow: THREE.Mesh; label: HTMLElement; html: string }
+const upPads: UpPad[] = Object.entries(UP_AT).map(([id, at]) => {
+  const ring = new THREE.Mesh(UP_RING, upMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(at.x, 0.05, at.z);
+  const arrow = new THREE.Mesh(UP_ARROW, upMat);
+  arrow.rotation.x = -Math.PI / 2;
+  arrow.position.set(at.x, 0.055, at.z);
+  ring.visible = arrow.visible = false;
+  scene.add(ring, arrow);
+  const label = document.createElement('div');
+  label.className = 'pad-label up-label off';
+  labels.appendChild(label);
+  return { id, x: at.x, z: at.z, ring, arrow, label, html: '' };
+});
+const upShown = (u: UpPad) => bBuilt(u.id) && !isBroken(u.id);
+/** Temps passe immobile sur une zone : on traverse sans ouvrir, on s'arrete et ca s'ouvre. */
+let upStill = 0;
+
+function updateUpPads(time: number): void {
+  const p = player.position;
+  for (const u of upPads) {
+    const on = upShown(u);
+    u.ring.visible = u.arrow.visible = on;
+    if (!on) {
+      u.label.classList.add('off');
+      continue;
+    }
+    const ready = bldReady.includes(u.id);
+    u.ring.material = u.arrow.material = ready ? upReadyMat : upMat;
+    // La fleche respire quand on peut monter de niveau.
+    u.arrow.scale.setScalar(ready ? 1 + Math.sin(time * 5) * 0.1 : 1);
+    if (Math.hypot(p.x - u.x, p.z - u.z) > 7 || (panel === 'bld' && bldId === u.id)) {
+      u.label.classList.add('off');
+      continue;
+    }
+    const d = bdef(u.id)!;
+    const lv = blvOf(u.id);
+    const html = `<span class="pl-icon">${d.icon}</span><span class="pl-name">${d.name}</span><span class="pl-cost">${lv >= BMAX ? 'niv. MAX' : `niv. ${lv} ${ready ? '⬆️' : '→ ' + (lv + 1)}`}</span>`;
+    if (u.html !== html) {
+      u.html = html;
+      u.label.innerHTML = html;
+    }
+    u.label.classList.toggle('ready', ready);
+    placeLabel(u.label, u.x, 0.3, u.z - 1.1);
+  }
+}
+
+/** La zone d'amelioration sous les pieds du joueur (ou ''). */
+function upPadAt(x: number, z: number): string {
+  for (const u of upPads) if (upShown(u) && Math.hypot(x - u.x, z - u.z) < 1.0) return u.id;
+  return '';
+}
+
+// ---- mode test (secret) : pieces, gemmes et materiaux illimites
+
+const testMode = () => save.seen.includes('mode-test');
+let titleTaps: number[] = [];
+function toggleTestMode(): void {
+  if (testMode()) {
+    save.seen = save.seen.filter((s) => s !== 'mode-test');
+    // On rend les pieces et gemmes d'avant le test (ce qui a ete construit reste).
+    if (save.testBackup) {
+      save.coins = save.testBackup.coins;
+      save.gems = save.testBackup.gems;
+      delete save.testBackup;
+    }
+    toast('🧪 Mode test désactivé');
+  } else {
+    save.testBackup = { coins: save.coins, gems: save.gems };
+    save.seen.push('mode-test');
+    toast('🧪 Mode test : pièces, gemmes et matériaux illimités');
+  }
+  document.body.classList.toggle('test-mode', testMode());
+  sfx.sfxVictory();
+  bldKey = '';
+  huntKey = '';
+  bldClock = 0;
+  persist();
+}
+ui.menuTitle.addEventListener('click', () => {
+  const now = performance.now();
+  titleTaps = titleTaps.filter((t) => now - t < 3000);
+  titleTaps.push(now);
+  if (titleTaps.length >= 7) {
+    titleTaps = [];
+    toggleTestMode();
+  }
+});
 
 // ---------------------------------------------------------------- menu
 
@@ -3520,7 +3625,15 @@ function interact(dt: number): void {
     const rem = remaining(pad);
     const paid = paidOf(pad.def.id);
     const target = () => new THREE.Vector3(pad.def.x, 0.2, pad.def.z);
-    if (rem.coins > 0 && save.coins > 0) {
+    if (testMode() && totalCost(rem) > 0) {
+      Object.assign(paid, pad.def.cost);
+      pad.inflight++;
+      const m = coinMesh();
+      m.rotation.x = Math.PI / 2;
+      flyers.launch(m, playerChest(), target, () => landOnPad(pad), 0.25, 1.0);
+      payClock = 0.3;
+      renderPad(pad);
+    } else if (rem.coins > 0 && save.coins > 0) {
       const chunk = Math.min(save.coins, rem.coins, Math.max(1, Math.ceil(pad.def.cost.coins / 25)));
       save.coins -= chunk;
       paid.coins += chunk;
@@ -3558,7 +3671,11 @@ function interact(dt: number): void {
     const rem = dynRemaining(dp);
     const paid = save.fixPaid[dp.key]!;
     const target = () => new THREE.Vector3(dp.x, 0.2, dp.z);
-    if (rem.coins > 0 && save.coins > 0) {
+    if (testMode()) {
+      // Mode test : paye d'un coup, la zone se termine a l'image suivante.
+      Object.assign(paid, dp.cost);
+      payClock = 0.3;
+    } else if (rem.coins > 0 && save.coins > 0) {
       const chunk = Math.min(save.coins, rem.coins, Math.max(1, Math.ceil(dp.cost.coins / 25)));
       save.coins -= chunk;
       paid.coins += chunk;
@@ -3584,7 +3701,17 @@ function interact(dt: number): void {
   const atReserve = near(reserve.zone.x, reserve.zone.z, 1.3);
   // Armurerie : le panneau des chasseurs de prime.
   const atHunt = isBuilt('armory') && near(HUNT_PAD.x, HUNT_PAD.z, 1.5);
-  const zone: Panel = atBench ? 'bench' : atReserve ? 'reserve' : atHunt ? 'hunters' : null;
+  // Zone ⬆️ d'un batiment : on s'y arrete (doigt leve) et son panneau s'ouvre.
+  const up = upPadAt(p.x, p.z);
+  upStill = up && move.lengthSq() < 0.0025 ? upStill + dt : 0;
+  const atUp = !!up && (upStill > 0.2 || (panel === 'bld' && bldId === up));
+  if (atUp && bldId !== up) {
+    bldId = up;
+    bldKey = '';
+    const d = bdef(up)!;
+    if (panel === 'bld') setText(ui.sheetTitle, `${d.icon} ${d.name}`);
+  }
+  const zone: Panel = atBench ? 'bench' : atReserve ? 'reserve' : atHunt ? 'hunters' : atUp ? 'bld' : null;
   // Un panneau ouvert d'un toucher reste ouvert tant qu'on ne s'eloigne pas de plus de 7 m.
   if (zone) tapPanel = null;
   else if (tapPanel && Math.hypot(p.x - tapFrom.x, p.z - tapFrom.z) > 7) tapPanel = null;
@@ -4352,15 +4479,10 @@ const joyVec = new THREE.Vector2();
 
 window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
-/** Un toucher bref sans glisser : on touche un batiment (son panneau s'ouvre). */
-let tapT = 0;
-let tapMoved = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (joyId !== null) return;
   ui.menu.classList.remove('on');
   joyId = e.pointerId;
-  tapT = performance.now();
-  tapMoved = 0;
   joyOrigin.set(e.clientX, e.clientY);
   joyVec.set(0, 0);
   ui.joy.style.left = `${e.clientX}px`;
@@ -4373,7 +4495,6 @@ window.addEventListener('pointermove', (e) => {
   if (e.pointerId !== joyId) return;
   const R = 56;
   joyVec.set(e.clientX - joyOrigin.x, e.clientY - joyOrigin.y);
-  tapMoved = Math.max(tapMoved, joyVec.length());
   if (joyVec.length() > R) joyVec.setLength(R);
   ui.knob.style.transform = `translate(calc(-50% + ${joyVec.x}px), calc(-50% + ${joyVec.y}px))`;
   joyVec.divideScalar(R);
@@ -4381,9 +4502,6 @@ window.addEventListener('pointermove', (e) => {
 const endJoy = (e: PointerEvent) => {
   if (e.pointerId !== joyId) return;
   joyId = null;
-  if (e.type === 'pointerup' && performance.now() - tapT < 320 && tapMoved < 14) {
-    try { onTap(e.clientX, e.clientY); } catch (err) { console.error(err); }
-  }
   joyVec.set(0, 0);
   ui.joy.classList.remove('on');
 };
@@ -4763,6 +4881,7 @@ function drawFrame(): void {
   camTarget.z = damp(camTarget.z, look ? camFocus.z : player.position.z, look ? 3.2 : 5, dt);
   placeHudBadges();
   placeBldBadges();
+  updateUpPads(time);
   shake = Math.max(0, shake - dt);
   camera.position.copy(camTarget).addScaledVector(CAM_DIR, camDist);
   camera.position.x += (Math.random() - 0.5) * shake * 0.8;
@@ -4871,6 +4990,7 @@ applyUpgrades();
 equipWeapon((WEAPONS.find((x) => x.id === save.weapon)?.id ?? 'rifle') as WeaponId);
 wearOutfit(save.outfit);
 applyMeta(0);
+document.body.classList.toggle('test-mode', testMode());
 try { restoreStock(); } catch (err) { console.error(err); }
 player.hp = player.maxHp;
 player.position.set(L.spawn.x, 0, L.spawn.z);
@@ -4906,5 +5026,5 @@ requestAnimationFrame(frame);
   world, ext: EXT, bld: B, watch: tower, bus, ruins: RUINS, pal: () => palisade, navAll, navState: nav, joy: joyVec,
   gateBarrier, dockWalls, huntCtx, ui,
   // Batiments a niveaux.
-  bState, bLevelUp, depositInto, openBld, onTap, applyLook, blvOf, wlvOf, renderBld, panel: () => panel, tapPanel: () => tapPanel,
+  bState, bLevelUp, depositInto, openBld, upPadAt, upPads, testMode, toggleTestMode, applyLook, blvOf, wlvOf, renderBld, panel: () => panel, tapPanel: () => tapPanel,
 };

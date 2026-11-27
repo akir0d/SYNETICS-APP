@@ -132,6 +132,8 @@ export interface Save {
   blv: Record<string, number>;
   /** Niveau (1 a 10) de chaque arme, plafonne par celui de l'armurerie. */
   wlv: Record<string, number>;
+  /** Pieces et gemmes d'avant le mode test (rendues quand on le quitte). */
+  testBackup?: { coins: number; gems: number };
   bt: Record<string, number>;
   /** Ce qui traine dans le camp : sac, reserve, bacs de l'etal, caisse, machines. */
   stock?: Stock;

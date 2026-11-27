@@ -307,7 +307,13 @@ export interface Customer {
   /** Temps passe en tete de file sans rien recevoir. */
   wait: number;
   sad: boolean;
+  /** Client VIP : grosse commande, paie le triple. */
+  vip: boolean;
 }
+
+/** Le client VIP : chapeau dore, veste de luxe (une seule apparence, geometries partagees). */
+const VIP_LOOK = { shirt: 0x6a3ab9, pants: 0x2a2a3a, hair: 0x2a1a10, hat: 0xe8c03a };
+const VIP_CHANCE = 0.08;
 
 /**
  * Ce qui encombre la route : le bus et l'epave de voiture. Les clients les contournent au
@@ -414,7 +420,9 @@ export class Market {
     const lane = lens[0]! <= lens[1]! ? 0 : 1;
     if (lens[lane]! >= L.lanes[lane]!.length) return;
     const side = this.eastOpen && Math.random() < 0.5 ? 1 : -1;
-    const look = LOOKS[this.lookIdx++ % LOOKS.length]!;
+    // De temps en temps, un client VIP : il en veut beaucoup, et paie le triple.
+    const vip = products.length > 2 && Math.random() < VIP_CHANCE;
+    const look = vip ? VIP_LOOK : LOOKS[this.lookIdx++ % LOOKS.length]!;
     const h = new Human(look);
     h.root.position.set(side * 36, 0, ROAD_Z + 0.8);
     this.scene.add(h.root);
@@ -433,20 +441,21 @@ export class Market {
         if (roll <= 0) { want = products[i]!; break; }
       }
     }
-    const need = want === 'soup' ? 1 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 5);
+    const base = want === 'soup' ? 1 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 5);
+    const need = vip ? Math.min(14, base * 2 + 2) : base;
     const label = document.createElement('div');
-    label.className = 'bubble';
+    label.className = vip ? 'bubble vip' : 'bubble';
     this.labels.appendChild(label);
     const front = L.lanes[lane]![0]!;
     this.customers.push({
-      human: h, lane, want, need, got: 0, state: 'arrive', label, buyClock: 0, happy: 0, wait: 0, sad: false,
+      human: h, lane, want, need, got: 0, state: 'arrive', label, buyClock: 0, happy: 0, wait: 0, sad: false, vip,
       path: [...roadDetour(side * 36, front.x, ROAD_Z + 0.8), new THREE.Vector3(front.x, 0, ROAD_Z + 0.8)],
     });
   }
 
   /** Renvoie les ventes conclues pendant cette image (pour les effets). */
-  update(dt: number, open: boolean, products: ItemType[], onBuy: (from: THREE.Vector3, to: THREE.Vector3, t: ItemType) => void): { pay: number; at: THREE.Vector3 }[] {
-    const sales: { pay: number; at: THREE.Vector3 }[] = [];
+  update(dt: number, open: boolean, products: ItemType[], onBuy: (from: THREE.Vector3, to: THREE.Vector3, t: ItemType) => void): { pay: number; at: THREE.Vector3; vip: boolean }[] {
+    const sales: { pay: number; at: THREE.Vector3; vip: boolean }[] = [];
     this.clock += dt;
     this.bins.update(dt);
     const s = 1 + Math.sin(this.clock * 3) * 0.03;
@@ -488,13 +497,13 @@ export class Market {
             }
             c.wait += dt;
             if (c.got >= c.need) {
-              const pay = c.need * ITEMS[c.want].price;
-              sales.push({ pay, at: h.root.position.clone().setY(1.6) });
+              const pay = c.need * ITEMS[c.want].price * (c.vip ? 3 : 1);
+              sales.push({ pay, at: h.root.position.clone().setY(1.6), vip: c.vip });
               c.happy = 1;
               this.leave(c);
             } else if (c.wait > (c.got === 0 && this.bins.countOf(c.want) === 0 ? 8 : 25)) {
               // Lasse d'attendre : il paie ce qu'il a deja pris et s'en va.
-              if (c.got > 0) sales.push({ pay: c.got * ITEMS[c.want].price, at: h.root.position.clone().setY(1.6) });
+              if (c.got > 0) sales.push({ pay: c.got * ITEMS[c.want].price * (c.vip ? 3 : 1), at: h.root.position.clone().setY(1.6), vip: c.vip });
               c.sad = true;
               c.happy = 1;
               this.leave(c);

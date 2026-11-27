@@ -493,7 +493,21 @@ function build(p: Pad): void {
   const site = p.def.site ?? p.def;
   particles.burst(new THREE.Vector3(site.x, 1.5, site.z), [0xffd84a, 0xffffff, 0xe0b077], 40, { speed: 6, up: 6, size: 0.16, life: 1.0 });
   toast(`${p.def.icon} ${DONE[p.def.id] ?? p.def.name} !`);
+  revealAt(site.x, site.z);
   persist();
+}
+
+/**
+ * Le moment « debloque » : la camera glisse vers ce qui vient d'etre restaure, le temps de le
+ * voir se monter, puis revient au joueur. Jamais la nuit (on garde l'oeil sur la horde).
+ */
+const camFocus = { x: 0, z: 0, t: 0 };
+function revealAt(x: number, z: number, secs = 1.8): void {
+  if (save.cycle && save.phase === 'night') return;
+  if (Math.hypot(x - player.position.x, z - player.position.z) < 5) return;
+  camFocus.x = x;
+  camFocus.z = z;
+  camFocus.t = secs;
 }
 
 const DONE: Record<string, string> = {
@@ -1659,13 +1673,38 @@ function advanceObjectives(): void {
   }
   if (moved) {
     // Temps de jeu a chaque objectif : pour verifier le rythme de la partie.
+    const fresh = save.obj - save.objT.length;
     while (save.objT.length < save.obj) save.objT.push(Math.round(save.playTime));
+    // Chaque objectif atteint rapporte un petit bonus, annonce par un bandeau.
+    if (fresh > 0 && performance.now() - bootT > 3000) {
+      const bonus = Math.round((40 + packCoins() * 0.12) / 10) * 10 * fresh;
+      grantCoins(bonus, above(), 8);
+      objBanner(`✅ Objectif réussi !`, `+${fmt(bonus)} pièces`);
+      particles.burst(player.position.clone().setY(2.4), [0xffd84a, 0x8be36b, 0xffffff, 0x6fd3ff], 36, { speed: 5, up: 7, size: 0.14, life: 1.1 });
+    }
     renderObjective();
     sfx.sfxObjective();
     checkMilestones();
     playRadio();
     persist();
   }
+}
+
+/** Bandeau de reussite en haut de l'ecran. */
+let bannerEl: HTMLElement | null = null;
+let bannerTimer = 0;
+function objBanner(title: string, sub: string): void {
+  if (!bannerEl) {
+    bannerEl = document.createElement('div');
+    bannerEl.className = 'obj-banner';
+    document.body.appendChild(bannerEl);
+  }
+  bannerEl.innerHTML = `<b>${title}</b><span>${sub}</span>`;
+  bannerEl.classList.remove('show');
+  void bannerEl.offsetWidth;
+  bannerEl.classList.add('show');
+  clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => bannerEl?.classList.remove('show'), 2200);
 }
 
 /** Un message radio debloque par l'objectif atteint (une seule fois chacun). */
@@ -2786,7 +2825,39 @@ function grantCoins(n: number, from: THREE.Vector3, pieces = 14): void {
   floatAtPlayer(`+${fmt(n)}`);
   save.coins += n;
   save.stats.earned += n;
-  flyCoins(n, from, playerChest, () => { sfx.sfxCoin(); bump(ui.moneyPill); }, pieces);
+  hudCoins(from, Math.min(14, Math.max(4, Math.round(pieces * 0.8))));
+}
+
+/** Des pieces qui volent de l'endroit du gain jusqu'au compteur du haut (pur plaisir des yeux). */
+const hudCoinPool: HTMLElement[] = [];
+let hudCoinSound = 0;
+function hudCoins(from: THREE.Vector3, count: number): void {
+  projected.copy(from).project(camera);
+  const sx = (projected.x * 0.5 + 0.5) * window.innerWidth;
+  const sy = (-projected.y * 0.5 + 0.5) * window.innerHeight;
+  const r = ui.moneyPill.getBoundingClientRect();
+  const tx = r.left + 16;
+  const ty = r.top + r.height / 2;
+  for (let i = 0; i < count; i++) {
+    const el = hudCoinPool.pop() ?? document.body.appendChild(document.createElement('div'));
+    el.className = 'hud-coin';
+    el.style.transition = 'none';
+    const jx = sx + (Math.random() - 0.5) * 40;
+    const jy = sy + (Math.random() - 0.5) * 30;
+    el.style.transform = `translate(${jx.toFixed(0)}px, ${jy.toFixed(0)}px) scale(.6)`;
+    el.style.opacity = '1';
+    void el.offsetWidth;
+    const delay = i * 45;
+    el.style.transition = `transform .6s cubic-bezier(.45,-0.35,.6,1) ${delay}ms, opacity .15s linear ${delay + 520}ms`;
+    el.style.transform = `translate(${tx.toFixed(0)}px, ${ty.toFixed(0)}px) scale(1)`;
+    el.style.opacity = '0';
+    setTimeout(() => {
+      bump(ui.moneyPill);
+      const now = performance.now();
+      if (now - hudCoinSound > 70) { hudCoinSound = now; sfx.sfxCoin(); }
+      hudCoinPool.push(el);
+    }, delay + 620);
+  }
 }
 const above = () => player.position.clone().add(new THREE.Vector3(0, 4, 2));
 
@@ -3057,10 +3128,10 @@ function interact(dt: number): void {
   if (market.cash > 0 && near(L.cash.x, L.cash.z, 1.4)) {
     const n = market.takeCash();
     floatText(`+${fmt(n)}`, L.cash.x, 1.4, L.cash.z);
-    flyCoins(n, market.cashWorld(), playerChest, (k) => {
-      earn(k);
-      save.stats.cashed += k;
-    }, 12);
+    // Credite tout de suite ; les pieces s'envolent jusqu'au compteur, qui defile.
+    hudCoins(market.cashWorld(), Math.min(12, 3 + Math.floor(n / 40)));
+    earn(n);
+    save.stats.cashed += n;
   }
   // Payer les zones a debloquer : d'abord les pieces, puis les materiaux.
   for (const pad of pads) {
@@ -4083,7 +4154,11 @@ function step(dt: number, time: number): void {
     save.stats.sold++;
     sfx.sfxSell();
     const pay = Math.round(s.pay * sellMul());
-    floatText(`+${fmt(pay)}`, s.at.x, s.at.y + 0.4, s.at.z, 'small');
+    floatText(s.vip ? `👑 +${fmt(pay)}` : `+${fmt(pay)}`, s.at.x, s.at.y + 0.4, s.at.z, s.vip ? '' : 'small');
+    if (s.vip) {
+      sfx.sfxObjective();
+      particles.burst(s.at.clone(), [0xffd84a, 0xfff1a8, 0xffffff], 24, { speed: 4, up: 5, size: 0.13, life: 0.9 });
+    }
     flyCoins(pay, s.at, () => market.cashWorld(), (n) => market.addCash(n), 6);
   }
 
@@ -4191,6 +4266,40 @@ function adaptResolution(): void {
   resize();
 }
 
+/** Heure du lancement : pas de bandeau de reussite pour ce qui etait deja acquis au chargement. */
+const bootT = performance.now();
+
+// ---- reperes de jeu : « MAX » au-dessus d'un sac plein, fleche sur l'etabli quand une
+// amelioration est a portee de bourse.
+let maxEl: HTMLElement | null = null;
+let upEl: HTMLElement | null = null;
+let upClock = 0;
+let upReady = false;
+function placeHudBadges(): void {
+  if (!maxEl) {
+    maxEl = document.createElement('div');
+    maxEl.className = 'max-label off';
+    maxEl.innerHTML = '<i>MAX</i>';
+    labels.appendChild(maxEl);
+    upEl = document.createElement('div');
+    upEl.className = 'up-badge off';
+    upEl.textContent = '⬆️';
+    labels.appendChild(upEl);
+  }
+  if (player.stack.cap > 0 && player.stack.count >= player.stack.cap) {
+    const top = player.stack.topWorld();
+    placeLabel(maxEl, top.x, top.y + 0.55, top.z);
+  } else maxEl.classList.add('off');
+  upClock -= 1;
+  if (upClock <= 0) {
+    upClock = 30;
+    upReady = structAlive('bench') && (UPGRADES.some((u) => { const c = u.costs[save.up[u.id]]; return c !== undefined && save.coins >= c; })
+      || LEVELS.some((d) => (!d.needs || isBuilt(d.needs)) && lv(d.id) < MAX_LEVEL && canAfford(levelPrice(d, lv(d.id)))));
+  }
+  if (upReady && panel !== 'bench') placeLabel(upEl!, L.bench.x, 3.2, L.bench.z);
+  else upEl!.classList.add('off');
+}
+
 let frameErrors = 0;
 function frame(): void {
   // On reprogramme d'abord : une erreur dans une image ne doit jamais figer le jeu.
@@ -4252,8 +4361,12 @@ function drawFrame(): void {
     }
   }
 
-  camTarget.x = damp(camTarget.x, player.position.x, 5, dt);
-  camTarget.z = damp(camTarget.z, player.position.z, 5, dt);
+  // Revelation d'un deblocage : on regarde le chantier un instant, puis on revient au joueur.
+  camFocus.t = Math.max(0, camFocus.t - dt);
+  const look = camFocus.t > 0;
+  camTarget.x = damp(camTarget.x, look ? camFocus.x : player.position.x, look ? 3.2 : 5, dt);
+  camTarget.z = damp(camTarget.z, look ? camFocus.z : player.position.z, look ? 3.2 : 5, dt);
+  placeHudBadges();
   shake = Math.max(0, shake - dt);
   camera.position.copy(camTarget).addScaledVector(CAM_DIR, camDist);
   camera.position.x += (Math.random() - 0.5) * shake * 0.8;
@@ -4305,7 +4418,7 @@ function drawFrame(): void {
   }
   for (const c of market.customers) {
     const left = c.need - c.got;
-    const html = c.state === 'leave' ? (c.happy > 0 ? (c.sad ? '😞' : '😊') : '') : `${ITEMS[c.want].icon} ${left}`;
+    const html = c.state === 'leave' ? (c.happy > 0 ? (c.sad ? '😞' : c.vip ? '🤩' : '😊') : '') : `${c.vip ? '👑 ' : ''}${ITEMS[c.want].icon} ${left}`;
     if (c.label.innerHTML !== html) c.label.innerHTML = html;
     c.label.classList.toggle('empty', !html);
     if (html) placeLabel(c.label, c.human.root.position.x, 2.5, c.human.root.position.z);

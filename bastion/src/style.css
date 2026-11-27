@@ -433,3 +433,35 @@ body.night .vignette { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,
 .btn.zone { min-width: 0; padding: 6px 8px; font-size: 13px; }
 .btn.zone:not(.on):not(:disabled) { background: linear-gradient(180deg, #f2e4c8, #e2cfa8); box-shadow: 0 4px 0 #c3ab80; color: var(--ink); text-shadow: none; }
 .btn.zone:disabled { opacity: .55; }
+
+/* ---- plaisir de jeu : pieces vers le compteur, bandeau de reussite, MAX, amelioration, VIP */
+.hud-coin {
+  position: fixed; left: 0; top: 0; z-index: 9; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%;
+  pointer-events: none; will-change: transform, opacity;
+  background: radial-gradient(circle at 35% 30%, #fff3b0 0 18%, #ffd23a 40%, #d89a10 100%);
+  border: 2px solid #a86f00; box-shadow: 0 1px 2px rgba(0,0,0,.35);
+}
+.obj-banner {
+  position: fixed; left: 50%; top: calc(64px + var(--safe-top)); z-index: 12; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; padding: 8px 22px 9px; border-radius: 18px;
+  background: linear-gradient(180deg, #7ed957, #3fae3a); color: #fff; border: 3px solid #fff;
+  box-shadow: 0 4px 0 #2a7a2a, 0 8px 18px rgba(0,0,0,.25); text-shadow: 0 2px 0 rgba(0,0,0,.25);
+  transform: translate(-50%, -140%); opacity: 0; transition: transform .35s cubic-bezier(.3,1.5,.5,1), opacity .25s;
+}
+.obj-banner.show { transform: translate(-50%, 0); opacity: 1; }
+.obj-banner b { font-size: 19px; font-weight: 800; line-height: 1.1; }
+.obj-banner span { font-size: 14px; font-weight: 800; color: #fff6c4; }
+/* La position est dans le transform de l'etiquette : on anime l'interieur, pas elle. */
+.max-label i {
+  display: inline-block; font-style: normal; padding: 1px 9px; border-radius: 10px; font-size: 14px; font-weight: 800; color: #fff;
+  letter-spacing: .5px; background: #e0443a; border: 2px solid #fff; box-shadow: 0 2px 0 #8a2a20; animation: maxPulse .6s ease-in-out infinite;
+}
+@keyframes maxPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+.up-badge {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 20px;
+  background: radial-gradient(circle, #9bf07a, #3fae3a); border: 3px solid #fff; box-shadow: 0 3px 0 #2a7a2a;
+  animation: upBob 1s ease-in-out infinite;
+}
+.labels > .max-label, .labels > .up-badge { margin: 0; }
+@keyframes upBob { 0%, 100% { margin-top: 0; } 50% { margin-top: -6px; } }
+.bubble.vip { background: linear-gradient(180deg, #fff3b0, #ffd23a); border-color: #d89a10; color: #5a3a00; font-weight: 800; }

@@ -83,11 +83,8 @@ export interface LevelDef {
 export const MAX_LEVEL = 15;
 
 export const LEVELS: LevelDef[] = [
-  { id: 'stall', name: 'Étal', icon: '🧺', needs: null, base: 150, effect: (l) => `Prix de vente +${5 * l} %` },
-  { id: 'reserve', name: 'Réserve', icon: '📦', needs: 'shelter', base: 220, effect: (l) => `${240 + 60 * l} places · absence +${15 * l} min` },
   { id: 'foreman', name: 'Contremaître', icon: '📋', needs: 'farmer', base: 300, effect: (l) => `Hors ligne : rendement ${Math.round(15 + 1.5 * l)} %, plafond +${10 * l} %, jusqu'à ${1 + l / 2} h` },
   { id: 'tower', name: 'Tour de guet', icon: '🗼', needs: 'tower', base: 300, effect: (l) => `Dégâts +${l}, tirs +${8 * l} %` },
-  { id: 'mill', name: 'Moulin', icon: '🍞', needs: 'mill', base: 400, effect: (l) => `Cadence +${15 * l} %` },
 ];
 
 /** Cout en pieces du niveau suivant : exponentiel, pour durer. */

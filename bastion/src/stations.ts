@@ -550,6 +550,7 @@ export class Market {
 export class Reserve {
   readonly counts = new Map<ItemType, number>();
   readonly root = new THREE.Group();
+  private readonly chest = new THREE.Group();
   readonly label: HTMLElement;
   readonly ring: THREE.Mesh;
   /** Ou se tenir pour se servir (devant le coffre). */
@@ -565,7 +566,9 @@ export class Reserve {
     lidG.position.set(0, 0.92, -0.5);
     lid.position.z = 0.5;
     lidG.rotation.x = -1.1;
-    this.root.add(merged('chest-body', chestBody), lidG);
+    // Le coffre a part : il sautille quand on y depose, pas le decor de la reserve autour.
+    this.chest.add(merged('chest-body', chestBody), lidG);
+    this.root.add(this.chest);
     shadow(this.root);
     this.root.position.set(x, 0, z);
     scene.add(this.root);
@@ -616,7 +619,7 @@ export class Reserve {
   update(dt: number, time: number): void {
     if (this.pop > 0) {
       this.pop = Math.max(0, this.pop - dt * 5);
-      this.root.scale.setScalar(1 + Math.sin(this.pop * Math.PI) * 0.06);
+      this.chest.scale.setScalar(1 + Math.sin(this.pop * Math.PI) * 0.06);
     }
     const s = 1 + Math.sin(time * 3) * 0.03;
     this.ring.scale.set(s, s, s);

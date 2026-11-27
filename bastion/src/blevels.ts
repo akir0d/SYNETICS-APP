@@ -4,8 +4,9 @@
 
 import type { Cost } from './progress';
 
-export type BId = 'bed1' | 'bed2' | 'bed3' | 'bed4' | 'field1' | 'field2' | 'field3' | 'sawmill' | 'kitchen' | 'armory';
-type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm';
+export type BId = 'bed1' | 'bed2' | 'bed3' | 'bed4' | 'field1' | 'field2' | 'field3' | 'sawmill' | 'kitchen' | 'armory'
+  | 'mill' | 'stall' | 'reserve' | 'shelter';
+type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm' | 'mill' | 'stall' | 'res' | 'shel';
 
 export const BMAX = 10;
 
@@ -29,6 +30,10 @@ export const BDEFS: BDef[] = [
   { id: 'sawmill', kind: 'saw', name: 'Scierie', icon: '🪚', base: 320 },
   { id: 'kitchen', kind: 'cook', name: 'Cuisine', icon: '🍲', base: 420 },
   { id: 'armory', kind: 'arm', name: 'Armurerie', icon: '🛡️', base: 900 },
+  { id: 'mill', kind: 'mill', name: 'Moulin', icon: '🍞', base: 520 },
+  { id: 'stall', kind: 'stall', name: 'Étal', icon: '🧺', base: 300 },
+  { id: 'reserve', kind: 'res', name: 'Réserve', icon: '📦', base: 340 },
+  { id: 'shelter', kind: 'shel', name: 'Abri', icon: '🏠', base: 460 },
 ];
 export const bdef = (id: string): BDef | undefined => BDEFS.find((d) => d.id === id);
 
@@ -39,6 +44,10 @@ const STAGES: Record<Kind, string[]> = {
   saw: ['Chevalet de fortune', 'Scie sous bâche', 'Scierie à moteur', 'Atelier en dur', 'Scierie industrielle'],
   cook: ['Feu de camp', 'Poêle sous bâche', 'Cuisine couverte', 'Cuisine en dur', 'Cantine équipée'],
   arm: ['Caisse d’armes', 'Cabane renforcée', 'Blockhaus', 'Blockhaus fortifié', 'Bunker'],
+  mill: ['Meule à bras', 'Petit moulin de bois', 'Moulin à vent', 'Moulin de pierre', 'Minoterie'],
+  stall: ['Caisses retournées', 'Porte sur des fûts', 'Comptoir à fanions', 'Échoppe peinte', 'Marché illuminé'],
+  res: ['Tas sous bâche', 'Coffre et fûts', 'Coffre et étagères', 'Remise en bois', 'Conteneur de stockage'],
+  shel: ['Tentes de survie', 'Cabane de bric et de broc', 'Conteneur', 'Conteneur aménagé', 'Conteneurs empilés'],
 };
 
 /** Aspect (1 a 5) d'un niveau : il change aux niveaux 3, 5, 7 et 9. */
@@ -55,7 +64,8 @@ export function bCost(d: BDef, next: number): Cost {
   if (next <= 4) {
     if (k === 'saw') c.log = 8 * (next - 1);
     else if (k === 'arm') { c.scrap = 10 * (next - 1); c.plank = 10; }
-    else c.plank = (k === 'cook' ? 5 : k === 'field' ? 6 : 4) * (next - 1);
+    else if (k === 'shel') { c.plank = 6 * (next - 1); c.scrap = 4 * (next - 1); }
+    else c.plank = (k === 'bed' ? 4 : k === 'cook' || k === 'stall' || k === 'res' ? 5 : 6) * (next - 1);
   } else if (next <= 6) {
     c.plank = k === 'arm' ? 0 : 10;
     c.stone = (k === 'bed' ? 6 : k === 'arm' ? 10 : 8) * (next - 4);
@@ -82,6 +92,15 @@ export const needOf = (d: BDef, next: number): 'quarry' | 'foundry' | null => {
 
 // ---- les bonus
 
+/** Etal : +8 % sur le prix de vente par niveau ; ce que la caisse garde hors ligne. */
+export const sellOf = (lv: number): number => 0.08 * (lv - 1);
+export const cashCapOf = (lv: number): number => 250 + 80 * (lv - 1);
+/** Reserve : 100 places de plus par niveau, et 20 minutes d'absence comptees en plus. */
+export const resCapOf = (lv: number): number => 240 + 100 * (lv - 1);
+export const awayOf = (lv: number): number => 1200 * (lv - 1);
+/** Abri : les survivants, mieux reposes, travaillent 5 % plus vite par niveau. */
+export const crewOf = (lv: number): number => 1 + 0.05 * (lv - 1);
+
 /** Croissance des cultures : +10 % par niveau. */
 export const growOf = (lv: number): number => 1 + 0.1 * (lv - 1);
 /** Chance de recolte double : 4 % par niveau. */
@@ -105,6 +124,14 @@ export function bonusText(d: BDef, lv: number): string {
       return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · planche en plus ${Math.round(100 * extraOf(lv))} %`;
     case 'cook':
       return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · bol en plus ${Math.round(100 * extraOf(lv))} %`;
+    case 'mill':
+      return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · pain en plus ${Math.round(100 * extraOf(lv))} %`;
+    case 'stall':
+      return `Prix de vente +${Math.round(100 * sellOf(lv))} % · caisse ${cashCapOf(lv)} pièces sans caissière`;
+    case 'res':
+      return `${resCapOf(lv)} places · absence comptée +${Math.round(awayOf(lv) / 60)} min`;
+    case 'shel':
+      return `Survivants +${Math.round(100 * (crewOf(lv) - 1))} % plus rapides`;
     case 'arm': {
       const un = lv >= 5 ? 'pompe et arbalète' : lv >= 3 ? 'fusil à pompe' : 'fusil';
       return `Armes jusqu’au niv. ${lv} · ${un} · chasseurs +${huntBonusOf(lv)} dégâts`;

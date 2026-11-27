@@ -1,7 +1,7 @@
 // Ce qu'on recolte : potagers, arbres a abattre, epaves a demonter.
 
 import * as THREE from 'three';
-import { C, at, blob, box, capsule, corrugated, cyl, damp, group, lathe, mat, mixHex, paint, plank, rbox, rcyl, rng, shadow, sphere, torus, vgrad } from './kit';
+import { C, at, blob, box, capsule, cone, corrugated, cyl, damp, group, lathe, mat, mixHex, paint, plank, rbox, rcyl, rng, shadow, sphere, torus, vgrad } from './kit';
 import { L } from './layout';
 import type { Circle, Segment } from './physics';
 import { mergeColored } from './bake';
@@ -31,6 +31,8 @@ export class Bed {
   growMul = 1;
   /** Aspect du bac (1 a 5, suit son niveau d'amelioration) ; le decor est a part des plantes. */
   stage = 0;
+  /** Taille des plantes (elles sont plus belles dans un bac ameliore). */
+  plantMul = 1;
   private readonly deco = new THREE.Group();
   private readonly cols: number;
   private readonly rows: number;
@@ -104,8 +106,9 @@ export class Bed {
     const { w, d, cols, rows } = this;
     const made = this.kind === 'wheat'
       ? shared(`fieldS${st},${w},${d},${rows}`, () => fieldDeco(w, d, rows, st))
-      : shared(`bedS${st},${w},${d},${cols},${rows}`, () => bedDeco(w, d, cols, rows, st));
+      : shared(`bedS${st},${this.kind},${w},${d},${cols},${rows}`, () => bedDeco(w, d, cols, rows, st, this.kind));
     for (const c of [...made.children]) this.deco.add(c);
+    this.plantMul = PLANT_MUL[st - 1]!;
     const base = this.kind === 'wheat' ? 0.12 : BED_BASE[st - 1]!;
     for (const p of this.plants) {
       p.obj.userData.base = base;
@@ -156,7 +159,7 @@ export class Bed {
       if (p.g < 1) p.g = Math.min(1, p.g + (dt * this.growMul) / this.growTime);
       p.pop = Math.max(0, p.pop - dt * 3);
       const ripe = p.g >= 1;
-      const s = 0.25 + p.g * 0.75;
+      const s = (0.25 + p.g * 0.75) * this.plantMul;
       p.obj.scale.setScalar(damp(p.obj.scale.x, s, 10, dt));
       p.obj.position.y = (p.obj.userData.base as number) + (ripe ? Math.abs(Math.sin(time * 3 + p.pos.x * 3)) * 0.04 : 0);
       p.obj.rotation.z = ripe ? Math.sin(time * 2 + p.pos.z * 5) * 0.08 : 0;
@@ -203,73 +206,199 @@ function rot<T extends THREE.Object3D>(o: T, x: number, y = 0, z = 0): T {
 /** Hauteur de la terre (base des plantes) pour chaque aspect du potager. */
 const BED_BASE = [0.16, 0.26, 0.44, 0.62, 0.62];
 const GLASS = 0xd6eef2;
-const STEEL = 0x5a6066;
+/** Sac de toile (profil de revolution). */
+const SACK: [number, number][] = [[0, 0], [0.2, 0], [0.25, 0.05], [0.26, 0.22], [0.22, 0.36], [0.12, 0.44], [0.07, 0.46], [0.08, 0.52], [0, 0.53]];
 
 /** Les cinq aspects d'un potager (pieces fusionnees ; le verre reste a part, transparent). */
-function bedDeco(w: number, d: number, cols: number, rows: number, stage: number): THREE.Group {
+/** Taille des plantes selon l'aspect : un champ ameliore se voit aussi a ses epis. */
+const PLANT_MUL = [0.78, 0.9, 1.0, 1.1, 1.22];
+const DRY_DEEP = new THREE.Color(0x8a6a48);
+const DRY_TOP = new THREE.Color(0xb39470);
+const WHITE = 0xeeeee6;
+const WATER = 0x4fa6d6;
+
+/** Mauvaises herbes : petites touffes vert-jaune. */
+function weeds(g: THREE.Group, n: number, w: number, d: number, y: number, seed: number): void {
+  const q = rng(seed);
+  for (let i = 0; i < n; i++) {
+    const x = (q() - 0.5) * w;
+    const z = (q() - 0.5) * d;
+    const tuft = cone(0.07 + q() * 0.04, 0.16 + q() * 0.1, mixHex(0x8a9a3a, 0xb0a040, q()), 5, x, y + 0.08, z);
+    tuft.rotation.set((q() - 0.5) * 0.5, q() * 3, (q() - 0.5) * 0.5);
+    g.add(tuft);
+  }
+}
+
+/** Cailloux poses sur la terre. */
+function pebbles(g: THREE.Group, n: number, w: number, d: number, y: number, seed: number, size = 0.08): void {
+  const q = rng(seed);
+  for (let i = 0; i < n; i++) {
+    const b = blob(size * (0.7 + q() * 0.7), mixHex(0x8f8a80, 0x6f6a62, q()), (q() - 0.5) * w, y, (q() - 0.5) * d);
+    b.scale.y = 0.6;
+    g.add(b);
+  }
+}
+
+/** Pelle plantee dans la terre : manche, poignee, lame. */
+function shovel(x: number, z: number, ry: number): THREE.Group {
+  const s = group(
+    cyl(0.025, 0.025, 1.0, C.woodDark, 6, 0, 0.62, 0), box(0.2, 0.04, 0.04, C.woodDark, 0, 1.12, 0),
+    box(0.2, 0.26, 0.03, 0x8a9097, 0, 0.08, 0),
+  );
+  s.position.set(x, 0, z);
+  s.rotation.set(0.15, ry, 0.12);
+  return s;
+}
+
+/** Epouvantail : poteau, bras en croix, chemise, chapeau de paille, tete en sac. */
+function scarecrow(x: number, z: number, shirt: number): THREE.Group {
+  const s = group(
+    cyl(0.04, 0.05, 1.9, C.woodDark, 6, 0, 0.95, 0),
+    rot(cyl(0.03, 0.03, 1.2, C.woodDark, 6, 0, 1.45, 0), 0, 0, Math.PI / 2),
+    rbox(0.5, 0.55, 0.22, shirt, 0.08, 0, 1.3, 0),
+    box(0.22, 0.18, 0.18, shirt, -0.42, 1.45, 0), box(0.22, 0.18, 0.18, shirt, 0.42, 1.45, 0),
+    cone(0.06, 0.16, 0xd9b24a, 5, -0.6, 1.42, 0), cone(0.06, 0.16, 0xd9b24a, 5, 0.6, 1.42, 0),
+    sphere(0.17, 0xd8c49a, 0, 1.75, 0, 8),
+    cyl(0.32, 0.32, 0.04, 0xe0c060, 10, 0, 1.88, 0), cyl(0.16, 0.18, 0.16, 0xd0a840, 8, 0, 1.97, 0),
+    box(0.04, 0.04, 0.02, 0x2b2b2b, -0.06, 1.78, 0.16), box(0.04, 0.04, 0.02, 0x2b2b2b, 0.06, 1.78, 0.16),
+  );
+  s.position.set(x, 0, z);
+  s.rotation.y = 0.5;
+  return s;
+}
+
+/** Chateau d'eau : quatre pieds, une cuve de bois cerclee, un toit pointu. */
+function waterTower(x: number, z: number, h: number, steel: boolean): THREE.Group {
+  const legC = steel ? 0x6a7076 : C.woodDark;
   const g = new THREE.Group();
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(rot(box(0.08, h, 0.08, legC, sx * 0.32, h / 2, sz * 0.32), sz * 0.06, 0, -sx * 0.06));
+  g.add(box(0.7, 0.04, 0.04, legC, 0, h * 0.5, 0.32), box(0.7, 0.04, 0.04, legC, 0, h * 0.5, -0.32));
+  g.add(rcyl(0.46, 0.46, 0.7, steel ? 0x9aa3aa : 0x8a5a34, 0.06, 0, h + 0.35, 0));
+  for (const y of [0.15, 0.55]) g.add(cyl(0.47, 0.47, 0.04, steel ? 0x6a7076 : 0x3a3d40, 12, 0, h + y, 0));
+  g.add(cone(0.55, 0.35, steel ? 0x6a7076 : 0x9c4a3c, 8, 0, h + 0.88, 0));
+  g.add(cyl(0.03, 0.03, h, 0x3f6a8a, 6, 0.36, h / 2, 0));
+  g.position.set(x, 0, z);
+  return g;
+}
+
+/** Botte de foin. */
+function hayBale(x: number, y: number, z: number, ry: number): THREE.Mesh {
+  const b = rbox(0.7, 0.4, 0.45, 0xd9b24a, 0.08, x, y + 0.2, z);
+  b.rotation.y = ry;
+  return b;
+}
+
+/** Arrosoir vert. */
+function wateringCan(x: number, y: number, z: number): THREE.Group {
+  return group(
+    rcyl(0.11, 0.12, 0.2, 0x5f9a4a, 0.04, x, y + 0.1, z),
+    rot(cyl(0.02, 0.025, 0.28, 0x5f9a4a, 6, x + 0.16, y + 0.16, z), 0, 0, -0.9),
+    rot(torus(0.07, 0.015, 0x4a7a3a, x - 0.02, y + 0.24, z), Math.PI / 2, 0, 0),
+  );
+}
+
+/** Terre seche et claire d'un sol encore en friche. */
+function drySoil(w: number, d: number, h: number, key: string): THREE.Mesh {
+  return paint(rbox(w, h, d, C.soil, Math.min(0.08, h / 2), 0, h / 2, 0), key, (_x, y, _z, out) => {
+    out.lerpColors(DRY_DEEP, DRY_TOP, smooth(y / h + 0.5));
+  });
+}
+
+function bedDeco(w: number, d: number, cols: number, rows: number, stage: number, kind: Crop): THREE.Group {
+  const g = new THREE.Group();
+  const tag = kind === 'tomato' ? 0xd9443a : 0xf08a2a;
   if (stage === 1) {
-    // Terre nue : une butte retournee a la pelle, quelques cailloux.
-    g.add(paint(rbox(w - 0.2, 0.16, d - 0.2, C.soil, 0.08, 0, 0.08, 0), 'soil1', (_x, y, _z, out) => {
-      out.lerpColors(SOIL_DEEP, SOIL_TOP, smooth((y + 0.08) / 0.16));
-    }));
+    // Terre retournee : butte seche et claire, cailloux, mauvaises herbes, une pelle plantee.
+    g.add(drySoil(w - 0.2, d - 0.2, 0.16, 'dry1'));
     mounds(g, w, d, cols, rows, 0.15);
-    for (const [sx, sz] of [[-0.5, 0.45], [0.48, -0.5], [0.2, 0.55]] as const) g.add(blob(0.07, 0x8f8a80, sx * w, 0.04, sz * d));
+    pebbles(g, 7, w - 0.3, d - 0.3, 0.12, 5);
+    weeds(g, 6, w - 0.3, d - 0.3, 0.1, 9);
+    g.add(shovel(w / 2 - 0.2, -d / 2 + 0.2, 0.6));
     return mergeColored(g, 0.05);
   }
   if (stage === 2) {
-    // Bordures : une planche couchee de chaque cote, la terre un peu plus haut.
+    // Bordures de planches, terre plus sombre, piquets d'etiquette, arrosoir.
     let k = 0;
     for (const s of [-1, 1]) {
-      g.add(plank(w, 0.18, 0.11, TONES[k++ % 3]!, 0, 0.09, s * (d / 2 - 0.055)));
-      g.add(plank(0.11, 0.18, d - 0.22, TONES[k++ % 3]!, s * (w / 2 - 0.055), 0.09, 0));
+      g.add(plank(w, 0.2, 0.12, TONES[k++ % 3]!, 0, 0.1, s * (d / 2 - 0.06)));
+      g.add(plank(0.12, 0.2, d - 0.24, TONES[k++ % 3]!, s * (w / 2 - 0.06), 0.1, 0));
     }
-    g.add(paint(rbox(w - 0.24, 0.22, d - 0.24, C.soil, 0.08, 0, 0.11, 0), 'soil2', (_x, y, _z, out) => {
-      out.lerpColors(SOIL_DEEP, SOIL_TOP, smooth((y + 0.11) / 0.22));
+    g.add(paint(rbox(w - 0.24, 0.24, d - 0.24, C.soil, 0.08, 0, 0.12, 0), 'soil2', (_x, y, _z, out) => {
+      out.lerpColors(SOIL_DEEP, SOIL_TOP, smooth((y + 0.12) / 0.24));
     }));
     mounds(g, w, d, cols, rows, 0.25);
+    for (const sx of [-1, 1]) g.add(cyl(0.02, 0.02, 0.6, C.woodDark, 6, sx * (w / 2 - 0.2), 0.45, d / 2 - 0.2), box(0.2, 0.14, 0.02, tag, sx * (w / 2 - 0.2), 0.7, d / 2 - 0.19));
+    g.add(wateringCan(-w / 2 + 0.25, 0.24, -d / 2 + 0.25));
     return mergeColored(g, 0.05);
   }
   if (stage === 3) {
+    // Bac en bois ; tuteurs pour les tomates, petite barriere et sac pour les carottes.
     g.add(bedFrame(w, d), bedSoil(w, d, cols, rows));
+    const extra = new THREE.Group();
+    if (kind === 'tomato') {
+      for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
+        const px = (j - (cols - 1) / 2) * ((w - 0.5) / Math.max(1, cols - 1)) + 0.12;
+        const pz = (i - (rows - 1) / 2) * ((d - 0.5) / Math.max(1, rows - 1));
+        extra.add(cyl(0.018, 0.018, 1.2, 0xb08a5a, 5, px, 0.95, pz));
+      }
+      for (let i = 0; i < rows; i++) {
+        const pz = (i - (rows - 1) / 2) * ((d - 0.5) / Math.max(1, rows - 1));
+        extra.add(rot(cyl(0.008, 0.008, w - 0.4, 0xe8e2d0, 4, 0.12, 1.45, pz), 0, 0, Math.PI / 2));
+      }
+    } else {
+      for (let i = 0; i < 7; i++) extra.add(box(0.06, 0.42, 0.04, WHITE, -w / 2 + 0.2 + i * ((w - 0.4) / 6), 0.62, -d / 2 + 0.07));
+      extra.add(box(w - 0.3, 0.05, 0.03, WHITE, 0, 0.72, -d / 2 + 0.07), lathe(SACK, 0xc9b48a, w / 2 - 0.25, 0.42, d / 2 - 0.25));
+    }
+    extra.add(cyl(0.02, 0.02, 0.6, C.woodDark, 6, w / 2 - 0.15, 0.7, d / 2 - 0.15), box(0.24, 0.16, 0.02, tag, w / 2 - 0.15, 0.95, d / 2 - 0.14));
+    g.add(mergeColored(extra, 0.04));
     return g;
   }
-  // Niveaux 7-8 : bac sureleve de trois planches sur pieds, tuyau d'arrosage goutte a goutte.
+  // Niveaux 7 a 10 : bac sureleve peint, sur pieds, arrosage goutte a goutte et sa cuve perchee.
+  const paintC = stage === 5 ? [0xe8e4d8, 0xdcd6c6, 0xf0ece0] : [0x4f8a8a, 0x5a9696, 0x467e7e];
   const raised = new THREE.Group();
   const t = 0.13;
   let k = 0;
   for (const y of [0.11, 0.31, 0.51]) {
     for (const s of [-1, 1]) {
-      raised.add(plank(w - 0.06, 0.19, t, TONES[k++ % 3]!, 0, y, s * (d / 2 - t / 2)));
-      raised.add(plank(t, 0.19, d - 2 * t - 0.01, TONES[k++ % 3]!, s * (w / 2 - t / 2), y, 0));
+      raised.add(plank(w - 0.06, 0.19, t, paintC[k++ % 3]!, 0, y, s * (d / 2 - t / 2)));
+      raised.add(plank(t, 0.19, d - 2 * t - 0.01, paintC[k++ % 3]!, s * (w / 2 - t / 2), y, 0));
     }
   }
+  raised.add(plank(w + 0.04, 0.05, 0.18, 0xc89a5a, 0, 0.63, -d / 2 + 0.06), plank(w + 0.04, 0.05, 0.18, 0xc89a5a, 0, 0.63, d / 2 - 0.06));
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) raised.add(plank(0.19, 0.72, 0.19, C.woodDark, sx * (w / 2 - 0.09), 0.36, sz * (d / 2 - 0.09)));
   const soil = bedSoil(w, d, cols, rows);
   soil.position.y = 0.18;
   raised.add(soil);
-  raised.add(rot(cyl(0.035, 0.035, w - 0.3, 0x3f6a8a, 10, 0, 0.66, -d / 2 + 0.2), 0, 0, Math.PI / 2));
-  for (let i = 0; i < 5; i++) raised.add(sphere(0.03, 0x2d4a60, -w / 2 + 0.35 + i * ((w - 0.7) / 4), 0.64, -d / 2 + 0.2, 6));
-  raised.add(cyl(0.05, 0.05, 0.12, 0xc9412f, 10, w / 2 - 0.05, 0.7, -d / 2 + 0.2));
+  // Goutte a goutte : tuyau bleu, goutteurs ; cuve d'eau sur son poteau, dans le coin.
+  raised.add(rot(cyl(0.035, 0.035, w - 0.3, 0x3f6a8a, 10, 0, 0.68, -d / 2 + 0.22), 0, 0, Math.PI / 2));
+  for (let i = 0; i < 5; i++) raised.add(sphere(0.03, 0x2d4a60, -w / 2 + 0.35 + i * ((w - 0.7) / 4), 0.66, -d / 2 + 0.22, 6));
+  const tx = -w / 2 + 0.16;
+  const tz = -d / 2 + 0.16;
+  raised.add(cyl(0.05, 0.05, 1.3, C.woodDark, 6, tx, 1.25, tz), rcyl(0.24, 0.24, 0.42, 0x3f78a8, 0.05, tx, 2.05, tz), cyl(0.25, 0.25, 0.04, 0x2d5a80, 10, tx, 2.27, tz));
+  raised.add(rot(cyl(0.025, 0.025, 1.2, 0x3f6a8a, 6, tx + 0.1, 1.3, tz + 0.06), 0.06, 0, 0.1));
   g.add(mergeColored(raised, 0.05));
   if (stage === 5) {
-    // Serre : ossature d'acier et verre (un seul maillage transparent pour les parois et le toit).
-    const H = 1.35;
+    // Serre : ossature blanche, verre, lucarne de toit entrouverte, rampe de lampes.
+    const H = 1.55;
     const fw = w + 0.2;
     const fd = d + 0.2;
     const frame = new THREE.Group();
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) frame.add(box(0.07, H, 0.07, STEEL, sx * fw / 2, H / 2, sz * fd / 2));
-    for (const sz of [-1, 1]) frame.add(box(fw, 0.06, 0.06, STEEL, 0, H, sz * fd / 2));
-    for (const sx of [-1, 1]) frame.add(box(0.06, 0.06, fd, STEEL, sx * fw / 2, H, 0));
-    frame.add(box(fw, 0.06, 0.06, STEEL, 0, H + 0.45, 0));
-    for (const sz of [-1, 1]) {
-      const r = box(fw, 0.05, Math.hypot(fd / 2, 0.45), STEEL, 0, H + 0.225, sz * fd / 4);
-      r.rotation.x = sz * Math.atan2(0.45, fd / 2);
-      r.scale.set(1, 1, 0.08);
+    for (const sx of [-1, 0, 1]) for (const sz of [-1, 1]) frame.add(box(0.08, H, 0.08, WHITE, sx * fw / 2, H / 2, sz * fd / 2));
+    for (const sz of [-1, 1]) frame.add(box(fw, 0.07, 0.07, WHITE, 0, H, sz * fd / 2));
+    for (const sx of [-1, 1]) frame.add(box(0.07, 0.07, fd, WHITE, sx * fw / 2, H, 0));
+    frame.add(box(fw, 0.08, 0.08, WHITE, 0, H + 0.5, 0));
+    for (const sx of [-1, 0, 1]) for (const sz of [-1, 1]) {
+      const r = box(0.06, 0.06, Math.hypot(fd / 2, 0.5), WHITE, sx * fw / 2, H + 0.25, sz * fd / 4);
+      r.rotation.x = sz * Math.atan2(0.5, fd / 2);
       frame.add(r);
     }
-    g.add(mergeColored(frame, 0.04));
-    g.add(glassHouse(fw, fd, H, 0.45));
+    // Lucarne : un panneau souleve au faitage.
+    const vent = box(0.8, 0.04, 0.5, WHITE, 0.4, H + 0.55, -0.3);
+    vent.rotation.x = 0.5;
+    frame.add(vent);
+    frame.add(box(fw - 0.4, 0.05, 0.07, 0xffe9a0, 0, H - 0.08, 0));
+    g.add(mergeColored(frame, 0.03));
+    g.add(glassHouse(fw, fd, H, 0.5));
   }
   return g;
 }
@@ -277,38 +406,81 @@ function bedDeco(w: number, d: number, cols: number, rows: number, stage: number
 /** Les cinq aspects d'un champ de ble. */
 function fieldDeco(w: number, d: number, rows: number, stage: number): THREE.Group {
   const g = new THREE.Group();
+  const back = { x: -w / 2 + 0.12, z: -d / 2 + 0.12 };
+  if (stage === 1) {
+    // Friche : terre seche et claire, fissures, cailloux, souche, mauvaises herbes.
+    const s1 = new THREE.Group();
+    s1.add(drySoil(w - 0.06, d - 0.06, 0.12, 'dryF'));
+    const q = rng(41);
+    for (let i = 0; i < 7; i++) {
+      const c = box(0.5 + q() * 0.6, 0.02, 0.035, 0x6a4a30, (q() - 0.5) * (w - 0.8), 0.125, (q() - 0.5) * (d - 0.6));
+      c.rotation.y = q() * 3;
+      s1.add(c);
+    }
+    pebbles(s1, 12, w - 0.4, d - 0.4, 0.12, 13, 0.11);
+    weeds(s1, 12, w - 0.4, d - 0.4, 0.1, 17);
+    s1.add(rcyl(0.22, 0.26, 0.3, 0x6e5034, 0.04, back.x + 0.2, 0.15, back.z + 0.2), cyl(0.2, 0.2, 0.02, 0xd9b07a, 8, back.x + 0.2, 0.31, back.z + 0.2));
+    s1.add(shovel(w / 2 - 0.2, d / 2 - 0.2, -0.4));
+    g.add(mergeColored(s1, 0.05));
+    return g;
+  }
   g.add(fieldSoil(w, d, rows));
   if (stage === 2) {
+    // Bordure de planches et un epouvantail de fortune.
     const b = new THREE.Group();
     for (const s of [-1, 1]) {
-      b.add(plank(w + 0.1, 0.16, 0.1, TONES[1]!, 0, 0.08, s * (d / 2 + 0.05)));
-      b.add(plank(0.1, 0.16, d, TONES[2]!, s * (w / 2 + 0.05), 0.08, 0));
+      b.add(plank(w + 0.1, 0.18, 0.12, TONES[1]!, 0, 0.09, s * (d / 2 + 0.05)));
+      b.add(plank(0.12, 0.18, d, TONES[2]!, s * (w / 2 + 0.05), 0.09, 0));
     }
+    b.add(scarecrow(back.x, back.z, 0x8a8f6a));
+    b.add(hayBale(w / 2 - 0.4, 0, d / 2 - 0.3, 0.3));
     g.add(mergeColored(b, 0.05));
   } else if (stage === 3) {
-    g.add(fieldFence(w, d));
-  } else if (stage >= 4) {
-    // Bordure de pierres taillees et rigole d'irrigation le long d'un cote, avec sa pompe.
+    // Champ cloture : piquets et lisses, epouvantail en chemise rouge, foin, brouette.
+    const b = new THREE.Group();
+    b.add(fieldFence(w, d));
+    b.add(scarecrow(back.x, back.z, 0xc9412f));
+    b.add(hayBale(w / 2 - 0.4, 0, d / 2 - 0.3, 0.3), hayBale(w / 2 - 0.45, 0.4, d / 2 - 0.3, 0.1), hayBale(w / 2 - 1.1, 0, d / 2 - 0.28, -0.1));
+    // Brouette : caisse, roue, deux brancards.
+    b.add(group(
+      rbox(0.55, 0.25, 0.4, 0x5f8a85, 0.04, -w / 2 + 0.6, 0.38, d / 2 - 0.28),
+      rot(cyl(0.12, 0.12, 0.06, 0x2b2b2b, 10, -w / 2 + 0.25, 0.12, d / 2 - 0.28), Math.PI / 2, 0, 0),
+      box(0.5, 0.04, 0.04, C.woodDark, -w / 2 + 0.95, 0.35, d / 2 - 0.12), box(0.5, 0.04, 0.04, C.woodDark, -w / 2 + 0.95, 0.35, d / 2 - 0.44),
+    ));
+    g.add(mergeColored(b, 0.05));
+  } else {
+    // Bordure de pierres taillees, rigole d'eau bleue, chateau d'eau et asperseurs.
     const s4 = new THREE.Group();
     const n = Math.round(w / 0.55);
-    for (const sz of [-1, 1]) for (let i = 0; i < n; i++) s4.add(box(w / n - 0.04, 0.2, 0.22, [0x9c988e, 0x8b877d, 0xa9a59a][(i + (sz > 0 ? 1 : 0)) % 3]!, -w / 2 + (i + 0.5) * (w / n), 0.1, sz * (d / 2 + 0.12)));
+    for (const sz of [-1, 1]) for (let i = 0; i < n; i++) s4.add(box(w / n - 0.04, 0.22, 0.24, [0x9c988e, 0x8b877d, 0xa9a59a][(i + (sz > 0 ? 1 : 0)) % 3]!, -w / 2 + (i + 0.5) * (w / n), 0.11, sz * (d / 2 + 0.12)));
     const m = Math.round(d / 0.55);
-    for (const sx of [-1, 1]) for (let i = 0; i < m; i++) s4.add(box(0.22, 0.2, d / m - 0.04, [0x8b877d, 0xa9a59a, 0x9c988e][i % 3]!, sx * (w / 2 + 0.12), 0.1, -d / 2 + (i + 0.5) * (d / m)));
-    s4.add(box(w, 0.05, 0.16, 0x4f8fb0, 0, 0.16, -d / 2 - 0.12));
-    s4.add(rbox(0.22, 0.7, 0.22, 0x3f6a8a, 0.05, w / 2 + 0.35, 0.35, -d / 2 - 0.12), rot(cyl(0.03, 0.03, 0.4, 0x2d2d2d, 8, w / 2 + 0.35, 0.78, -d / 2 + 0.02), Math.PI / 2.5, 0, 0));
+    for (const sx of [-1, 1]) for (let i = 0; i < m; i++) s4.add(box(0.24, 0.22, d / m - 0.04, [0x8b877d, 0xa9a59a, 0x9c988e][i % 3]!, sx * (w / 2 + 0.12), 0.11, -d / 2 + (i + 0.5) * (d / m)));
+    s4.add(box(w, 0.06, 0.2, WATER, 0, 0.18, -d / 2 - 0.12));
+    s4.add(waterTower(back.x - 0.05, back.z - 0.05, 2.1, stage === 5));
+    // Asperseurs : un tuyau en travers, trois tetes.
+    s4.add(rot(cyl(0.025, 0.025, w - 0.3, 0x3f6a8a, 6, 0, 0.55, 0), 0, 0, Math.PI / 2));
+    for (let i = 0; i < 3; i++) {
+      const x = -w / 2 + 0.6 + i * ((w - 1.2) / 2);
+      s4.add(cyl(0.02, 0.02, 0.45, 0x3f6a8a, 6, x, 0.33, 0), cyl(0.06, 0.04, 0.06, 0xc9412f, 8, x, 0.6, 0));
+    }
     g.add(mergeColored(s4, 0.05));
     if (stage === 5) {
-      // Grande serre en tunnel : arceaux d'acier et bache de verre.
-      const R = d / 2 + 0.35;
+      // Tunnel de culture : arceaux blancs, verre, rampe de lampes au faitage, panneau solaire.
+      const R = d / 2 + 0.38;
       const hoops = new THREE.Group();
-      for (let i = 0; i < 4; i++) {
-        const hp = new THREE.Mesh(new THREE.TorusGeometry(R, 0.04, 6, 18, Math.PI), mat(STEEL));
+      for (let i = 0; i < 5; i++) {
+        const hp = new THREE.Mesh(new THREE.TorusGeometry(R, 0.05, 6, 18, Math.PI), mat(WHITE));
         hp.rotation.y = Math.PI / 2;
-        hp.position.x = -w / 2 + (i / 3) * w;
+        hp.position.x = -w / 2 + (i / 4) * w;
         hoops.add(hp);
       }
+      hoops.add(box(w, 0.06, 0.06, WHITE, 0, R, 0), box(w - 0.4, 0.05, 0.08, 0xffe9a0, 0, R - 0.1, 0));
+      const panel = group(box(1.0, 0.05, 0.7, 0x2d4a6e, 0, 0, 0), box(1.04, 0.03, 0.04, 0x9aa3aa, 0, 0.02, 0));
+      panel.position.set(w / 2 - 0.6, R + 0.12, -0.35);
+      panel.rotation.x = -0.4;
+      hoops.add(panel);
       g.add(mergeColored(hoops, 0.03));
-      const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(R, R, w + 0.1, 20, 1, true, -Math.PI / 2, Math.PI), mat(GLASS, { opacity: 0.26, double: true }));
+      const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(R, R, w + 0.1, 20, 1, true, -Math.PI / 2, Math.PI), mat(GLASS, { opacity: 0.24, double: true }));
       tunnel.rotation.z = Math.PI / 2;
       tunnel.castShadow = false;
       g.add(tunnel);

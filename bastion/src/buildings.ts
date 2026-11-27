@@ -12,7 +12,7 @@ import {
   torus, uniqueMat, type Profile,
 } from './kit';
 import { L } from './layout';
-import { concertina, crate, drum, gasBottle, sandbags, tarp } from './props';
+import { concertina, crate, drum, gasBottle, paintedBoard, sandbags, sheet, tarp } from './props';
 
 export interface Building {
   group: THREE.Group;
@@ -714,51 +714,123 @@ export function watchTower(scene: THREE.Scene, x: number = L.tower.x, z: number 
 const TEAL = 0x4f7f7a;
 const TEAL2 = 0x3f6662;
 
-export function shelter(): Building {
+/** Tente igloo de survie (profil de revolution). */
+const TENT_DOME: Profile = [[0, 0], [1.0, 0], [1.02, 0.05], [0.98, 0.4], [0.86, 0.75], [0.62, 1.05], [0.32, 1.25], [0, 1.3]];
+
+/**
+ * L'abri des survivants, en cinq aspects : tente de survie, cabane de bric et de broc,
+ * conteneur, conteneur amenage (auvent, panneau solaire), conteneurs empiles.
+ */
+export function shelter(stage = 4): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
   const g = new THREE.Group();
-  // Le conteneur repeint : caisson, toles ondulees, cadre d'acier.
-  g.add(group(
-    box(4.2, 2.3, 2.2, TEAL, 0, 1.15, 0),
-    corrugated(3.96, 2.1, 0x568883, 0, 1.15, 1.135, 18),
-    rot(corrugated(1.96, 2.1, TEAL, 2.135, 1.15, 0, 9), 0, Math.PI / 2), rot(corrugated(1.96, 2.1, TEAL, -2.135, 1.15, 0, 9), 0, Math.PI / 2),
-    ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.16, 2.36, 0.16, TEAL2, sx * 2.1, 1.18, sz * 1.1))),
-    box(4.36, 0.14, 0.16, TEAL2, 0, 0.07, 1.1), box(4.36, 0.16, 0.16, TEAL2, 0, 2.28, 1.1),
-    box(0.16, 0.16, 2.36, TEAL2, 2.1, 2.28, 0), box(0.16, 0.16, 2.36, TEAL2, -2.1, 2.28, 0),
-  ));
-  g.add(part(2.3, box(4.3, 0.1, 2.3, TEAL2, 0, 2.36, 0)));
-  // Une vraie porte de planches, une fenetre allumee avec volets et jardiniere.
-  g.add(plankDoor(1.0, 1.9, 0.9, 0.02, 1.2, C.wood));
   const wm = winMat();
-  const win = box(0.9, 0.6, 0.04, wm, -1.0, 1.5, 1.17);
-  g.add(win);
-  g.add(part(1.1,
-    windowFrame(0.9, 0.6, -1.0, 1.5, 1.19),
-    rot(plank(0.42, 0.66, 0.04, 0xb9874a, -1.75, 1.5, 1.3), 0, 0.5), rot(plank(0.42, 0.66, 0.04, 0xa8783e, -0.25, 1.5, 1.3), 0, -0.5),
-    flowerBox(0.9, -1.0, 1.04, 1.27),
-  ));
-  // L'auvent raye sur deux poteaux.
-  const awning = new THREE.Group();
-  for (let i = 0; i < 5; i++) {
-    const c = i % 2 ? CREAM : 0xc9573a;
-    awning.add(plank(0.52, 0.05, 1.35, c, -1.04 + i * 0.52, 0, 0), plank(0.52, 0.16, 0.04, c, -1.04 + i * 0.52, -0.09, 0.66));
+  let win: THREE.Mesh | null = null;
+  let win2: THREE.Mesh | null = null;
+  if (st === 1) {
+    // Deux tentes, une bache tendue entre elles, des couchages et un feu de camp eteint.
+    const tent = paint(lathe(TENT_DOME, C.white), 'tentdome', (_x, y, _z, out) => { out.setHex(y > 1.15 ? 0x5f6a3e : 0x7a8450); });
+    tent.scale.set(1.15, 1, 0.95);
+    tent.position.x = -0.9;
+    const tent2 = paint(lathe(TENT_DOME, C.white), 'tentdome2', (_x, y, _z, out) => { out.setHex(y > 1.15 ? 0x8a5a3a : 0xb07a48); });
+    tent2.scale.set(0.85, 0.85, 0.8);
+    tent2.position.set(1.3, 0, 0.1);
+    g.add(group(tent, tent2, box(0.5, 0.6, 0.05, 0x2b2b2b, -0.9, 0.3, 0.92), box(0.38, 0.45, 0.05, 0x2b2b2b, 1.3, 0.23, 0.75)));
+    const fly = tarp(2.2, 1.6, 0x4f7a8f, 0);
+    fly.position.set(0.2, 1.45, 0.6);
+    fly.rotation.x = 0.25;
+    g.add(fly, group(postPiece(1.5, 0.04, LOG3, -0.8, 1.3), postPiece(1.5, 0.04, LOG3, 1.2, 1.3)));
+    g.add(group(rot(rcyl(0.14, 0.14, 0.7, 0x5f9ad0, 0.06, -0.1, 0.14, 1.4), 0, 0, Math.PI / 2), rot(rcyl(0.14, 0.14, 0.7, 0xc9573a, 0.06, 0.6, 0.14, 1.6), 0, 0.4, Math.PI / 2)));
+    g.add(at(sandbags(1.4, 1, 31), -1.4, 0, -1.2));
+  } else if (st === 2) {
+    // Cabane de planches clouees, toit de toles rapiecees, une fenetre de fortune.
+    const walls = new THREE.Group();
+    for (let i = 0; i < 6; i++) {
+      walls.add(plank(3.8, 0.34, 0.1, [BOARD, BOARD2, BOARD3][i % 3]!, 0, 0.18 + i * 0.35, -1.0));
+      for (const s of [-1, 1]) walls.add(plank(0.1, 0.34, 2.0, [BOARD2, BOARD3, BOARD][i % 3]!, s * 1.85, 0.18 + i * 0.35, 0));
+      if (i < 2 || i > 3) walls.add(plank(3.8, 0.34, 0.1, [BOARD3, BOARD, BOARD2][i % 3]!, 0, 0.18 + i * 0.35, 1.0));
+      else walls.add(plank(1.6, 0.34, 0.1, BOARD3, -1.1, 0.18 + i * 0.35, 1.0), plank(1.2, 0.34, 0.1, BOARD2, 1.3, 0.18 + i * 0.35, 1.0));
+    }
+    g.add(walls);
+    win = box(0.8, 0.66, 0.04, wm, 0.1, 1.4, 1.0);
+    g.add(win);
+    const roof = tinRoof(4.2, 2.5, C.rust, 0x6a737b);
+    roof.position.y = 2.15;
+    roof.rotation.x = 0.1;
+    g.add(roof);
+    g.add(plankDoor(0.8, 1.6, -1.2, 0, 1.06, 0x5a4636));
+    g.add(at(crate(0.5), 2.3, 0, 0.8), at(drum(0x3f6a8a), 2.3, 0, -0.4));
+  } else {
+    // Le conteneur repeint : caisson, toles ondulees, cadre d'acier.
+    g.add(group(
+      box(4.2, 2.3, 2.2, TEAL, 0, 1.15, 0),
+      corrugated(3.96, 2.1, 0x568883, 0, 1.15, 1.135, 18),
+      rot(corrugated(1.96, 2.1, TEAL, 2.135, 1.15, 0, 9), 0, Math.PI / 2), rot(corrugated(1.96, 2.1, TEAL, -2.135, 1.15, 0, 9), 0, Math.PI / 2),
+      ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.16, 2.36, 0.16, TEAL2, sx * 2.1, 1.18, sz * 1.1))),
+      box(4.36, 0.14, 0.16, TEAL2, 0, 0.07, 1.1), box(4.36, 0.16, 0.16, TEAL2, 0, 2.28, 1.1),
+      box(0.16, 0.16, 2.36, TEAL2, 2.1, 2.28, 0), box(0.16, 0.16, 2.36, TEAL2, -2.1, 2.28, 0),
+    ));
+    g.add(part(2.3, box(4.3, 0.1, 2.3, TEAL2, 0, 2.36, 0)));
+    g.add(plankDoor(1.0, 1.9, 0.9, 0.02, 1.2, C.wood));
+    win = box(0.9, 0.6, 0.04, wm, -1.0, 1.5, 1.17);
+    g.add(win);
+    g.add(part(1.1,
+      windowFrame(0.9, 0.6, -1.0, 1.5, 1.19),
+      rot(plank(0.42, 0.66, 0.04, 0xb9874a, -1.75, 1.5, 1.3), 0, 0.5), rot(plank(0.42, 0.66, 0.04, 0xa8783e, -0.25, 1.5, 1.3), 0, -0.5),
+      ...(st >= 4 ? [flowerBox(0.9, -1.0, 1.04, 1.27)] : []),
+    ));
+    g.add(at(sandbags(1.4, 2, 31), -1.4, 0, 2.0));
+    if (st >= 4) {
+      // L'auvent raye sur deux poteaux.
+      const awning = new THREE.Group();
+      for (let i = 0; i < 5; i++) {
+        const c = i % 2 ? CREAM : 0xc9573a;
+        awning.add(plank(0.52, 0.05, 1.35, c, -1.04 + i * 0.52, 0, 0), plank(0.52, 0.16, 0.04, c, -1.04 + i * 0.52, -0.09, 0.66));
+      }
+      awning.position.set(-0.3, 2.1, 1.82);
+      awning.rotation.x = 0.22;
+      g.add(awning);
+      g.add(group(postPiece(1.96, 0.07, LOG, -1.5, 2.3), postPiece(1.96, 0.07, LOG2, 0.9, 2.3)));
+      g.add(at(crate(0.55), 2.5, 0, 0.9), at(crate(0.45, C.woodLight), 2.5, 0.55, 0.9, 0.4));
+    }
+    // Sur le toit (ou sur le conteneur du dessus) : panneau solaire, citerne, antenne.
+    const top = st === 5 ? 4.62 : 2.42;
+    if (st === 5) {
+      // Le deuxieme conteneur, couleur rouille, decale ; garde-corps et escalier.
+      g.add(part(2.42,
+        box(3.0, 2.1, 2.1, 0xb8673a, -0.55, 3.47, 0), corrugated(2.8, 1.9, 0xa85a30, -0.55, 3.47, 1.06, 13),
+        ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.14, 2.14, 0.14, 0x8a4a2a, -0.55 + sx * 1.45, 3.47, sz * 1.0))),
+        box(3.1, 0.1, 2.2, 0x8a4a2a, -0.55, 4.56, 0),
+      ));
+      win2 = box(0.8, 0.55, 0.04, wm, -1.1, 3.6, 1.08);
+      g.add(win2);
+      g.add(part(2.4, plankDoor(0.8, 1.7, 0.3, 2.42, 1.08, 0x5a4636)));
+      g.add(part(2.5,
+        ...[0, 1, 2, 3].map((i) => box(0.05, 0.8, 0.05, C.metal, 1.0 + i * 0.36, 2.82, 1.05)), box(1.15, 0.05, 0.05, C.metal, 1.55, 3.2, 1.05),
+        ...[0, 1, 2].map((i) => box(0.05, 0.8, 0.05, C.metal, 2.08, 2.82, -0.75 + i * 0.6)), box(0.05, 0.05, 2.0, C.metal, 2.08, 3.2, 0),
+      ));
+      // Escalier sur le cote, cinq marches.
+      g.add(group(...Array.from({ length: 6 }, (_, i) => plank(0.55, 0.06, 0.32, BOARD2, 2.55, 0.35 + i * 0.4, -0.9 + i * 0.32)),
+        rot(box(0.06, 2.9, 0.06, IRON, 2.85, 1.25, -0.1), -0.66, 0, 0)));
+      // Guirlande d'ampoules du toit jusqu'a l'antenne.
+      g.add(part(2.4, ...Array.from({ length: 7 }, (_, i) => sphere(0.05, 0xfff0c0, -2.0 + i * 0.6, 2.55 + 0.12 * Math.sin(i * 0.9), 1.15, 6))));
+    }
+    if (st >= 4) {
+      const solar = group(box(1.1, 0.06, 0.8, IRON, 0, 0, 0), plank(1.0, 0.04, 0.7, 0x2d4a6e, 0, 0.04, 0), box(0.04, 0.045, 0.7, 0x5a7aa0, 0, 0.05, 0));
+      solar.position.set(-0.9, top + 0.24, -0.25);
+      solar.rotation.x = 0.35;
+      g.add(solar);
+      g.add(part(top,
+        box(0.08, 0.3, 0.08, IRON, -0.9, top + 0.13, -0.55),
+        rcyl(0.35, 0.35, 0.6, 0x3f6a8a, 0.3, st === 5 ? -0.1 : 0.75, top + 0.29, -0.5), cyl(0.36, 0.36, 0.05, 0x2f5470, 8, st === 5 ? -0.1 : 0.75, top + 0.29, -0.5),
+        cyl(0.04, 0.04, 1.4, C.metal, 8, st === 5 ? 0.6 : 1.8, top + 0.58, -0.6), plank(0.6, 0.35, 0.04, 0xe8b84a, st === 5 ? 0.9 : 2.1, top + 1.08, -0.6),
+      ));
+      if (st === 5) g.add(part(top, rot(cyl(0.34, 0.08, 0.12, 0xd8d8d0, 10, -1.6, top + 0.4, 0.4), 0.9, 0, 0.3), cyl(0.03, 0.03, 0.4, C.metal, 6, -1.6, top + 0.2, 0.4)));
+    }
   }
-  awning.position.set(-0.3, 2.1, 1.82);
-  awning.rotation.x = 0.22;
-  g.add(awning);
-  g.add(group(postPiece(1.96, 0.07, LOG, -1.5, 2.3), postPiece(1.96, 0.07, LOG2, 0.9, 2.3)));
-  g.add(at(sandbags(1.4, 2, 31), -1.4, 0, 2.0));
-  // Sur le toit : panneau solaire, citerne, antenne et son panneau jaune.
-  const solar = group(box(1.1, 0.06, 0.8, IRON, 0, 0, 0), plank(1.0, 0.04, 0.7, 0x2d4a6e, 0, 0.04, 0), box(0.04, 0.045, 0.7, 0x5a7aa0, 0, 0.05, 0));
-  solar.position.set(-0.9, 2.66, -0.25);
-  solar.rotation.x = 0.35;
-  g.add(solar);
-  g.add(part(2.4,
-    box(0.08, 0.3, 0.08, IRON, -0.9, 2.55, -0.55),
-    rcyl(0.35, 0.35, 0.6, 0x3f6a8a, 0.3, 0.75, 2.71, -0.5), cyl(0.36, 0.36, 0.05, 0x2f5470, 8, 0.75, 2.71, -0.5),
-    cyl(0.04, 0.04, 1.4, C.metal, 8, 1.8, 3.0, -0.6), plank(0.6, 0.35, 0.04, 0xe8b84a, 2.1, 3.5, -0.6),
-  ));
-  g.add(at(crate(0.55), 2.5, 0, 0.9), at(crate(0.45, C.woodLight), 2.5, 0.55, 0.9, 0.4));
-  return { group: hidden(g, L.shelter.x, L.shelter.z, -0.5), glowMats: [wm], live: [win] };
+  const out = hidden(g, L.shelter.x, L.shelter.z, -0.5);
+  const lit = [win, win2].filter((x): x is THREE.Mesh => !!x);
+  return { group: out, glowMats: lit.length ? [wm] : [], live: lit };
 }
 
 // ---------------------------------------------------------------- le moulin
@@ -783,87 +855,172 @@ function millR(y: number): number {
   return 1.39;
 }
 
-/** Le moulin de la ferme : il moud le ble et un four accole en fait du pain. */
-export function windmill(): Building {
+/**
+ * Le moulin de la ferme, en cinq aspects : meule a bras, petit moulin de bois, moulin a vent,
+ * moulin de pierre a galerie, minoterie (ailes d'acier, silo a grain). Le four fait le pain.
+ */
+export function windmill(stage = 3): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
   const g = new THREE.Group();
-  const stone = new THREE.Color(C.stone);
-  const plaster = new THREE.Color(0xe6dccb);
-  const crown = new THREE.Color(C.woodDark);
-  const tower = paint(lathe(MILL, C.white), 'mill', (_x, y, _z, out) => { out.copy(y < 0.6 ? stone : y > 4.09 ? crown : plaster); });
-  const body = group(tower);
-  // Pierres apparentes dans l'enduit : quelques rapiecages.
-  for (const [a, y, r] of [[-0.5, 1.3, 0.2], [0.6, 2.2, 0.16], [-0.2, 3.3, 0.14], [1.2, 0.95, 0.18], [-1.1, 2.6, 0.15]] as const) {
-    const R = millR(y);
-    const b = blob(r, a > 0 ? C.stone : 0x85837b, Math.sin(a) * R, y, Math.cos(a) * R);
-    b.rotation.y = a;
-    b.scale.set(1.2, 0.8, 0.45);
-    body.add(b);
-  }
-  g.add(body);
-  g.add(part(4.24,
-    paint(lathe(MILL_CAP, C.white, 0, 4.24, 0), 'millcap', (_x, y, _z, out) => { out.setHex(y > 0.535 && y < 1.0 ? 0xa0573a : 0x8f4a2a); }),
-    cyl(0.04, 0.04, 0.4, IRON, 8, 0, 6.05, 0), sphere(0.08, 0xd9b44a, 0, 6.27, 0, 8),
-  ));
-  // La porte dans son encadrement de pierre, la fenetre allumee.
-  g.add(group(
-    plank(0.18, 1.55, 0.3, C.stone, -0.5, 0.775, 1.76), plank(0.18, 1.55, 0.3, 0x85837b, 0.5, 0.775, 1.76),
-    plank(1.18, 0.2, 0.32, C.stone, 0, 1.55, 1.75),
-    plankDoor(0.82, 1.43, 0, 0.02, 1.9, C.woodDark),
-  ));
-  const wm = winMat();
-  const wz = millR(2.8) + 0.02;
-  const win = box(0.42, 0.5, 0.05, wm, 0, 2.8, wz);
-  g.add(win);
-  g.add(part(2.5, windowFrame(0.42, 0.5, 0, 2.8, wz + 0.02)));
-  g.add(part(3.8, along(cyl(0.17, 0.17, 0.75, IRON, 8, 0, 4.0, 1.62), 'z')));
-  // Les ailes : longerons, cadres et toiles, fusionnes en un seul maillage qui tourne.
-  const arms = group(along(cyl(0.2, 0.2, 0.3, 0x3a3a3a, 8, 0, 0, 0), 'z'), sphere(0.13, 0x2c2e30, 0, 0, 0.17, 8));
-  for (let i = 0; i < 4; i++) {
-    const cloth = i % 2 ? 0xe8e0cc : C.canvas;
-    const arm = group(
-      plank(0.14, 3.2, 0.1, C.woodDark, 0, 1.7, 0),
-      plank(0.5, 2.5, 0.025, cloth, 0.36, 1.95, 0.04),
-      plank(0.045, 2.6, 0.05, BOARD2, 0.1, 1.95, 0.06), plank(0.045, 2.6, 0.05, BOARD2, 0.62, 1.95, 0.06),
-    );
-    for (let k = 0; k < 4; k++) arm.add(plank(0.6, 0.045, 0.05, BOARD2, 0.36, 0.75 + k * 0.8, 0.08));
-    if (i === 1) arm.add(plank(0.22, 0.3, 0.03, 0xc9573a, 0.42, 2.4, 0.06));
-    arm.rotation.z = (i * Math.PI) / 2;
-    arms.add(arm);
-  }
-  const hub = new THREE.Group();
-  hub.position.set(0, 4.0, 2.05);
-  hub.add(mergeColored(arms));
-  g.add(hub);
-  // Le four de brique en dome, sur un socle de pierre ; bois de chauffe, cheminee.
-  const dome = lathe(DOME, C.brick, 2.0, 0.34, 0.8);
-  dome.scale.set(1.1, 1, 0.92);
-  g.add(group(
-    plank(1.6, 0.36, 1.3, C.stone, 2.0, 0.18, 0.8),
-    dome,
-    plank(0.6, 0.1, 0.12, 0x8a4a32, 2.0, 0.72, 1.42), plank(0.1, 0.32, 0.12, 0x8a4a32, 1.74, 0.52, 1.42), plank(0.1, 0.32, 0.12, 0x8a4a32, 2.26, 0.52, 1.42),
-  ));
-  g.add(part(0.8, plank(0.3, 0.9, 0.3, 0x8a4a32, 2.35, 1.25, 0.5), plank(0.38, 0.08, 0.38, IRON, 2.35, 1.72, 0.5)));
   const fireMat = uniqueMat(0xff8a2a, 0xff5a10);
-  const fire = box(0.42, 0.3, 0.06, fireMat, 2.0, 0.52, 1.43);
+  const wm = winMat();
+  const live: THREE.Object3D[] = [];
+  let spin: (dt: number, busy: boolean) => void;
+  let fire: THREE.Mesh;
+  if (st === 1) {
+    // Meule a bras sous un appentis : souche, deux meules, manivelle ; four de pierres seches.
+    g.add(group(postPiece(1.9, 0.06, LOG3, -0.9, 0.9), postPiece(1.9, 0.06, LOG3, 0.9, 0.9), postPiece(1.3, 0.06, LOG3, -0.9, -0.9), postPiece(1.3, 0.06, LOG3, 0.9, -0.9)));
+    const t = tarp(2.3, 2.2, 0xb0905a, 0);
+    t.position.y = 1.62;
+    t.rotation.x = -0.28;
+    g.add(t);
+    g.add(group(rcyl(0.42, 0.48, 0.6, LOG, 0.06, 0, 0.3, 0), cyl(0.5, 0.5, 0.14, 0x8a8780, 12, 0, 0.67, 0)));
+    const quern = group(cyl(0.48, 0.48, 0.14, 0x9a9890, 12, 0, 0, 0), cyl(0.08, 0.08, 0.16, 0x3a3a3a, 8, 0, 0.02, 0), cyl(0.03, 0.03, 0.4, C.woodDark, 6, 0.34, 0.24, 0));
+    quern.position.y = 0.82;
+    g.add(quern);
+    live.push(quern);
+    spin = (dt, busy) => { quern.rotation.y += dt * (busy ? 2.4 : 0); };
+    const ov = new THREE.Group();
+    const r = rng(19);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      const b = blob(0.16, mixHex(0x8a8780, 0x6a6862, r()), 2.0 + Math.cos(a) * 0.45, 0.12 + (i % 2) * 0.16, 0.8 + Math.sin(a) * 0.4);
+      ov.add(b);
+    }
+    g.add(ov);
+    fire = cone(0.2, 0.36, fireMat, 6, 2.0, 0.26, 0.8);
+  } else {
+    // La tour : bois (petit moulin), enduit, pierre (galerie), pierre et acier (minoterie).
+    const k = st === 2 ? 0.62 : 1;
+    const stone = new THREE.Color(C.stone);
+    const stone2 = new THREE.Color(0x85837b);
+    const plaster = new THREE.Color(0xe6dccb);
+    const crown = new THREE.Color(C.woodDark);
+    const wood = new THREE.Color(BOARD2);
+    const wood2 = new THREE.Color(BOARD3);
+    const tower = paint(lathe(MILL, C.white), `mill${st}`, (_x, y, _z, out) => {
+      if (y > 4.09) out.copy(crown);
+      else if (st === 2) out.copy(Math.floor(y / 0.42) % 2 ? wood : wood2);
+      else if (st >= 4) out.copy(Math.floor(y / 0.38) % 2 ? stone : stone2);
+      else out.copy(y < 0.6 ? stone : plaster);
+    });
+    const body = group(tower);
+    if (st === 3) {
+      for (const [a, y, rr] of [[-0.5, 1.3, 0.2], [0.6, 2.2, 0.16], [-0.2, 3.3, 0.14], [1.2, 0.95, 0.18], [-1.1, 2.6, 0.15]] as const) {
+        const R = millR(y);
+        const b = blob(rr, a > 0 ? C.stone : 0x85837b, Math.sin(a) * R, y, Math.cos(a) * R);
+        b.rotation.y = a;
+        b.scale.set(1.2, 0.8, 0.45);
+        body.add(b);
+      }
+    }
+    body.scale.setScalar(k);
+    g.add(body);
+    const capC = st >= 4 ? [0xb8452f, 0xa03a28] : [0xa0573a, 0x8f4a2a];
+    const cap = part(4.24 * k,
+      paint(lathe(MILL_CAP, C.white, 0, 4.24 * k, 0), `millcap${st >= 4 ? 'r' : ''}`, (_x, y, _z, out) => { out.setHex(y > 0.535 && y < 1.0 ? capC[0]! : capC[1]!); }),
+      cyl(0.04, 0.04, 0.4, IRON, 8, 0, 4.24 * k + 1.81, 0), sphere(0.08, 0xd9b44a, 0, 4.24 * k + 2.03, 0, 8),
+    );
+    cap.scale.setScalar(k);
+    cap.position.y = 4.24 * k;
+    g.add(cap);
+    // Porte et fenetre allumee.
+    if (st === 2) {
+      g.add(plankDoor(0.62, 1.1, 0, 0.02, millR(0.6) * k + 0.05, C.woodDark));
+    } else {
+      g.add(group(
+        plank(0.18, 1.55, 0.3, C.stone, -0.5, 0.775, 1.76), plank(0.18, 1.55, 0.3, 0x85837b, 0.5, 0.775, 1.76),
+        plank(1.18, 0.2, 0.32, C.stone, 0, 1.55, 1.75),
+        plankDoor(0.82, 1.43, 0, 0.02, 1.9, C.woodDark),
+      ));
+    }
+    const wz = millR(2.8) * k + 0.02;
+    const win = box(0.42 * k, 0.5 * k, 0.05, wm, 0, 2.8 * k, wz);
+    g.add(win);
+    live.push(win);
+    g.add(part(2.5 * k, windowFrame(0.42 * k, 0.5 * k, 0, 2.8 * k, wz + 0.02)));
+    // Galerie de bois autour de la tour (pierre et minoterie).
+    if (st >= 4) {
+      const R = millR(2.3) + 0.55;
+      const gal = new THREE.Group();
+      gal.add(paint(lathe([[R - 0.6, 0], [R, 0], [R, 0.08], [R - 0.6, 0.08]], C.white, 0, 2.3, 0), 'gallery', (_x, _y, _z, out) => { out.setHex(BOARD2); }));
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        if (Math.abs(Math.sin(a)) < 0.25 && Math.cos(a) > 0) continue;
+        gal.add(box(0.06, 0.6, 0.06, C.woodDark, Math.sin(a) * R, 2.68, Math.cos(a) * R));
+      }
+      gal.add(paint(lathe([[R - 0.04, 0], [R + 0.04, 0], [R + 0.04, 0.06], [R - 0.04, 0.06]], C.white, 0, 2.96, 0), 'galrail', (_x, _y, _z, out) => { out.setHex(C.woodDark); }));
+      g.add(part(2.3, ...gal.children.slice()));
+    }
+    // Les ailes : toile (bois, enduit, pierre), panneaux d'acier (minoterie).
+    const sail = st === 5 ? 1.12 : st === 4 ? 1.1 : st === 2 ? 0.6 : 1;
+    const arms = group(along(cyl(0.2, 0.2, 0.3, 0x3a3a3a, 8, 0, 0, 0), 'z'), sphere(0.13, 0x2c2e30, 0, 0, 0.17, 8));
+    for (let i = 0; i < 4; i++) {
+      const cloth = st === 5 ? (i % 2 ? 0xaab3ba : 0x9aa3aa) : i % 2 ? 0xe8e0cc : C.canvas;
+      const spar = st === 5 ? STEEL : C.woodDark;
+      const arm = group(
+        plank(0.14, 3.2, 0.1, spar, 0, 1.7, 0),
+        plank(0.5, 2.5, 0.025, cloth, 0.36, 1.95, 0.04),
+        plank(0.045, 2.6, 0.05, st === 5 ? IRON : BOARD2, 0.1, 1.95, 0.06), plank(0.045, 2.6, 0.05, st === 5 ? IRON : BOARD2, 0.62, 1.95, 0.06),
+      );
+      for (let j = 0; j < 4; j++) arm.add(plank(0.6, 0.045, 0.05, st === 5 ? IRON : BOARD2, 0.36, 0.75 + j * 0.8, 0.08));
+      if (i === 1) arm.add(plank(0.22, 0.3, 0.03, st >= 4 ? 0xe8b84a : 0xc9573a, 0.42, 2.4, 0.06));
+      arm.rotation.z = (i * Math.PI) / 2;
+      arms.add(arm);
+    }
+    // Avec la galerie, l'arbre est plus long : les ailes passent devant elle.
+    const hz = st >= 4 ? 2.5 : 2.05;
+    g.add(part(3.8 * k, along(cyl(0.17 * k, 0.17 * k, (hz - 1.3) * k, IRON, 8, 0, 4.0 * k, ((hz + 1.25) / 2) * k), 'z')));
+    const hub = new THREE.Group();
+    hub.position.set(0, 4.0 * k, hz * k);
+    const m = mergeColored(arms);
+    m.scale.setScalar(sail);
+    hub.add(m);
+    g.add(hub);
+    live.push(hub);
+    spin = (dt, busy) => { hub.rotation.z -= dt * (busy ? 1.6 : 0.25); };
+    // Le four de brique en dome, sur un socle de pierre ; bois de chauffe, cheminee.
+    const dome = lathe(DOME, C.brick, 2.0, 0.34, 0.8);
+    dome.scale.set(1.1, 1, 0.92);
+    g.add(group(
+      plank(1.6, 0.36, 1.3, C.stone, 2.0, 0.18, 0.8),
+      dome,
+      plank(0.6, 0.1, 0.12, 0x8a4a32, 2.0, 0.72, 1.42), plank(0.1, 0.32, 0.12, 0x8a4a32, 1.74, 0.52, 1.42), plank(0.1, 0.32, 0.12, 0x8a4a32, 2.26, 0.52, 1.42),
+    ));
+    g.add(part(0.8, plank(0.3, 0.9, 0.3, 0x8a4a32, 2.35, 1.25, 0.5), plank(0.38, 0.08, 0.38, IRON, 2.35, 1.72, 0.5)));
+    fire = box(0.42, 0.3, 0.06, fireMat, 2.0, 0.52, 1.43);
+    g.add(group(
+      along(logPiece(0.5, 0.07, LOG, 2.55, 0.07, 1.6), 'x'), along(logPiece(0.5, 0.07, LOG2, 2.58, 0.07, 1.75), 'x'),
+      along(logPiece(0.5, 0.07, LOG3, 2.56, 0.2, 1.67), 'x'),
+    ));
+    if (st === 5) {
+      // Silo a grain d'acier, echelle, goulotte jusqu'a la tour ; fanion au sommet.
+      g.add(group(
+        rcyl(0.72, 0.72, 3.2, 0xb8c0c6, 0.08, -2.9, 1.6, -1.6),
+        ...[0.5, 1.3, 2.1, 2.9].map((y) => cyl(0.74, 0.74, 0.05, 0x8a939a, 14, -2.9, y, -1.6)),
+        cone(0.8, 0.6, 0x8a939a, 12, -2.9, 3.5, -1.6),
+        box(0.05, 3.3, 0.05, IRON, -2.14, 1.65, -1.48), box(0.05, 3.3, 0.05, IRON, -2.14, 1.65, -1.72),
+        rot(along(cyl(0.09, 0.09, 1.4, 0x8a939a, 8, -1.85, 3.15, -1.15), 'x'), 0, 0.5, 0.25),
+      ));
+      g.add(part(5.8, cyl(0.03, 0.03, 1.2, C.metal, 6, 0, 6.85, 0), plank(0.5, 0.3, 0.03, 0xc9412f, 0.26, 7.25, 0)));
+    }
+  }
   g.add(fire);
-  g.add(group(
-    along(logPiece(0.5, 0.07, LOG, 2.55, 0.07, 1.6), 'x'), along(logPiece(0.5, 0.07, LOG2, 2.58, 0.07, 1.75), 'x'),
-    along(logPiece(0.5, 0.07, LOG3, 2.56, 0.2, 1.67), 'x'),
-  ));
-  // Sacs de farine, gerbe de ble, caisse.
+  live.push(fire);
+  // Sacs de farine, gerbe de ble, caisse : la reserve grossit avec le moulin.
   const lying = lathe(SACK, 0xc9b48a, -1.9, 0.33, 0.3);
   lying.rotation.set(0, 0.4, Math.PI / 2);
-  g.add(group(
-    lathe(SACK, C.canvas, -2.2, 0, -0.4), lying,
-    rcyl(0.15, 0.2, 0.7, 0xd9b24a, 0.3, -2.4, 0.35, 0.75), cyl(0.16, 0.16, 0.06, 0xb08a3a, 8, -2.4, 0.4, 0.75),
-  ));
+  const sacks = group(lathe(SACK, C.canvas, -2.2, 0, -0.4), rcyl(0.15, 0.2, 0.7, 0xd9b24a, 0.3, -2.4, 0.35, 0.75), cyl(0.16, 0.16, 0.06, 0xb08a3a, 8, -2.4, 0.4, 0.75));
+  if (st >= 2) sacks.add(lying);
+  if (st >= 4) sacks.add(lathe(SACK, 0xd8c8a0, -2.75, 0, 0.1), lathe(SACK, C.canvas, -2.45, 0.6, -0.2), at(crate(0.5), -1.6, 0, -1.6));
+  g.add(sacks);
   g.add(at(crate(0.5, C.woodLight), -1.9, 0, 1.2));
   return {
     group: hidden(g, L.mill.x, L.mill.z),
     glowMats: [fireMat, wm],
-    live: [hub, fire, win],
+    live,
     anim: (dt, t, busy) => {
-      hub.rotation.z -= dt * (busy ? 1.6 : 0.25);
+      spin(dt, busy);
       fireMat.emissiveIntensity = busy ? 1 + Math.sin(t * 18) * 0.3 : 0.2;
     },
   };
@@ -1498,3 +1655,140 @@ export function towerSkin(g: THREE.Object3D, stage: number): void {
   m.userData.keep = true;
   g.add(m);
 }
+// ---------------------------------------------------------------- l'etal et la reserve (a niveaux)
+
+/**
+ * L'etal, encastre dans la palissade sud, en cinq aspects : caisses retournees, porte sur
+ * des futs, comptoir de planches et fanions, echoppe peinte a enseigne, marche couvert
+ * d'acier et d'ampoules. Le plateau reste a 1 m (les bacs y sont poses) et rien ne passe
+ * au-dessus du comptoir : la camera voit tout ce qu'on y pose.
+ */
+export function stallStand(stage = 2): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
+  const { x, z, w: W } = L.stall;
+  const g = new THREE.Group();
+  const tones = [0xc8a878, 0xbd9c6a, 0xd0b285];
+  const hw = W / 2;
+  if (st === 1) {
+    // Des caisses alignees, deux planches brutes posees dessus.
+    const n = 7;
+    for (let i = 0; i < n; i++) g.add(at(crate(0.92, [C.wood, C.woodLight, 0x9c6a3e][i % 3]!), -hw + 0.5 + i * ((W - 1.0) / (n - 1)), 0, 0, (i % 2 ? 0.06 : -0.05)));
+    g.add(plank(W - 0.2, 0.08, 0.5, tones[0]!, 0, 0.97, -0.24), plank(W - 0.3, 0.08, 0.46, tones[1]!, 0, 0.97, 0.26));
+  } else if (st === 2) {
+    // Un long plateau sur trois futs, tole de facade.
+    for (const sx of [-1, 0, 1]) g.add(at(drum([0x3f6a8a, 0x6f7a4a, 0x8a3f30][sx + 1]!), sx * (hw - 0.5), 0, 0.05));
+    for (let i = 0; i < 3; i++) g.add(plank(W - 0.1, 0.1, 0.33, tones[i]!, 0, 1.0, (i - 1) * 0.335));
+    g.add(plank(W - 0.2, 0.05, 0.12, 0x8a6a48, 0, 1.06, 0.45));
+    const front = sheet(W - 0.3, 0.85, 0x5f8a85);
+    front.position.set(0, 0.05, 0.42);
+    g.add(front);
+  } else {
+    // Comptoir de planches : caisson, facade de planches verticales (peinte a partir de l'echoppe).
+    const face = st === 3 ? [BOARD, BOARD2, BOARD3] : st === 4 ? [0x4f8a8a, CREAM, 0x5a9696] : [0xc9412f, CREAM, 0xb83a2a];
+    g.add(plank(W - 0.2, 0.9, 0.9, C.woodDark, 0, 0.45, 0));
+    const nb = Math.round((W - 0.2) / 0.36);
+    for (let i = 0; i < nb; i++) g.add(plank((W - 0.2) / nb - 0.02, 0.86, 0.05, face[i % 3]!, -hw + 0.1 + (i + 0.5) * ((W - 0.2) / nb), 0.45, 0.47));
+    for (let i = 0; i < 3; i++) g.add(plank(W - 0.1, 0.1, 0.33, st === 5 ? [0xb8b0a0, 0xc8c0b0, 0xaca494][i]! : tones[i]!, 0, 1.0, (i - 1) * 0.335));
+    g.add(plank(W, 0.06, 0.1, st === 5 ? STEEL : 0x8a6a48, 0, 1.06, 0.47));
+    // Poteaux aux deux bouts, et ce qui pend entre eux (fanions, enseigne, ampoules).
+    const postC = st === 5 ? STEEL : st === 4 ? 0x3f6662 : LOG;
+    const PH = st === 3 ? 2.4 : 2.9;
+    for (const s of [-1, 1]) {
+      if (st === 5) g.add(box(0.14, PH, 0.14, postC, s * (hw + 0.1), PH / 2, -0.35), box(0.14, PH, 0.14, postC, s * (hw + 0.1), PH / 2, 0.35));
+      else g.add(postPiece(PH, 0.09, postC, s * (hw + 0.1), -0.35));
+    }
+    if (st === 3) {
+      const flags = [0xd9584a, 0xf2c94c, 0x5f9ad0, 0x8cae4f];
+      const bunting = new THREE.Group();
+      for (let i = 0; i < 16; i++) {
+        const fx = -hw + 0.3 + i * ((W - 0.6) / 15);
+        const sag = 0.35 * (1 - (fx / hw) ** 2);
+        bunting.add(rot(plank(0.2, 0.24, 0.02, flags[i % 4]!, fx, 2.2 - sag, -0.35), 0, 0, i % 2 ? 0.1 : -0.1));
+      }
+      bunting.add(along(cyl(0.008, 0.008, W + 0.2, 0xe8e2d0, 4, 0, 2.3, -0.35), 'x'));
+      g.add(part(1.8, ...bunting.children.slice()));
+      g.add(part(1.6, ...[-1, 1].map((s) => rcyl(0.09, 0.09, 0.2, 0xf2c94c, 0.04, s * (hw - 0.3), 1.85, -0.35))));
+    } else {
+      // Enseigne en haut, a l'arriere : grande planche, bande de couleur, pieces peintes.
+      const board = st === 4 ? 0xeee2c6 : 0xffffff;
+      const band = st === 4 ? 0x4f8a8a : 0xc9412f;
+      g.add(part(2.4,
+        plank(W + 0.3, 0.5, 0.08, board, 0, PH - 0.3, -0.4), plank(W + 0.3, 0.1, 0.09, band, 0, PH - 0.5, -0.4),
+        plank(W + 0.4, 0.08, 0.14, postC, 0, PH - 0.02, -0.4),
+        ...[-2, -1, 0, 1, 2].map((i) => cyl(0.14, 0.14, 0.03, 0xf2c94c, 12, i * 0.9, PH - 0.28, -0.35)).map((c) => rot(c, Math.PI / 2, 0, 0)),
+      ));
+      // Etageres de bocaux et pots de fleurs aux deux bouts.
+      for (const s of [-1, 1]) {
+        g.add(group(
+          plank(0.5, 0.05, 0.4, BOARD2, s * (hw + 0.45), 0.7, -0.1), plank(0.5, 0.05, 0.4, BOARD3, s * (hw + 0.45), 1.25, -0.1),
+          box(0.05, 1.3, 0.05, C.woodDark, s * (hw + 0.68), 0.65, -0.28), box(0.05, 1.3, 0.05, C.woodDark, s * (hw + 0.22), 0.65, -0.28),
+          ...[0, 1].map((k) => rcyl(0.07, 0.07, 0.18, [0xd9584a, 0xe8b84a][k]!, 0.03, s * (hw + 0.35 + k * 0.2), 0.82, -0.1)),
+          ...[0, 1].map((k) => rcyl(0.06, 0.06, 0.16, [0x8cae4f, 0xe08a3a][k]!, 0.03, s * (hw + 0.35 + k * 0.2), 1.36, -0.1)),
+          rcyl(0.16, 0.12, 0.24, 0xb0603a, 0.04, s * (hw + 0.45), 0.12, 0.3), puff(0.2, C.leafLight, s * (hw + 0.45), 0.38, 0.3),
+        ));
+      }
+      if (st === 5) {
+        // Guirlande d'ampoules sous l'enseigne, glaciere au bout.
+        g.add(part(2.3, ...Array.from({ length: 12 }, (_, i) => {
+          const bx = -hw + 0.3 + i * ((W - 0.6) / 11);
+          return sphere(0.06, 0xfff0c0, bx, PH - 0.75 - 0.15 * (1 - (bx / hw) ** 2), -0.32, 6);
+        })));
+        g.add(group(rbox(0.6, 0.5, 0.4, 0x3f78a8, 0.06, hw + 0.45, 0.25, -0.75), box(0.62, 0.08, 0.42, CREAM, hw + 0.45, 0.48, -0.75)));
+      }
+    }
+  }
+  // Enseigne peinte, cote route, au bout du comptoir.
+  if (st >= 2) g.add(at(paintedBoard('coin'), hw + (st >= 4 ? 1.0 : 0.5), 0, 0.95, -0.15));
+  g.position.set(x, 0, z);
+  shadow(g);
+  return { group: g };
+}
+
+/**
+ * Autour du coffre de la reserve, en cinq aspects : bache et sacs, futs et caisse, etageres,
+ * appentis de bois, conteneur de stockage. Rien devant le coffre (on s'y sert) ni au-dessus.
+ */
+export function reserveDeco(stage: number): THREE.Group {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
+  const g = new THREE.Group();
+  g.name = 'reserve-deco';
+  if (st === 1) {
+    const t = box(2.6, 0.03, 1.9, 0x4f7a8f, 0, 0.015, -0.3);
+    t.rotation.y = 0.08;
+    g.add(t, lathe(SACK, C.canvas, -1.25, 0, -0.9), lathe(SACK, 0xc9b48a, 1.2, 0, -0.95));
+  }
+  if (st >= 2) g.add(at(drum(0x8a3f30), -1.35, 0, -0.6), at(crate(0.55, C.woodLight), 1.3, 0, -0.55, 0.3));
+  if (st >= 3) {
+    // Etageres derriere le coffre (le couvercle s'ouvre devant elles).
+    const sh = new THREE.Group();
+    for (const sx of [-1, 1]) sh.add(box(0.07, 1.9, 0.07, C.woodDark, sx * 1.2, 0.95, -1.35), box(0.07, 1.9, 0.07, C.woodDark, sx * 1.2, 0.95, -1.75));
+    for (const y of [0.5, 1.15, 1.8]) sh.add(plank(2.5, 0.05, 0.5, BOARD2, 0, y, -1.55));
+    for (let i = 0; i < 4; i++) sh.add(at(crate(0.4, [C.wood, C.woodLight][i % 2]!), -0.85 + i * 0.56, 0.53, -1.55, i * 0.2));
+    for (let i = 0; i < 5; i++) sh.add(rcyl(0.09, 0.09, 0.24, [0xd9584a, 0xe8b84a, 0x8cae4f, 0x5f9ad0, 0xe08a3a][i]!, 0.03, -0.95 + i * 0.48, 1.3, -1.55));
+    g.add(sh);
+  }
+  if (st === 4) {
+    // Appentis : mur de planches au fond, toit de tole qui descend vers l'arriere.
+    const lean = new THREE.Group();
+    for (let i = 0; i < 6; i++) lean.add(plank(2.9, 0.34, 0.08, [BOARD, BOARD2, BOARD3][i % 3]!, 0, 0.18 + i * 0.35, -1.95));
+    for (const sx of [-1, 1]) lean.add(postPiece(2.4, 0.07, LOG2, sx * 1.42, -1.1));
+    const roof = tinRoof(3.2, 1.3, C.rust, 0x9c4a3c);
+    roof.position.set(0, 2.35, -1.55);
+    roof.rotation.x = -0.25;
+    lean.add(roof);
+    g.add(lean);
+  }
+  if (st === 5) {
+    // Conteneur de stockage, porte roulante ouverte ; diable et caisses empilees a cote.
+    g.add(group(
+      box(3.0, 2.2, 1.2, 0x5f6a3e, 0, 1.1, -2.1), corrugated(2.9, 2.0, 0x6a754a, 0, 1.1, -1.48, 13),
+      box(3.04, 0.12, 1.24, 0x4a5430, 0, 2.24, -2.1),
+    ));
+    g.add(at(crate(0.55), 1.85, 0, -1.0), at(crate(0.5, C.woodLight), 1.85, 0.55, -1.0, 0.3), at(crate(0.55), -1.9, 0, -1.2, 0.2));
+    g.add(group(box(0.05, 1.0, 0.05, C.metal, -1.6, 0.5, -0.3), box(0.05, 1.0, 0.05, C.metal, -1.35, 0.5, -0.3), box(0.35, 0.05, 0.3, C.metal, -1.48, 0.03, -0.15),
+      rot(cyl(0.1, 0.1, 0.05, 0x2b2b2b, 10, -1.65, 0.1, -0.35), 0, 0, Math.PI / 2), rot(cyl(0.1, 0.1, 0.05, 0x2b2b2b, 10, -1.3, 0.1, -0.35), 0, 0, Math.PI / 2)));
+  }
+  shadow(g);
+  return g;
+}
+

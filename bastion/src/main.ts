@@ -5,11 +5,13 @@ import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
 import {
-  BDEFS, BMAX, WEAPON_NEED, bCost, bdef, bonusText, capOf, doubleOf, extraOf, growOf, huntBonusOf, needOf, speedOf, stageName, stageOf, wCost,
+  BDEFS, BMAX, WEAPON_NEED, awayOf, bCost, bdef, bonusText, capOf, cashCapOf, crewOf, doubleOf, extraOf, growOf, huntBonusOf, needOf, resCapOf, sellOf,
+  speedOf, stageName, stageOf, wCost,
   type BDef,
 } from './blevels';
 import {
-  Bus, armory, cabin, dock, foundry, infirmary, kitchen, quarryShed, sawmill, shelter, towerSkin, warehouse, watchTower, windmill, workbench,
+  Bus, armory, cabin, dock, foundry, infirmary, kitchen, quarryShed, reserveDeco, sawmill, shelter, stallStand, towerSkin, warehouse, watchTower, windmill,
+  workbench,
   type Building,
 } from './buildings';
 import { Flyers, Particles, Tracers } from './fx';
@@ -145,6 +147,8 @@ const tower = watchTower(scene);
 const B: Record<string, Building> = {
   bench: workbench(), sawmill: sawmill(), kitchen: kitchen(), shelter: shelter(), mill: windmill(), dock: dock(),
   quarry: quarryShed(), foundry: foundry(),
+  // L'etal (toujours la, encastre dans la palissade sud) : son aspect suit son niveau.
+  stall: stallStand(),
 };
 for (const b of Object.values(B)) scene.add(b.group);
 B.tower = tower;
@@ -358,6 +362,16 @@ if (!save.seen.includes('blv-v1')) {
   up('kitchen', 1 + Math.round((old.cook ?? 0) * 0.5) + 2 * ((save.bt.kitchen ?? 1) - 1));
   up('armory', Math.max(1 + save.up.gun, save.weapons.includes('crossbow') ? 5 : save.weapons.includes('shotgun') ? 3 : 1));
   save.wlv.rifle = Math.max(save.wlv.rifle ?? 1, Math.min(BMAX, 1 + 2 * save.up.gun));
+}
+// Lot 2 : etal, reserve, moulin et abri quittent l'etabli (niveaux et paliers en dur repris).
+if (!save.seen.includes('blv-v2')) {
+  save.seen.push('blv-v2');
+  const old = save.lv;
+  const up = (id: string, n: number) => { save.blv[id] = Math.max(save.blv[id] ?? 1, Math.max(1, Math.min(BMAX, n))); };
+  up('stall', 1 + Math.round((old.stall ?? 0) * 0.6));
+  up('reserve', 1 + Math.round((old.reserve ?? 0) * 0.6) + ((save.bt.shelter ?? 1) - 1));
+  up('mill', 1 + Math.round((old.mill ?? 0) * 0.5) + 2 * ((save.bt.mill ?? 1) - 1));
+  up('shelter', 1 + 2 * ((save.bt.shelter ?? 1) - 1));
 }
 
 // ---------------------------------------------------------------- zones a debloquer
@@ -1788,7 +1802,7 @@ function renderSheet(): void {
     </div>`;
   }).join('');
   const scroll = ui.sheetBody.scrollTop;
-  ui.sheetBody.innerHTML = `<p class="note">⬆️ Potagers, champs, scierie, cuisine et armurerie s’améliorent eux-mêmes : arrête-toi sur la flèche ⬆️ devant eux.</p>`
+  ui.sheetBody.innerHTML = `<p class="note">⬆️ Potagers, champs, scierie, cuisine, moulin, étal, abri et armurerie s’améliorent eux-mêmes : arrête-toi sur la flèche ⬆️ devant eux. La réserve, dans son panneau.</p>`
     + `<h2>🧱 Matériaux</h2>${materialCards()}<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + BENCH_UPS.map((u) => {
     const lvl = save.up[u.id];
     const max = lvl >= u.costs.length;
@@ -1811,6 +1825,8 @@ const RES_ORDER: ItemType[] = ['log', 'plank', 'scrap', 'stone', 'metal', 'fuel'
 let resKey = '';
 /** Types deja affiches depuis l'ouverture, dans l'ordre d'apparition (on ajoute a la fin seulement). */
 let resShown: ItemType[] = [];
+/** Cle de la carte d'amelioration affichee en haut de la reserve. */
+let resBldKey = '';
 
 function resButton(t: ItemType): HTMLButtonElement {
   const b = document.createElement('button');
@@ -1825,7 +1841,8 @@ function renderReserve(): void {
     // Construit une seule fois par ouverture ; ensuite tout se met a jour en place.
     resKey = 'built';
     resShown = [];
-    ui.sheetBody.innerHTML = `<h2>📦 Réserve <span class="lv" data-res-total></span></h2>
+    resBldKey = '';
+    ui.sheetBody.innerHTML = `<div data-res-bld></div><h2>📦 Réserve <span class="lv" data-res-total></span></h2>
       <p class="note" data-res-bag></p>
       <p class="note" data-res-empty>Vide pour l'instant : tes survivants y déposent ce qu'ils récoltent.</p>
       <div class="res-grid"></div>
@@ -1833,6 +1850,14 @@ function renderReserve(): void {
   }
   const grid = ui.sheetBody.querySelector<HTMLElement>('.res-grid');
   if (!grid) return;
+  // La carte d'amelioration de la reserve, reconstruite seulement quand elle change.
+  const bk = bldKeyOf('reserve');
+  const host = ui.sheetBody.querySelector<HTMLElement>('[data-res-bld]');
+  if (host && bk !== resBldKey) {
+    resBldKey = bk;
+    host.innerHTML = bldCard('reserve');
+  }
+  refreshBldButtons();
   const need = neededNow();
   for (const t of RES_ORDER) {
     if ((reserve.counts.get(t) ?? 0) > 0 && !resShown.includes(t)) {
@@ -2137,10 +2162,11 @@ const dayKey = () => todayKey(new Date(nowT()));
  * Ce que rapporte une vente : niveau de l'etal, survivants sauves (+4 % chacun, jusqu'a +40 %),
  * reclame en ville (contrat), renommee (convois) et boost « ventes x2 ».
  */
-const sellMul = () => (1 + 0.05 * lv('stall') + Math.min(0.4, 0.04 * save.rescued) + 0.08 * ct('reclame') + 0.03 * save.renown)
+const sellMul = () => (1 + sellOf(blvOf('stall')) + Math.min(0.4, 0.04 * save.rescued) + 0.08 * ct('reclame') + 0.03 * save.renown)
   * (boostOn('sell') ? 2 : 1);
 /** Vitesse des survivants (contrat « equipe aguerrie »). */
-const crewMul = () => 1 + 0.12 * ct('crew');
+/** Vitesse des survivants : contrat « equipe aguerrie » et niveau de l'abri. */
+const crewMul = () => (1 + 0.12 * ct('crew')) * (isBuilt('shelter') ? crewOf(blvOf('shelter')) : 1);
 
 /** Applique niveaux et boosts aux machines, cultures, reserve et au joueur (chaque image). */
 function applyMeta(dt: number): void {
@@ -2159,9 +2185,10 @@ function applyMeta(dt: number): void {
   cook.speed = speedOf(blvOf('kitchen')) * grow;
   saw.extra = extraOf(blvOf('sawmill'));
   cook.extra = extraOf(blvOf('kitchen'));
-  mill.speed = (1 + 0.15 * lv('mill')) * grow * tierK('mill');
+  mill.speed = speedOf(blvOf('mill')) * grow;
+  mill.extra = extraOf(blvOf('mill'));
   forge.speed = grow * tierK('foundry');
-  reserve.cap = 240 + 60 * lv('reserve') + 120 * (bt('shelter') - 1) + (isBuilt('warehouse') ? 200 : 0);
+  reserve.cap = resCapOf(blvOf('reserve')) + (isBuilt('warehouse') ? 200 : 0);
   player.speedMul = (1 + 0.12 * save.up.boots) * (boostOn('speed') ? 1.4 : 1);
 }
 
@@ -2648,8 +2675,6 @@ const BT_NAMES = ['Bois', 'Pierre', 'Métal'];
 /** Batiments qu'on peut construire en dur, et leur « poids » dans le cout. */
 const TIERABLE: { id: string; name: string; icon: string; w: number }[] = [
   { id: 'tower', name: 'Tour de guet', icon: '🗼', w: 1.4 },
-  { id: 'shelter', name: 'Abri', icon: '🏠', w: 1.5 },
-  { id: 'mill', name: 'Moulin', icon: '🍞', w: 1.6 },
   { id: 'foundry', name: 'Fonderie', icon: '🔥', w: 1.8 },
 ];
 const WALL_COSTS: Cost[] = [
@@ -2797,18 +2822,23 @@ function applyBuildingTier(id: string): void {
 
 // ---------------------------------------------------------------- batiments a niveaux : on les touche pour les ameliorer
 
+/** Obstacles poses quand la reserve ou le moulin grandissent (une seule fois). */
+let resSolid: { x: number; z: number; r: number } | null = null;
+let siloSolid: { x: number; z: number; r: number } | null = null;
 /** Les potagers et champs, dans l'ordre du tableau `beds`. */
 const bedOfId = (id: string): Bed | undefined => {
   const i = (BED_IDS as readonly string[]).indexOf(id);
   return i >= 0 ? beds[i] : undefined;
 };
-const bBuilt = (id: string) => id === 'bed1' || isBuilt(id);
+/** Le premier potager, l'etal et la reserve sont la des le depart. */
+const bBuilt = (id: string) => id === 'bed1' || id === 'stall' || id === 'reserve' || isBuilt(id);
 const armoryExt = () => EXT.find((e) => e.id === 'armory')!;
 
 function bPos(id: string): { x: number; z: number } {
   const bed = bedOfId(id);
   if (bed) return bed.group.position;
   if (id === 'armory') return armoryExt();
+  if (id === 'reserve') return L.chest;
   return B[id]!.group.position;
 }
 
@@ -2850,8 +2880,31 @@ function applyLook(id: string, animate: boolean): void {
     if (animate && before !== st) restorer.run(null, bed.decoGroup);
     return;
   }
-  if (id !== 'sawmill' && id !== 'kitchen' && id !== 'armory') return;
-  const nb = id === 'sawmill' ? sawmill(st) : id === 'kitchen' ? kitchen(st) : armory(0, 0, st, save.weapons);
+  if (id === 'reserve') {
+    // La reserve : le coffre reste, son decor change autour (rien devant ni au-dessus).
+    const old = reserve.root.getObjectByName('reserve-deco');
+    if (old) reserve.root.remove(old);
+    const deco = reserveDeco(st);
+    reserve.root.add(deco);
+    if (animate) restorer.run(null, deco, () => consolidate(deco));
+    else consolidate(deco);
+    // Appentis et conteneur : un obstacle derriere le coffre.
+    if (st >= 4 && !resSolid) {
+      resSolid = { x: L.chest.x, z: L.chest.z - 1.9, r: 1.1 };
+      world.solids.push(resSolid);
+    }
+    return;
+  }
+  if (id === 'mill' && st === 5 && !siloSolid) {
+    siloSolid = { x: L.mill.x - 2.9, z: L.mill.z - 1.6, r: 0.8 };
+    world.solids.push(siloSolid);
+  }
+  const make: Record<string, () => Building> = {
+    sawmill: () => sawmill(st), kitchen: () => kitchen(st), armory: () => armory(0, 0, st, save.weapons),
+    mill: () => windmill(st), shelter: () => shelter(st), stall: () => stallStand(st),
+  };
+  if (!make[id]) return;
+  const nb = make[id]!();
   const target = id === 'armory' ? armoryExt().group : B[id]!.group;
   restorer.cancel(target);
   for (const c of [...target.children]) {
@@ -2883,6 +2936,7 @@ function bLevelUp(id: string): void {
   buzz(newLook ? 60 : 30);
   bldKey = '';
   huntKey = '';
+  resBldKey = '';
   persist();
 }
 
@@ -2991,9 +3045,9 @@ function weaponsHtml(): string {
 /** Ouvre le panneau d'un batiment (toucher, ou badge ⬆️). */
 function openBld(id: string): void {
   tapFrom.copy(player.position);
-  if (id === 'armory') {
-    tapPanel = 'hunters';
-    setPanel('hunters');
+  if (id === 'armory' || id === 'reserve') {
+    tapPanel = id === 'armory' ? 'hunters' : 'reserve';
+    setPanel(tapPanel);
     return;
   }
   tapPanel = 'bld';
@@ -3078,8 +3132,10 @@ ui.sheetBody.addEventListener('click', (e) => {
     huntKey = '';
     persist();
   }
+  resBldKey = '';
   if (panel === 'hunters') renderHunters();
   else if (panel === 'bld') renderBld();
+  else if (panel === 'reserve') renderReserve();
 });
 
 // ---- les badges ⬆️ au-dessus des batiments qu'on peut ameliorer
@@ -3114,7 +3170,7 @@ function placeBldBadges(): void {
       labels.appendChild(el);
       bldBadges.set(id, el);
     }
-    const open = (panel === 'bld' && bldId === id) || (panel === 'hunters' && id === 'armory');
+    const open = (panel === 'bld' && bldId === id) || (panel === 'hunters' && id === 'armory') || (panel === 'reserve' && id === 'reserve');
     if (open) {
       el.classList.add('off');
       continue;
@@ -3122,7 +3178,7 @@ function placeBldBadges(): void {
     const p = bPos(id);
     const s = bState(id);
     el.classList.toggle('look', !s.max && stageOf(s.next) !== stageOf(s.lv));
-    placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') ? 1.3 : id === 'armory' ? 3.6 : 3.2, p.z);
+    placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') ? 1.3 : id === 'mill' ? 7.0 : id === 'reserve' || id === 'stall' ? 2.4 : id === 'armory' ? 3.6 : 3.2, p.z);
   }
 }
 
@@ -3133,6 +3189,7 @@ const UP_AT: Record<string, { x: number; z: number }> = {
   bed1: { x: -7.85, z: -9.5 }, bed2: L.pads.bed2, bed3: L.pads.bed3, bed4: L.pads.bed4,
   field1: L.pads.field1, field2: L.pads.field2, field3: L.pads.field3,
   sawmill: { x: 9.6, z: -8.6 }, kitchen: L.pads.kitchen,
+  mill: L.pads.mill, shelter: L.pads.shelter, stall: { x: 10.2, z: 9.6 },
 };
 const UP_RING = new THREE.RingGeometry(0.82, 1.02, 40);
 /** Une fleche couchee au sol, pointe vers le haut de l'ecran. */
@@ -4306,7 +4363,7 @@ function showVictory(): void {
  * contremaitre), absence comptee 1 h (+30 min par niveau, entrepot, relais radio, reserve),
  * et un plafond de pieces de l'ordre de 6 a 10 minutes de jeu actif.
  */
-const maxAway = () => Math.min(12 * 3600, (1 + 0.5 * lv('foreman') + (isBuilt('warehouse') ? 1 : 0) + ct('radio')) * 3600 + 900 * lv('reserve'));
+const maxAway = () => Math.min(12 * 3600, (1 + 0.5 * lv('foreman') + (isBuilt('warehouse') ? 1 : 0) + ct('radio')) * 3600 + awayOf(blvOf('reserve')));
 const offlineEff = () => 0.15 + 0.015 * lv('foreman');
 const offlineCoinCap = () => Math.round((packCoins() * 1.5 * (1 + 0.1 * lv('foreman'))) / 10) * 10;
 
@@ -4346,7 +4403,7 @@ function offlineGains(): void {
       wheatShare: fieldW / Math.max(1, fieldW + unlocked.filter((b) => b.kind !== 'wheat').length),
       conv: { saw: saw.built, cook: cook.built, mill: mill.built, forge: forge.built },
       bins, sellMul: sellMul() / (boostOn('sell') ? 2 : 1), crewMul: crewMul(),
-      cashCap: 250 + 50 * lv('stall'), reserveRoom: Math.max(0, reserve.cap - reserve.total),
+      cashCap: cashCapOf(blvOf('stall')), reserveRoom: Math.max(0, reserve.cap - reserve.total),
       // Un rapport pas encore encaisse compte deja dans le plafond : les bacs ne se vident pas pour rien.
       coinCap: Math.max(0, offlineCoinCap() - (save.pendingOffline?.coins ?? 0)), itemCap: 40 + 8 * lv('foreman'),
       cycleLen: save.cycle ? dayLen(save.day) + nightLen(save.day) : 0,

@@ -12,7 +12,7 @@ import type { Profile } from './kit';
 import { CAMP, FARM, FARM_EAST_GATE, L, POND, ROAD_Z, STATION, insideCamp } from './layout';
 import type { Circle, Segment } from './physics';
 import {
-  crate, drum, floodlight, hedgehog, jersey, paintedBoard, roofSheet, sandbags, sheet,
+  crate, drum, floodlight, hedgehog, jersey, roofSheet, sandbags,
   tire, tireStack, wreck,
 } from './props';
 import { boulder, bush, deadTree, leafy, pine } from './flora';
@@ -74,7 +74,6 @@ export function buildWorld(scene: THREE.Scene): World {
 
   ground(scene, r);
   road(scene, r);
-  stall(scene);
   campfire(scene, w, L.campfire.x, L.campfire.z);
   seats(scene, w);
   workLight(scene, w);
@@ -596,28 +595,6 @@ function flameMesh(): THREE.Mesh {
 const ember = (): THREE.MeshLambertMaterial => mat(0x4a2412, { emissive: 0x7a2a0a });
 
 // ---------------------------------------------------------------- camp
-
-/**
- * L'etal, encastre dans la palissade sud : une porte posee sur deux futs.
- * Rien au-dessus du comptoir : la camera voit tout ce qu'on y pose.
- */
-function stall(scene: THREE.Scene): void {
-  const { x, z, w: W } = L.stall;
-  const g = new THREE.Group();
-  // Un long plateau sur trois futs : il porte les bacs (stations.ts, Bins).
-  for (const sx of [-1, 0, 1]) g.add(at(drum([0x3f6a8a, 0x6f7a4a, 0x8a3f30][sx + 1]!), sx * (W / 2 - 0.5), 0, 0.05));
-  // Plateau en trois planches de teintes voisines.
-  const tones = [0xc8a878, 0xbd9c6a, 0xd0b285];
-  for (let i = 0; i < 3; i++) g.add(plank(W - 0.1, 0.1, 0.33, tones[i]!, 0, 1.0, (i - 1) * 0.335));
-  g.add(plank(W - 0.2, 0.05, 0.12, 0x8a6a48, 0, 1.06, 0.45));
-  // Devant, cote route : une tole de facade.
-  const front = sheet(W - 0.3, 0.85, 0x5f8a85);
-  front.position.set(0, 0.05, 0.42);
-  g.add(front);
-  // Enseigne peinte, cote route, au bout du comptoir.
-  g.add(at(paintedBoard('coin'), W / 2 + 0.5, 0, 0.95, -0.15));
-  scene.add(shadow(at(g, x, 0, z)));
-}
 
 function campfire(scene: THREE.Scene, w: World, x: number, z: number): void {
   const g = new THREE.Group();

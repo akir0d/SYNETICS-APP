@@ -929,6 +929,8 @@ export class StoneSource {
   readonly max = 8;
   private regen = 0;
   private shake = 0;
+  /** Vitesse de repousse (niveau de la carriere). */
+  regenMul = 1;
 
   constructor(scene: THREE.Scene, readonly x: number, readonly z: number, solids: Circle[]) {
     // Gros galets lites et serres (un seul maillage fusionne), eclats et cailloux au pied.
@@ -967,7 +969,7 @@ export class StoneSource {
   update(dt: number): void {
     if (this.amount < this.max) {
       this.regen += dt;
-      if (this.regen > 6) {
+      if (this.regen > 6 / this.regenMul) {
         this.regen = 0;
         this.amount += 1;
       }

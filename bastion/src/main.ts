@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
 import {
-  BDEFS, BMAX, WEAPON_NEED, awayOf, bCost, bdef, bonusText, capOf, cashCapOf, crewOf, doubleOf, extraOf, growOf, huntBonusOf, needOf, resCapOf, sellOf,
+  BDEFS, BMAX, WEAPON_NEED, awayOf, bCost, bdef, bonusText, capOf, cashCapOf, crewOf, doubleOf, extraOf, fishOf, growOf, huntBonusOf, needOf, regenOf,
+  rentOf, resCapOf, sellOf,
   speedOf, stageName, stageOf, wCost,
   type BDef,
 } from './blevels';
@@ -372,6 +373,11 @@ if (!save.seen.includes('blv-v2')) {
   up('reserve', 1 + Math.round((old.reserve ?? 0) * 0.6) + ((save.bt.shelter ?? 1) - 1));
   up('mill', 1 + Math.round((old.mill ?? 0) * 0.5) + 2 * ((save.bt.mill ?? 1) - 1));
   up('shelter', 1 + 2 * ((save.bt.shelter ?? 1) - 1));
+}
+// Lot 3 : la fonderie en dur (palier) devient un niveau ; carriere, ponton et maisons partent du 1.
+if (!save.seen.includes('blv-v3')) {
+  save.seen.push('blv-v3');
+  save.blv.foundry = Math.max(save.blv.foundry ?? 1, Math.min(BMAX, 1 + 2 * ((save.bt.foundry ?? 1) - 1)));
 }
 
 // ---------------------------------------------------------------- zones a debloquer
@@ -1802,7 +1808,7 @@ function renderSheet(): void {
     </div>`;
   }).join('');
   const scroll = ui.sheetBody.scrollTop;
-  ui.sheetBody.innerHTML = `<p class="note">⬆️ Potagers, champs, scierie, cuisine, moulin, étal, abri et armurerie s’améliorent eux-mêmes : arrête-toi sur la flèche ⬆️ devant eux. La réserve, dans son panneau.</p>`
+  ui.sheetBody.innerHTML = `<p class="note">⬆️ Tous les bâtiments s’améliorent eux-mêmes : arrête-toi sur la flèche ⬆️ devant eux (la réserve : dans son panneau). Ici, l’équipement et la palissade.</p>`
     + `<h2>🧱 Matériaux</h2>${materialCards()}<h2>🏗️ Le camp</h2>${levels}<h2>🔧 Ton équipement</h2>` + BENCH_UPS.map((u) => {
     const lvl = save.up[u.id];
     const max = lvl >= u.costs.length;
@@ -2178,8 +2184,6 @@ function applyMeta(dt: number): void {
   const grow = boostOn('grow') ? 2 : 1;
   // Chaque potager, chaque champ a son niveau : il pousse plus vite.
   beds.forEach((b, i) => { b.growMul = grow * growOf(blvOf(BED_IDS[i]!)); });
-  // Batiments en pierre puis en metal : +50 % de cadence a chaque palier.
-  const tierK = (id: string) => 1 + 0.5 * (bt(id) - 1);
   // Scierie et cuisine : leur niveau (touche-les pour les ameliorer).
   saw.speed = speedOf(blvOf('sawmill')) * grow;
   cook.speed = speedOf(blvOf('kitchen')) * grow;
@@ -2187,7 +2191,10 @@ function applyMeta(dt: number): void {
   cook.extra = extraOf(blvOf('kitchen'));
   mill.speed = speedOf(blvOf('mill')) * grow;
   mill.extra = extraOf(blvOf('mill'));
-  forge.speed = grow * tierK('foundry');
+  forge.speed = speedOf(blvOf('foundry')) * grow;
+  forge.extra = extraOf(blvOf('foundry'));
+  const rg = regenOf(blvOf('quarry'));
+  for (const r of rocks) r.regenMul = rg;
   reserve.cap = resCapOf(blvOf('reserve')) + (isBuilt('warehouse') ? 200 : 0);
   player.speedMul = (1 + 0.12 * save.up.boots) * (boostOn('speed') ? 1.4 : 1);
 }
@@ -2675,7 +2682,6 @@ const BT_NAMES = ['Bois', 'Pierre', 'Métal'];
 /** Batiments qu'on peut construire en dur, et leur « poids » dans le cout. */
 const TIERABLE: { id: string; name: string; icon: string; w: number }[] = [
   { id: 'tower', name: 'Tour de guet', icon: '🗼', w: 1.4 },
-  { id: 'foundry', name: 'Fonderie', icon: '🔥', w: 1.8 },
 ];
 const WALL_COSTS: Cost[] = [
   { coins: 0 },
@@ -2822,6 +2828,8 @@ function applyBuildingTier(id: string): void {
 
 // ---------------------------------------------------------------- batiments a niveaux : on les touche pour les ameliorer
 
+/** Teinte du toit de chaque maison (elle la garde a chaque aspect). */
+const HOUSE_TONE: Record<string, number> = { house1: 0x5f8a85, house2: 0x9c4a3c, house3: 0x6f7a4a, house4: 0xb9874a };
 /** Obstacles poses quand la reserve ou le moulin grandissent (une seule fois). */
 let resSolid: { x: number; z: number; r: number } | null = null;
 let siloSolid: { x: number; z: number; r: number } | null = null;
@@ -2839,6 +2847,8 @@ function bPos(id: string): { x: number; z: number } {
   if (bed) return bed.group.position;
   if (id === 'armory') return armoryExt();
   if (id === 'reserve') return L.chest;
+  const ext = EXT.find((e) => e.id === id);
+  if (ext) return ext;
   return B[id]!.group.position;
 }
 
@@ -2902,18 +2912,25 @@ function applyLook(id: string, animate: boolean): void {
   const make: Record<string, () => Building> = {
     sawmill: () => sawmill(st), kitchen: () => kitchen(st), armory: () => armory(0, 0, st, save.weapons),
     mill: () => windmill(st), shelter: () => shelter(st), stall: () => stallStand(st),
+    quarry: () => quarryShed(st), foundry: () => foundry(st), dock: () => dock(st),
+    house1: () => cabin(0, 0, 0, HOUSE_TONE.house1!, st), house2: () => cabin(0, 0, 0, HOUSE_TONE.house2!, st),
+    house3: () => cabin(0, 0, 0, HOUSE_TONE.house3!, st), house4: () => cabin(0, 0, 0, HOUSE_TONE.house4!, st),
   };
   if (!make[id]) return;
   const nb = make[id]!();
-  const target = id === 'armory' ? armoryExt().group : B[id]!.group;
+  const ext = EXT.find((e) => e.id === id);
+  const target = ext ? ext.group : B[id]!.group;
   restorer.cancel(target);
   for (const c of [...target.children]) {
     target.remove(c);
   }
   for (const c of [...nb.group.children]) target.add(c);
   const b: Building = { ...nb, group: target as THREE.Group };
-  if (id === 'armory') armoryExt().live = b.live ?? [];
-  else B[id] = b;
+  if (ext) {
+    ext.live = b.live ?? [];
+    const def = EXT_DEFS.find((e) => e.id === id);
+    if (def) def.b = b;
+  } else B[id] = b;
   if (!bBuilt(id) || isBroken(id) || !target.visible) return;
   if (animate) restorer.run(null, target, () => consolidate(target, b.live));
   else consolidate(target, b.live);
@@ -3178,7 +3195,7 @@ function placeBldBadges(): void {
     const p = bPos(id);
     const s = bState(id);
     el.classList.toggle('look', !s.max && stageOf(s.next) !== stageOf(s.lv));
-    placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') ? 1.3 : id === 'mill' ? 7.0 : id === 'reserve' || id === 'stall' ? 2.4 : id === 'armory' ? 3.6 : 3.2, p.z);
+    placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') || id === 'dock' ? 1.3 : id === 'mill' ? 7.0 : id === 'reserve' || id === 'stall' ? 2.4 : id === 'armory' || id.startsWith('house') ? 3.6 : 3.2, p.z);
   }
 }
 
@@ -3190,6 +3207,9 @@ const UP_AT: Record<string, { x: number; z: number }> = {
   field1: L.pads.field1, field2: L.pads.field2, field3: L.pads.field3,
   sawmill: { x: 9.6, z: -8.6 }, kitchen: L.pads.kitchen,
   mill: L.pads.mill, shelter: L.pads.shelter, stall: { x: 10.2, z: 9.6 },
+  quarry: L.pads.quarry, foundry: L.pads.foundry, dock: L.pads.dock,
+  // Les maisons : la ou on a paye leur chantier.
+  ...Object.fromEntries(EXT.filter((e) => e.id.startsWith('house')).map((e) => [e.id, e.pad])),
 };
 const UP_RING = new THREE.RingGeometry(0.82, 1.02, 40);
 /** Une fleche couchee au sol, pointe vers le haut de l'ecran. */
@@ -3575,6 +3595,8 @@ function interact(dt: number): void {
           const at = new THREE.Vector3(rr.x, 0.9, rr.z);
           particles.burst(at, [0x9a9890, 0xb0aea6, 0x6f6c66], 12, { speed: 4, up: 3, size: 0.12, life: 0.5 });
           if (freeSpace() > 0) giveToPlayer('stone', at, () => { save.stats.stone++; });
+          // Niveau de la carriere : parfois, le bloc donne double.
+          if (freeSpace() > 0 && Math.random() < doubleOf(blvOf('quarry'))) giveToPlayer('stone', at.clone().setY(1.2), () => { save.stats.stone++; });
         }
       }, 140);
     }
@@ -3595,11 +3617,12 @@ function interact(dt: number): void {
   if (isBuilt('dock') && settled && freeSpace() > 0 && near(L.fishSpot.x, L.fishSpot.z, 1.1)) {
     player.faceTowards(L.fishSpot.x, L.fishSpot.z + 3, dt);
     if (fishClock <= 0) {
-      fishClock = 1.9;
+      fishClock = 1.9 / fishOf(blvOf('dock'));
       const from = new THREE.Vector3(L.fishSpot.x + (Math.random() - 0.5) * 1.4, 0.3, L.fishSpot.z + 1.6 + Math.random());
       particles.burst(from, [0xbfe6ff, 0xffffff, 0x4f8090], 14, { speed: 2.5, up: 4, size: 0.12, life: 0.6 });
       sfx.sfxPickup(3);
       giveToPlayer('fish', from, () => { save.stats.fish++; });
+      if (freeSpace() > 0 && Math.random() < extraOf(blvOf('dock'))) giveToPlayer('fish', from.clone().setY(0.8), () => { save.stats.fish++; });
     }
   }
   // Reserve : le panneau du bas s'ouvre devant le coffre, on choisit ce qu'on prend (setPanel).
@@ -3862,8 +3885,10 @@ const helperCtx: HelperCtx = {
       particles.burst(new THREE.Vector3(src.x, 1.0, src.z), [0xfff1a8, 0x9aa3ab], 6, { speed: 3, up: 3, size: 0.08, life: 0.4 });
     }
   },
+  get fishMul() { return fishOf(blvOf('dock')); },
   onFish: (h) => {
     h.stack.add('fish');
+    if (!h.stack.full && Math.random() < extraOf(blvOf('dock'))) h.stack.add('fish');
     particles.burst(new THREE.Vector3(L.fishSpot.x, 0.3, L.fishSpot.z + 1.8), [0xbfe6ff, 0xffffff], 8, { speed: 2, up: 3, size: 0.1, life: 0.5 });
   },
   reserveCount: () => { let n = 0; for (const [t, c] of reserve.counts) if (portable(t)) n += c; return n; },
@@ -3922,7 +3947,16 @@ function startDay(): void {
   save.phaseT = 0;
   sfx.sfxToggle(false);
   save.gems += 1;
-  toast(`☀️ Jour ${save.day} : le camp a tenu ! +1 💎`);
+  // Les maisons paient leur loyer a l'aube (selon leur niveau).
+  let rent = 0;
+  for (const e of EXT) {
+    if (!e.id.startsWith('house') || !isBuilt(e.id) || isBroken(e.id)) continue;
+    const n = rentOf(blvOf(e.id));
+    rent += n;
+    hudCoins(new THREE.Vector3(e.x, 2.4, e.z), 4);
+  }
+  if (rent > 0) earn(rent);
+  toast(`☀️ Jour ${save.day} : le camp a tenu ! +1 💎${rent > 0 ? ` · 🏡 loyers +${fmt(rent)}` : ''}`);
   document.body.classList.remove('night');
   planDay(0);
   persist();
@@ -4609,6 +4643,8 @@ function applyLighting(t: number, dusk: number, time: number): void {
     if (id === 'kitchen') continue;
     for (const m of b.glowMats ?? []) m.emissiveIntensity = t * 2;
   }
+  // Les fenetres des maisons s'allument le soir.
+  for (const e of EXT_DEFS) for (const m of e.b.glowMats ?? []) m.emissiveIntensity = t * 2;
   tower.light.intensity = structAlive('tower') ? t * 45 : 0;
   player.flashlight.intensity = t * 48;
   fireflies.forEach((f) => {

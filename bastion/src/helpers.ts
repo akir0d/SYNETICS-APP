@@ -30,6 +30,8 @@ export interface HelperCtx {
   onChop: (tree: ChopTree, h: Helper) => void;
   onScrap: (src: ScrapSource, h: Helper) => void;
   onFish: (h: Helper) => void;
+  /** Vitesse de peche (niveau du ponton). */
+  fishMul?: number;
   // ---- porteur : de la reserve (et des machines) vers l'etal et les machines
   reserveCount: () => number;
   reserveTake: () => ItemType | null;
@@ -364,7 +366,7 @@ export class Helper {
     this.human.face(0, dt);
     this.clock -= dt;
     if (this.clock <= 0) {
-      this.clock = 3.2;
+      this.clock = 3.2 / (ctx.fishMul ?? 1);
       this.working = 1;
       ctx.onFish(this);
     }

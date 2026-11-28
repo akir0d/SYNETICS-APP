@@ -5,8 +5,8 @@
 import type { Cost } from './progress';
 
 export type BId = 'bed1' | 'bed2' | 'bed3' | 'bed4' | 'field1' | 'field2' | 'field3' | 'sawmill' | 'kitchen' | 'armory'
-  | 'mill' | 'stall' | 'reserve' | 'shelter';
-type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm' | 'mill' | 'stall' | 'res' | 'shel';
+  | 'mill' | 'stall' | 'reserve' | 'shelter' | 'quarry' | 'foundry' | 'dock' | 'house1' | 'house2' | 'house3' | 'house4';
+type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm' | 'mill' | 'stall' | 'res' | 'shel' | 'quarry' | 'forge' | 'dock' | 'house';
 
 export const BMAX = 10;
 
@@ -34,6 +34,13 @@ export const BDEFS: BDef[] = [
   { id: 'stall', kind: 'stall', name: 'Étal', icon: '🧺', base: 300 },
   { id: 'reserve', kind: 'res', name: 'Réserve', icon: '📦', base: 340 },
   { id: 'shelter', kind: 'shel', name: 'Abri', icon: '🏠', base: 460 },
+  { id: 'quarry', kind: 'quarry', name: 'Carrière', icon: '⛏️', base: 600 },
+  { id: 'foundry', kind: 'forge', name: 'Fonderie', icon: '🔥', base: 800 },
+  { id: 'dock', kind: 'dock', name: 'Ponton', icon: '🎣', base: 450 },
+  { id: 'house1', kind: 'house', name: 'Maison 1', icon: '🏡', base: 400 },
+  { id: 'house2', kind: 'house', name: 'Maison 2', icon: '🏡', base: 400 },
+  { id: 'house3', kind: 'house', name: 'Maison 3', icon: '🏡', base: 450 },
+  { id: 'house4', kind: 'house', name: 'Maison 4', icon: '🏡', base: 450 },
 ];
 export const bdef = (id: string): BDef | undefined => BDEFS.find((d) => d.id === id);
 
@@ -48,6 +55,10 @@ const STAGES: Record<Kind, string[]> = {
   stall: ['Caisses retournées', 'Porte sur des fûts', 'Comptoir à fanions', 'Échoppe peinte', 'Marché illuminé'],
   res: ['Tas sous bâche', 'Coffre et fûts', 'Coffre et étagères', 'Remise en bois', 'Conteneur de stockage'],
   shel: ['Tentes de survie', 'Cabane de bric et de broc', 'Conteneur', 'Conteneur aménagé', 'Conteneurs empilés'],
+  quarry: ['Pioche et brouette', 'Appentis à outils', 'Cabane et treuil', 'Concasseur', 'Grue de levage'],
+  forge: ['Bas fourneau', 'Four de briques', 'Halle d’acier', 'Creuset au palan', 'Usine'],
+  dock: ['Planches de fortune', 'Ponton', 'Ponton et barque', 'Ponton à garde-corps', 'Port de pêche'],
+  house: ['Cabane sous bâche', 'Cabane de rondins', 'Maison de rondins', 'Maison à véranda', 'Maison à étage'],
 };
 
 /** Aspect (1 a 5) d'un niveau : il change aux niveaux 3, 5, 7 et 9. */
@@ -98,6 +109,12 @@ export const cashCapOf = (lv: number): number => 250 + 80 * (lv - 1);
 /** Reserve : 100 places de plus par niveau, et 20 minutes d'absence comptees en plus. */
 export const resCapOf = (lv: number): number => 240 + 100 * (lv - 1);
 export const awayOf = (lv: number): number => 1200 * (lv - 1);
+/** Carriere : les affleurements se reconstituent 20 % plus vite par niveau. */
+export const regenOf = (lv: number): number => 1 + 0.2 * (lv - 1);
+/** Ponton : on peche 15 % plus vite par niveau (toi et le pecheur). */
+export const fishOf = (lv: number): number => 1 + 0.15 * (lv - 1);
+/** Maison : un loyer verse a chaque aube. */
+export const rentOf = (lv: number): number => Math.round(25 * lv * (1 + 0.1 * (lv - 1)));
 /** Abri : les survivants, mieux reposes, travaillent 5 % plus vite par niveau. */
 export const crewOf = (lv: number): number => 1 + 0.05 * (lv - 1);
 
@@ -130,6 +147,14 @@ export function bonusText(d: BDef, lv: number): string {
       return `Prix de vente +${Math.round(100 * sellOf(lv))} % · caisse ${cashCapOf(lv)} pièces sans caissière`;
     case 'res':
       return `${resCapOf(lv)} places · absence comptée +${Math.round(awayOf(lv) / 60)} min`;
+    case 'quarry':
+      return `Pierre qui repousse +${Math.round(100 * (regenOf(lv) - 1))} % · pierre double ${Math.round(100 * doubleOf(lv))} %`;
+    case 'forge':
+      return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · lingot en plus ${Math.round(100 * extraOf(lv))} %`;
+    case 'dock':
+      return `Pêche +${Math.round(100 * (fishOf(lv) - 1))} % plus rapide · poisson double ${Math.round(100 * extraOf(lv))} %`;
+    case 'house':
+      return `Loyer à chaque aube : ${rentOf(lv)} pièces`;
     case 'shel':
       return `Survivants +${Math.round(100 * (crewOf(lv) - 1))} % plus rapides`;
     case 'arm': {

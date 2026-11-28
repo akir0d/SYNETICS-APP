@@ -1031,70 +1031,155 @@ export function windmill(stage = 3): Building {
 const BUCKET: Profile = [[0, 0], [0.15, 0], [0.17, 0.02], [0.2, 0.3], [0.21, 0.32], [0.19, 0.32], [0.18, 0.28], [0, 0.28]];
 
 /** Le ponton de l'etang : on y peche. */
-export function dock(): Building {
+/** Une barque (coque, bancs, rames) ; avec un moteur hors-bord pour la peche en grand. */
+function rowboat(motor: boolean, tone: number): THREE.Group {
+  const b = group(
+    rbox(0.8, 0.32, 2.2, tone, 0.14, 0, 0.0, 0), rbox(0.66, 0.1, 2.0, 0x6a4e32, 0.06, 0, 0.12, 0),
+    cone(0.4, 0.5, tone, 6, 0, 0.0, 1.25), plank(0.7, 0.05, 0.22, BOARD3, 0, 0.18, -0.3), plank(0.7, 0.05, 0.22, BOARD2, 0, 0.18, 0.4),
+    rot(cyl(0.02, 0.02, 1.6, BOARD2, 6, 0.32, 0.25, 0.1), Math.PI / 2 - 0.1, 0, 0.3),
+  );
+  b.children[2]!.rotation.x = Math.PI / 2;
+  if (motor) b.add(rbox(0.26, 0.36, 0.3, 0x2b2b2b, 0.05, 0, 0.3, -1.2), box(0.06, 0.4, 0.06, 0x3a3d40, 0, 0.0, -1.25), box(0.3, 0.06, 0.06, 0xc9412f, 0, 0.5, -1.2));
+  return b;
+}
+
+/**
+ * Le ponton de l'etang, en cinq aspects : planches de fortune, ponton, ponton et barque,
+ * ponton a garde-corps (lanternes, sechoir a poissons), port de peche (cabane sur pilotis,
+ * bateau a moteur, nasses, bouees). Le platelage ne change pas : on y marche pareil.
+ */
+export function dock(stage = 2): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
   const g = new THREE.Group();
   const posts = new THREE.Group();
-  for (let i = 0; i < 3; i++) for (const sx of [-0.6, 0.6]) posts.add(postPiece(0.6, 0.1, i % 2 ? 0x5e452c : 0x6a4e32, sx, -1.2 + i * 1.3, -0.1));
+  for (let i = 0; i < 3; i++) for (const sx of [-0.6, 0.6]) posts.add(postPiece(st >= 4 ? 0.9 : 0.6, 0.1, i % 2 ? 0x5e452c : 0x6a4e32, sx, -1.2 + i * 1.3, st >= 4 ? -0.4 : -0.1));
   posts.add(plank(0.12, 0.1, 3.7, C.woodDark, -0.5, 0.0, 0.1), plank(0.12, 0.1, 3.7, C.woodDark, 0.5, 0.0, 0.1));
   g.add(posts);
   const deck = new THREE.Group();
-  const tones = [C.wood, C.woodLight, 0xb98450];
+  const tones = st === 1 ? [0x8a6a48, 0x9c7a52, 0x6e5034] : [C.wood, C.woodLight, 0xb98450];
+  const r = rng(53);
   for (let i = 0; i < 11; i++) {
-    const p = plank(1.5 - (i % 3) * 0.04, 0.06, 0.3, tones[i % 3]!, ((i * 7) % 3 - 1) * 0.02, 0.07, -1.6 + i * 0.34);
-    p.rotation.y = ((i * 5) % 3 - 1) * 0.015;
+    // Planches de fortune : de travers, plus courtes, de toutes les teintes.
+    const p = plank((st === 1 ? 1.3 - r() * 0.3 : 1.5 - (i % 3) * 0.04), 0.06, st === 1 ? 0.26 : 0.3, tones[i % 3]!, ((i * 7) % 3 - 1) * (st === 1 ? 0.08 : 0.02), 0.07, -1.6 + i * 0.34);
+    p.rotation.y = ((i * 5) % 3 - 1) * (st === 1 ? 0.08 : 0.015);
     deck.add(p);
   }
   g.add(deck);
-  // Cordage, seau, canne a peche appuyee, caisse.
+  // Cordage, seau, canne a peche appuyee.
   g.add(part(0.1,
-    rot(torus(0.14, 0.04, C.rope, -0.35, 0.13, 1.35), Math.PI / 2), rot(torus(0.1, 0.03, C.rope, 0.6, 0.38, 1.4), Math.PI / 2),
+    rot(torus(0.14, 0.04, C.rope, -0.35, 0.13, 1.35), Math.PI / 2),
     lathe(BUCKET, 0x5f7a8a, -0.5, 0.1, -1.3),
     rot(cyl(0.015, 0.02, 1.8, BOARD2, 8, 0.62, 0.7, 0.0), 0.35, 0, -0.22),
+    ...(st >= 2 ? [rot(torus(0.1, 0.03, C.rope, 0.6, 0.38, 1.4), Math.PI / 2)] : []),
   ));
-  g.add(at(crate(0.45), 0.45, 0.1, -1.4, 0.3));
+  if (st >= 2) g.add(at(crate(0.45), 0.45, 0.1, -1.4, 0.3));
+  if (st >= 3) {
+    // Barque amarree a un pieu, a gauche du ponton.
+    const boat = rowboat(st === 5, st === 5 ? 0xd8d8d0 : 0x5f8a85);
+    boat.position.set(-1.45, -0.02, 0.6);
+    boat.rotation.y = 0.08;
+    g.add(boat, group(postPiece(0.9, 0.08, LOG3, -0.95, 1.6, -0.3), rot(cyl(0.012, 0.012, 0.8, C.rope, 4, -1.2, 0.35, 1.25), 0, 0.5, 1.2)));
+  }
+  if (st >= 4) {
+    // Garde-corps, deux lanternes, sechoir a poissons.
+    const rail = new THREE.Group();
+    for (const sx of [-0.72, 0.72]) {
+      for (let i = 0; i < 5; i++) rail.add(box(0.06, 0.6, 0.06, C.woodDark, sx, 0.4, -1.5 + i * 0.8));
+      rail.add(box(0.06, 0.06, 3.3, BOARD2, sx, 0.72, -0.1));
+    }
+    for (const sx of [-0.72, 0.72]) rail.add(cyl(0.035, 0.035, 1.4, IRON, 6, sx, 0.8, 1.75), rcyl(0.09, 0.09, 0.2, 0xffd27a, 0.03, sx, 1.55, 1.75));
+    g.add(rail);
+    const rack = group(
+      postPiece(1.3, 0.05, LOG3, 1.25, -1.6), postPiece(1.3, 0.05, LOG3, 2.25, -1.6), along(cyl(0.03, 0.03, 1.1, LOG3, 6, 1.75, 1.25, -1.6), 'x'),
+    );
+    for (let i = 0; i < 4; i++) rack.add(rot(rbox(0.1, 0.32, 0.05, 0x8aa0a8, 0.03, 1.4 + i * 0.24, 1.0, -1.6), 0, 0, 0.1));
+    g.add(rack);
+  }
+  if (st === 5) {
+    // Cabane de pecheur sur pilotis, a droite ; nasses, bouees, filet.
+    const hut = new THREE.Group();
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) hut.add(postPiece(1.0, 0.07, LOG, 2.2 + sx * 0.75, 0.7 + sz * 0.6, -0.5));
+    hut.add(plank(1.8, 0.08, 1.5, C.wood, 2.2, 0.52, 0.7));
+    for (let i = 0; i < 4; i++) hut.add(plank(1.6, 0.3, 0.06, [BOARD, BOARD2, BOARD3][i % 3]!, 2.2, 0.72 + i * 0.31, 0.05), plank(0.06, 0.3, 1.3, [BOARD2, BOARD3, BOARD][i % 3]!, 2.98, 0.72 + i * 0.31, 0.7));
+    hut.add(box(0.06, 1.24, 1.3, BOARD, 1.42, 1.18, 0.7));
+    const roof = tinRoof(2.1, 1.8, 0x3f6a8a, 0x5f8a85);
+    roof.position.set(2.2, 1.9, 0.7);
+    roof.rotation.x = 0.15;
+    hut.add(roof);
+    hut.add(box(0.5, 0.4, 0.04, 0x2e3439, 2.2, 1.25, 1.36), plank(0.12, 0.06, 1.0, BOARD2, 1.15, 0.5, 0.7));
+    g.add(hut);
+    // Nasses empilees au bout du ponton, bouees rouges et blanches dans l'eau.
+    g.add(group(
+      rbox(0.4, 0.3, 0.3, 0x8a7a5a, 0.05, -0.45, 0.25, -0.6), rbox(0.36, 0.28, 0.3, 0x7a6a4a, 0.05, -0.45, 0.55, -0.6),
+      sphere(0.14, 0xc9412f, -1.6, 0.02, 2.4, 8), sphere(0.13, 0xeeeee6, 0.9, 0.02, 2.8, 8), sphere(0.13, 0xc9412f, 2.4, 0.02, 2.2, 8),
+    ));
+  }
   return { group: hidden(g, L.dock.x, L.dock.z) };
 }
 
 // ---------------------------------------------------------------- la carriere
 
-/** La cabane de la carriere : treuil en bois, outils, brouette. */
-export function quarryShed(): Building {
+/**
+ * La carriere, en cinq aspects : pioche et brouette, appentis a outils, cabane et treuil,
+ * concasseur et blocs tailles, grue de levage et wagonnet sur rails.
+ */
+export function quarryShed(stage = 3): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
   const g = new THREE.Group();
-  // Le treuil : chevalet de rondins, poulie, corde, bloc de pierre suspendu.
-  const winch = new THREE.Group();
-  for (const s of [-1, 1]) {
-    const leg = logPiece(3.6, 0.11, s < 0 ? LOG : LOG2, s * 0.9, 1.7, 0);
-    leg.rotation.z = s * 0.25;
-    winch.add(leg);
+  if (st >= 3) {
+    // Le treuil : chevalet de rondins, poulie, corde, bloc de pierre suspendu.
+    const winch = new THREE.Group();
+    for (const s of [-1, 1]) {
+      const leg = logPiece(3.6, 0.11, s < 0 ? LOG : LOG2, s * 0.9, 1.7, 0);
+      leg.rotation.z = s * 0.25;
+      winch.add(leg);
+    }
+    const strut = logPiece(3.46, 0.09, LOG3, 0, 1.71, -0.25);
+    strut.rotation.x = 0.145;
+    winch.add(strut, along(logPiece(1.3, 0.11, LOG2, 0, 3.42, 0), 'x'));
+    winch.add(along(cyl(0.13, 0.13, 0.08, IRON, 8, 0, 3.2, 0), 'z'), cyl(0.02, 0.02, 2.07, C.rope, 8, 0, 2.165, 0));
+    winch.add(along(rcyl(0.14, 0.14, 0.55, C.rope, 0.2, 0.62, 0.55, -0.3), 'x'), plank(0.08, 0.6, 0.3, BOARD2, 0.3, 0.3, -0.3), plank(0.08, 0.6, 0.3, BOARD2, 0.94, 0.3, -0.3));
+    winch.add(box(0.05, 0.3, 0.05, IRON, 1.0, 0.68, -0.3));
+    g.add(winch);
+    g.add(part(0.8, rbox(0.45, 0.36, 0.45, C.stone, 0.08, 0, 0.95, 0), torus(0.06, 0.02, IRON, 0, 1.17, 0)));
+    // La cabane : bardage de planches, porte, fenetre, toit de tole.
+    const shed = group(box(2.2, 1.8, 1.6, C.woodDark, -2.4, 0.9, 0.6));
+    for (let i = 0; i < 7; i++) shed.add(plank(0.3, 1.8, 0.05, [BOARD, BOARD2, BOARD3][i % 3]!, -3.3 + i * 0.3, 0.9, 1.425));
+    for (let i = 0; i < 5; i++) shed.add(plank(0.05, 1.8, 0.32, [BOARD2, BOARD3, BOARD][i % 3]!, -1.275, 0.9, -0.04 + i * 0.32));
+    shed.add(plankDoor(0.62, 1.4, -1.9, 0.02, 1.48, LOG3));
+    shed.add(box(0.46, 0.36, 0.04, 0x2e3439, -2.95, 1.2, 1.45), windowFrame(0.46, 0.36, -2.95, 1.2, 1.47));
+    g.add(shed);
+    const roof = tinRoof(2.7, 2.1, st === 5 ? 0x8a949c : C.rust, 0x8a8f91);
+    roof.position.set(-2.4, 1.88, 0.6);
+    roof.rotation.x = -0.06;
+    g.add(roof);
+  } else if (st === 2) {
+    // Appentis : trois poteaux, toit de tole, ratelier d'outils, etabli de pierre.
+    g.add(group(postPiece(1.9, 0.07, LOG, -3.3, 1.3), postPiece(1.9, 0.07, LOG2, -1.4, 1.3), postPiece(1.5, 0.07, LOG3, -3.3, -0.1), postPiece(1.5, 0.07, LOG, -1.4, -0.1)));
+    const roof = tinRoof(2.4, 1.8, C.rust, 0x8a8f91);
+    roof.position.set(-2.35, 1.75, 0.6);
+    roof.rotation.x = -0.25;
+    g.add(roof);
+    g.add(group(plank(1.6, 0.08, 0.6, BOARD2, -2.35, 0.75, 0.2), plank(0.1, 0.75, 0.5, LOG3, -3.0, 0.37, 0.2), plank(0.1, 0.75, 0.5, LOG3, -1.7, 0.37, 0.2),
+      rbox(0.4, 0.3, 0.3, C.stone, 0.06, -2.5, 0.94, 0.2), box(0.3, 0.05, 0.05, IRON, -2.0, 0.82, 0.25)));
+  } else {
+    // Bache tendue sur deux perches, une pioche plantee dans un bloc.
+    const t = tarp(1.8, 1.4, 0x6f7a4a, 0);
+    t.position.set(-2.4, 1.25, 0.5);
+    t.rotation.x = -0.3;
+    g.add(t, group(postPiece(1.4, 0.05, LOG3, -3.2, 1.1), postPiece(1.4, 0.05, LOG3, -1.6, 1.1)));
+    g.add(group(rbox(0.6, 0.45, 0.5, C.stone, 0.1, -0.4, 0.22, 0.3), rot(cyl(0.025, 0.025, 0.9, CUT, 8, -0.4, 0.8, 0.3), 0, 0, 0.4), rot(box(0.5, 0.06, 0.06, IRON, -0.6, 1.2, 0.3), 0, 0, 0.5)));
   }
-  const strut = logPiece(3.46, 0.09, LOG3, 0, 1.71, -0.25);
-  strut.rotation.x = 0.145;
-  winch.add(strut, along(logPiece(1.3, 0.11, LOG2, 0, 3.42, 0), 'x'));
-  winch.add(along(cyl(0.13, 0.13, 0.08, IRON, 8, 0, 3.2, 0), 'z'), cyl(0.02, 0.02, 2.07, C.rope, 8, 0, 2.165, 0));
-  winch.add(along(rcyl(0.14, 0.14, 0.55, C.rope, 0.2, 0.62, 0.55, -0.3), 'x'), plank(0.08, 0.6, 0.3, BOARD2, 0.3, 0.3, -0.3), plank(0.08, 0.6, 0.3, BOARD2, 0.94, 0.3, -0.3));
-  winch.add(box(0.05, 0.3, 0.05, IRON, 1.0, 0.68, -0.3));
-  g.add(winch);
-  g.add(part(0.8, rbox(0.45, 0.36, 0.45, C.stone, 0.08, 0, 0.95, 0), torus(0.06, 0.02, IRON, 0, 1.17, 0)));
-  // La cabane : bardage de planches, porte, fenetre, toit de tole.
-  const shed = group(box(2.2, 1.8, 1.6, C.woodDark, -2.4, 0.9, 0.6));
-  for (let i = 0; i < 7; i++) shed.add(plank(0.3, 1.8, 0.05, [BOARD, BOARD2, BOARD3][i % 3]!, -3.3 + i * 0.3, 0.9, 1.425));
-  for (let i = 0; i < 5; i++) shed.add(plank(0.05, 1.8, 0.32, [BOARD2, BOARD3, BOARD][i % 3]!, -1.275, 0.9, -0.04 + i * 0.32));
-  shed.add(plankDoor(0.62, 1.4, -1.9, 0.02, 1.48, LOG3));
-  shed.add(box(0.46, 0.36, 0.04, 0x2e3439, -2.95, 1.2, 1.45), windowFrame(0.46, 0.36, -2.95, 1.2, 1.47));
-  g.add(shed);
-  const roof = tinRoof(2.7, 2.1, C.rust, 0x8a8f91);
-  roof.position.set(-2.4, 1.88, 0.6);
-  roof.rotation.x = -0.06;
-  g.add(roof);
-  // Outils appuyes contre la cabane.
-  const pick = group(cyl(0.025, 0.025, 1.0, CUT, 8, 0, 0.5, 0), rot(box(0.5, 0.06, 0.06, IRON, 0, 0.98, 0), 0, 0, 0.12));
-  pick.position.set(-1.16, 0, 0.15);
-  pick.rotation.z = 0.2;
-  const shovel = group(cyl(0.025, 0.025, 1.0, BOARD3, 8, 0, 0.62, 0), plank(0.03, 0.28, 0.2, C.metal, 0, 0.1, 0));
-  shovel.position.set(-1.18, 0, -0.1);
-  shovel.rotation.z = 0.18;
-  g.add(group(pick, shovel));
-  // La brouette, chargee de pierres, et un tas de cailloux.
+  // Outils appuyes, brouette chargee de pierres, tas de cailloux.
+  if (st >= 2) {
+    const pick = group(cyl(0.025, 0.025, 1.0, CUT, 8, 0, 0.5, 0), rot(box(0.5, 0.06, 0.06, IRON, 0, 0.98, 0), 0, 0, 0.12));
+    pick.position.set(-1.16, 0, 0.15);
+    pick.rotation.z = 0.2;
+    const shovel = group(cyl(0.025, 0.025, 1.0, BOARD3, 8, 0, 0.62, 0), plank(0.03, 0.28, 0.2, C.metal, 0, 0.1, 0));
+    shovel.position.set(-1.18, 0, -0.1);
+    shovel.rotation.z = 0.18;
+    g.add(group(pick, shovel));
+  }
   const barrow = group(
     rbox(0.9, 0.32, 0.6, 0x5a6e3a, 0.08, 1.75, 0.5, 1.2),
     torus(0.17, 0.05, 0x2b2b2b, 2.3, 0.22, 1.2),
@@ -1107,6 +1192,32 @@ export function quarryShed(): Building {
     blob(0.22, C.stone, 0.9, 0.12, 0.9), blob(0.18, 0x85837b, 1.2, 0.1, 0.7), blob(0.15, 0xa8a59b, 0.7, 0.1, 1.15),
     blob(0.13, C.stone, 1.05, 0.3, 0.85),
   ));
+  if (st >= 4) {
+    // Concasseur : tremie sur pieds, caisson, volant ; blocs tailles empiles et cercles.
+    g.add(group(
+      ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => box(0.1, 1.3, 0.1, STEEL, 2.0 + sx * 0.45, 0.65, -1.0 + sz * 0.4))),
+      rbox(1.1, 0.6, 0.95, 0xe8b84a, 0.06, 2.0, 1.4, -1.0), rcone(0.75, 0.6, 0x9aa3aa, 0.12, 2.0, 2.0, -1.0),
+      rot(cyl(0.32, 0.32, 0.1, IRON, 12, 2.6, 1.4, -1.0), 0, 0, Math.PI / 2), box(0.5, 0.05, 0.5, 0x85837b, 2.0, 0.1, -1.0),
+    ));
+    const blocks = new THREE.Group();
+    for (let i = 0; i < 6; i++) blocks.add(box(0.5, 0.36, 0.4, [C.stone, 0xa8a59b, 0x9a9890][i % 3]!, 0.2 + (i % 3) * 0.52, 0.18 + Math.floor(i / 3) * 0.37, -1.6));
+    blocks.add(box(1.62, 0.04, 0.04, 0x8a6a48, 0.72, 0.6, -1.39));
+    g.add(blocks);
+  }
+  if (st === 5) {
+    // Grue de levage : mat d'acier, fleche, cable et crochet ; rails et wagonnet de pierres.
+    g.add(group(
+      box(0.24, 5.2, 0.24, 0xe8b84a, 3.4, 2.6, 0.6), box(0.5, 0.2, 0.5, 0x55595c, 3.4, 0.1, 0.6),
+      rot(box(0.18, 0.18, 4.2, 0xe8b84a, 3.4, 5.0, -1.0), -0.35, 0, 0), rot(box(0.05, 0.05, 2.6, IRON, 3.4, 5.3, 0.3), 0.6, 0, 0),
+      cyl(0.015, 0.015, 3.0, C.metal, 4, 3.4, 4.0, -2.9), rbox(0.5, 0.36, 0.4, C.stone, 0.06, 3.4, 2.35, -2.9), torus(0.08, 0.02, IRON, 3.4, 2.6, -2.9),
+    ));
+    const rails = new THREE.Group();
+    for (const sz of [-0.3, 0.3]) rails.add(box(4.0, 0.05, 0.06, 0x6a7076, 0.6, 0.06, 2.4 + sz));
+    for (let i = 0; i < 9; i++) rails.add(box(0.12, 0.04, 0.9, LOG3, -1.4 + i * 0.5, 0.02, 2.4));
+    rails.add(rbox(0.8, 0.5, 0.6, 0x5a6066, 0.06, 1.2, 0.42, 2.4), blob(0.18, C.stone, 1.1, 0.72, 2.35), blob(0.15, 0xa8a59b, 1.35, 0.7, 2.45));
+    for (const sx of [-0.25, 0.25]) for (const sz of [-0.3, 0.3]) rails.add(rot(cyl(0.1, 0.1, 0.05, 0x2b2b2b, 10, 1.2 + sx, 0.14, 2.4 + sz), Math.PI / 2, 0, 0));
+    g.add(rails);
+  }
   return { group: hidden(g, L.quarryShed.x, L.quarryShed.z, 0.4) };
 }
 
@@ -1115,65 +1226,121 @@ export function quarryShed(): Building {
 const KILN: Profile = [[0, 0], [1.15, 0], [1.18, 0.04], [1.18, 0.3], [1.13, 0.36], [1.1, 1.15], [1.0, 1.55], [0.78, 1.8], [0.46, 1.93], [0, 1.96]];
 const BARREL: Profile = [[0, 0], [0.28, 0], [0.3, 0.03], [0.3, 0.68], [0.28, 0.7], [0.26, 0.66], [0, 0.66]];
 
-/** La fonderie : un four de briques, un creuset rougeoyant, une cheminee. */
-export function foundry(): Building {
+/**
+ * La fonderie, en cinq aspects : bas fourneau d'argile et soufflet, four de briques en plein
+ * air, halle d'acier, creuset au palan et lingotieres, usine (murs de tole, haute cheminee,
+ * pont roulant jaune).
+ */
+export function foundry(stage = 3): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
   const g = new THREE.Group();
-  // Halle d'acier : poteaux, poutres, jambes de force, toit de tole grise rapiecee.
-  const frame = new THREE.Group();
-  for (const s of [-1, 1]) for (const t of [-1, 1]) {
-    const h = t > 0 ? 2.785 : 3.045;
-    frame.add(box(0.16, h, 0.16, t > 0 ? STEEL : 0x55595c, s * 1.9, h / 2, t * 1.3));
-    frame.add(rot(box(0.08, 0.6, 0.08, STEEL, s * 1.68, h - 0.3, t * 1.3), 0, 0, s * 0.8));
-  }
-  frame.add(box(4.0, 0.14, 0.14, 0x55595c, 0, 2.715, 1.3), box(4.0, 0.14, 0.14, 0x55595c, 0, 2.975, -1.3));
-  g.add(frame);
-  const roof = tinRoof(4.6, 3.4, STEEL, C.rust);
-  roof.position.y = 2.95;
-  roof.rotation.x = 0.1;
-  g.add(roof);
-  // Le four : briques, soubassement de pierre, suie vers le haut, cerclages de fer.
-  const brick = new THREE.Color(0xa8553a);
-  const soot = new THREE.Color(0x5e3426);
-  const base = new THREE.Color(C.concreteDark);
-  g.add(group(
-    paint(lathe(KILN, C.white, -0.6, 0, 0), 'kiln', (_x, y, _z, out) => {
-      if (y < 0.33) out.copy(base);
-      else out.copy(brick).lerp(soot, Math.max(0, Math.min(1, (y - 1.25) / 0.7)));
-    }),
-    cyl(1.14, 1.14, 0.07, IRON, 8, -0.6, 0.62, 0), cyl(1.13, 1.13, 0.07, IRON, 8, -0.6, 1.0, 0),
-    box(0.76, 0.08, 0.1, IRON, -0.6, 0.88, 1.19), box(0.08, 0.5, 0.1, IRON, -0.94, 0.6, 1.17), box(0.08, 0.5, 0.1, IRON, -0.26, 0.6, 1.17),
-    rot(plank(0.5, 0.42, 0.04, IRON, -0.02, 0.6, 1.3), 0, -1.1),
-  ));
-  // La cheminee : brique, puis tuyau d'acier coiffe.
-  g.add(part(1.6,
-    cyl(0.36, 0.4, 1.4, 0x8a4a32, 8, -0.6, 2.3, -0.3),
-    cyl(0.25, 0.27, 1.5, STEEL, 8, -0.6, 3.7, -0.3), cyl(0.28, 0.28, 0.06, IRON, 8, -0.6, 3.3, -0.3),
-    rcone(0.36, 0.2, IRON, 0.3, -0.6, 4.55, -0.3),
-  ));
   const fireMat = uniqueMat(0xff8a2a, 0xff5a10);
-  const mouth = box(0.6, 0.45, 0.06, fireMat, -0.6, 0.6, 1.16);
+  let mouth: THREE.Mesh;
+  if (st >= 3) {
+    // Halle d'acier : poteaux, poutres, jambes de force, toit de tole grise rapiecee.
+    const frame = new THREE.Group();
+    for (const s of [-1, 1]) for (const t of [-1, 1]) {
+      const h = t > 0 ? 2.785 : 3.045;
+      frame.add(box(0.16, h, 0.16, st === 5 ? 0xe8b84a : t > 0 ? STEEL : 0x55595c, s * 1.9, h / 2, t * 1.3));
+      frame.add(rot(box(0.08, 0.6, 0.08, STEEL, s * 1.68, h - 0.3, t * 1.3), 0, 0, s * 0.8));
+    }
+    frame.add(box(4.0, 0.14, 0.14, 0x55595c, 0, 2.715, 1.3), box(4.0, 0.14, 0.14, 0x55595c, 0, 2.975, -1.3));
+    g.add(frame);
+    const roof = tinRoof(4.6, 3.4, STEEL, C.rust);
+    roof.position.y = 2.95;
+    roof.rotation.x = 0.1;
+    g.add(roof);
+  }
+  if (st === 1) {
+    // Bas fourneau d'argile, soufflet de cuir, ferraille en tas.
+    const clay = new THREE.Color(0xb07a52);
+    const soot = new THREE.Color(0x5e3426);
+    const k = paint(lathe(KILN, C.white, -0.6, 0, 0), 'kilnclay', (_x, y, _z, out) => { out.copy(clay).lerp(soot, Math.max(0, Math.min(1, (y - 1.2) / 0.7))); });
+    k.scale.set(0.55, 0.75, 0.55);
+    g.add(group(k, cyl(0.16, 0.2, 0.3, 0x8a5a3a, 8, -0.6, 1.55, 0)));
+    g.add(group(rbox(0.5, 0.16, 0.34, 0x6a4a30, 0.05, 0.3, 0.12, 0.5), rot(rbox(0.5, 0.05, 0.34, 0x8a6a48, 0.02, 0.3, 0.26, 0.5), 0, 0, 0.2),
+      rot(cyl(0.04, 0.04, 0.6, 0x3a3d40, 6, -0.05, 0.2, 0.4), 0, 0, Math.PI / 2 - 0.3)));
+    mouth = box(0.3, 0.24, 0.06, fireMat, -0.6, 0.3, 0.62);
+  } else {
+    // Le four : briques, soubassement de pierre, suie vers le haut, cerclages de fer.
+    const brick = new THREE.Color(0xa8553a);
+    const soot = new THREE.Color(0x5e3426);
+    const base = new THREE.Color(C.concreteDark);
+    g.add(group(
+      paint(lathe(KILN, C.white, -0.6, 0, 0), 'kiln', (_x, y, _z, out) => {
+        if (y < 0.33) out.copy(base);
+        else out.copy(brick).lerp(soot, Math.max(0, Math.min(1, (y - 1.25) / 0.7)));
+      }),
+      cyl(1.14, 1.14, 0.07, IRON, 8, -0.6, 0.62, 0), cyl(1.13, 1.13, 0.07, IRON, 8, -0.6, 1.0, 0),
+      box(0.76, 0.08, 0.1, IRON, -0.6, 0.88, 1.19), box(0.08, 0.5, 0.1, IRON, -0.94, 0.6, 1.17), box(0.08, 0.5, 0.1, IRON, -0.26, 0.6, 1.17),
+      rot(plank(0.5, 0.42, 0.04, IRON, -0.02, 0.6, 1.3), 0, -1.1),
+    ));
+    // La cheminee : brique, puis tuyau d'acier coiffe (tres haute a l'usine).
+    if (st === 5) {
+      g.add(part(1.6,
+        cyl(0.5, 0.62, 6.2, 0x9a4a32, 10, -0.6, 4.7, -0.3),
+        ...[2.6, 4.2, 5.8, 7.5].map((y) => cyl(y > 7 ? 0.52 : 0.6 - (y - 2.6) * 0.02, y > 7 ? 0.52 : 0.6 - (y - 2.6) * 0.02, 0.12, 0xeeeee6, 10, -0.6, y, -0.3)),
+        cyl(0.55, 0.55, 0.2, IRON, 10, -0.6, 7.85, -0.3),
+      ));
+    } else {
+      g.add(part(1.6,
+        cyl(0.36, 0.4, 1.4, 0x8a4a32, 8, -0.6, 2.3, -0.3),
+        ...(st >= 3 ? [cyl(0.25, 0.27, 1.5, STEEL, 8, -0.6, 3.7, -0.3), cyl(0.28, 0.28, 0.06, IRON, 8, -0.6, 3.3, -0.3), rcone(0.36, 0.2, IRON, 0.3, -0.6, 4.55, -0.3)]
+          : [rcone(0.42, 0.2, IRON, 0.3, -0.6, 3.1, -0.3)]),
+      ));
+    }
+    mouth = box(0.6, 0.45, 0.06, fireMat, -0.6, 0.6, 1.16);
+  }
   g.add(mouth);
-  // L'enclume sur sa souche, le bac de trempe, les lingots, le tas de charbon.
+  // L'enclume sur sa souche, le bac de trempe.
   g.add(group(
     rcyl(0.24, 0.28, 0.6, LOG, 0.3, 1.2, 0.3, 0.2), cyl(0.21, 0.21, 0.02, CUT, 8, 1.2, 0.6, 0.2),
     box(0.22, 0.12, 0.16, IRON, 1.2, 0.66, 0.2), box(0.5, 0.14, 0.22, 0x46494d, 1.2, 0.79, 0.2),
     rot(cone(0.07, 0.24, IRON, 7, 1.56, 0.8, 0.2), 0, 0, -Math.PI / 2),
   ));
-  const water = new THREE.Color(0x3f6a8a);
-  const metal = new THREE.Color(0x55595c);
-  g.add(group(
-    paint(lathe(BARREL, C.white, 1.75, 0, 0.95), 'quench', (x, y, z, out) => {
-      out.copy(y < 0.665 && y > 0.6 && Math.hypot(x, z) < 0.265 ? water : metal);
-    }),
-    cyl(0.31, 0.31, 0.05, IRON, 8, 1.75, 0.18, 0.95), cyl(0.31, 0.31, 0.05, IRON, 8, 1.75, 0.55, 0.95),
-  ));
+  if (st >= 2) {
+    const water = new THREE.Color(0x3f6a8a);
+    const metal = new THREE.Color(0x55595c);
+    g.add(group(
+      paint(lathe(BARREL, C.white, 1.75, 0, 0.95), 'quench', (x, y, z, out) => {
+        out.copy(y < 0.665 && y > 0.6 && Math.hypot(x, z) < 0.265 ? water : metal);
+      }),
+      cyl(0.31, 0.31, 0.05, IRON, 8, 1.75, 0.18, 0.95), cyl(0.31, 0.31, 0.05, IRON, 8, 1.75, 0.55, 0.95),
+    ));
+  }
+  // Les lingots : de plus en plus nombreux.
   const ingots = group(plank(0.8, 0.1, 0.6, BOARD2, 0.5, 0.05, 1.15));
-  for (let i = 0; i < 4; i++) ingots.add(box(0.32, 0.1, 0.14, 0xb8bec4, 0.32 + (i % 2) * 0.36, 0.15, 1.0 + Math.floor(i / 2) * 0.3));
-  ingots.add(rot(box(0.32, 0.1, 0.14, 0xc9cfd4, 0.5, 0.25, 1.15), 0, Math.PI / 2));
+  const n = st === 1 ? 1 : st === 2 ? 2 : st === 3 ? 5 : 9;
+  for (let i = 0; i < n; i++) {
+    const layer = Math.floor(i / 4);
+    const b = box(0.32, 0.1, 0.14, i % 3 ? 0xb8bec4 : 0xc9cfd4, 0.32 + (i % 2) * 0.36, 0.15 + layer * 0.1, 1.0 + (Math.floor(i / 2) % 2) * 0.3);
+    if (layer % 2) b.rotation.y = Math.PI / 2;
+    ingots.add(b);
+  }
   g.add(ingots);
-  const coal = blob(0.6, 0x34312e, 1.4, 0.15, -0.9);
+  const coal = blob(st === 1 ? 0.35 : 0.6, 0x34312e, 1.4, 0.15, -0.9);
   coal.scale.y = 0.4;
   g.add(group(coal, blob(0.14, 0x2b2b2b, 0.85, 0.08, -0.6), blob(0.12, 0x3a3632, 1.95, 0.07, -0.55), blob(0.1, 0x2b2b2b, 1.6, 0.28, -0.75)));
+  if (st >= 4) {
+    // Creuset rougeoyant au palan, lingotieres alignees.
+    g.add(part(1.2,
+      box(0.12, 0.12, 2.6, 0x55595c, 0.6, 2.62, 0), box(0.3, 0.2, 0.3, 0xe8b84a, 0.6, 2.45, 0.2),
+      cyl(0.012, 0.012, 1.0, C.metal, 4, 0.6, 1.85, 0.2),
+      rcyl(0.28, 0.22, 0.42, 0x3a3d40, 0.06, 0.6, 1.2, 0.2), cyl(0.24, 0.24, 0.03, 0xff8a2a, 10, 0.6, 1.42, 0.2),
+    ));
+    for (let i = 0; i < 4; i++) g.add(group(rbox(0.36, 0.12, 0.2, 0x46494d, 0.03, -1.4 + i * 0.42, 0.06, 1.75), box(0.28, 0.02, 0.12, 0xb8bec4, -1.4 + i * 0.42, 0.125, 1.75)));
+  }
+  if (st === 5) {
+    // Murs de tole au fond et sur un cote, pont roulant, bandes de danger.
+    const back = tinSheet(3.8, 2.6, 0x7a8288);
+    back.position.set(0, 0, -1.32);
+    const side = tinSheet(2.5, 2.4, 0x6f777e);
+    side.position.set(1.92, 0, 0);
+    side.rotation.y = Math.PI / 2;
+    g.add(group(back, side));
+    g.add(part(2.5, box(4.2, 0.2, 0.2, 0xe8b84a, 0, 2.5, -0.6), ...Array.from({ length: 7 }, (_, i) => box(0.3, 0.205, 0.205, i % 2 ? 0x2b2b2b : 0xe8b84a, -1.8 + i * 0.6, 2.5, -0.6))));
+    g.add(at(drum(0x3f6a8a), -1.6, 0, -0.7), at(drum(0xc9412f), -1.9, 0, 0.0));
+  }
   return {
     group: hidden(g, L.foundry.x, L.foundry.z),
     glowMats: [fireMat],
@@ -1184,51 +1351,125 @@ export function foundry(): Building {
 
 // ---------------------------------------------------------------- batiments des extensions du camp
 
-/** Une maison d'artisan : cabane de rondins, toit de tole, fenetre allumee le soir. */
-export function cabin(x: number, z: number, ry: number, roofTone: number): Building {
+/**
+ * Une maison d'artisan, en cinq aspects : cabane de planches sous bache, cabane basse de
+ * rondins, maison de rondins, maison a veranda et jardinet, maison a etage et balcon.
+ */
+export function cabin(x: number, z: number, ry: number, roofTone: number, stage = 3): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
   const g = new THREE.Group();
-  const tones = [LOG, LOG2, LOG3];
-  // Murs de rondins croises aux angles, en deux moities (du bas vers le haut).
-  for (const half of [0, 1]) {
+  const wm = winMat();
+  const lit: THREE.Mesh[] = [];
+  if (st === 1) {
+    // Cabane de planches clouees, bache tendue en guise de toit, couchage dehors.
     const walls = new THREE.Group();
-    walls.position.y = half * 0.96;
-    for (let i = half * 3; i < half * 3 + 3; i++) {
+    for (let i = 0; i < 5; i++) {
+      const c = [BOARD, BOARD2, BOARD3][i % 3]!;
+      walls.add(plank(2.4, 0.3, 0.08, c, 0, 0.16 + i * 0.31, -0.85), plank(0.08, 0.3, 1.7, c, -1.2, 0.16 + i * 0.31, 0), plank(0.08, 0.3, 1.7, c, 1.2, 0.16 + i * 0.31, 0));
+      if (i > 3) walls.add(plank(2.4, 0.3, 0.08, c, 0, 0.16 + i * 0.31, 0.85));
+      else walls.add(plank(0.9, 0.3, 0.08, c, -0.75, 0.16 + i * 0.31, 0.85), plank(0.7, 0.3, 0.08, c, 0.85, 0.16 + i * 0.31, 0.85));
+    }
+    g.add(walls);
+    const t = tarp(2.9, 2.2, mixHex(roofTone, 0x6f7a4a, 0.5), 0);
+    t.position.y = 1.72;
+    t.rotation.x = 0.12;
+    g.add(t);
+    g.add(group(rot(rcyl(0.13, 0.13, 0.75, 0xb0605a, 0.05, -0.4, 0.13, 1.4), 0, 0.3, Math.PI / 2), at(crate(0.4), 1.0, 0, 1.3, 0.4)));
+    return { group: hidden(g, x, z, ry) };
+  }
+  // Murs de rondins croises aux angles : 4 rangs (cabane basse), 6 (maison), 10 (a etage).
+  const tones = [LOG, LOG2, LOG3];
+  const rows = st === 2 ? 4 : st === 5 ? 10 : 6;
+  const top = 0.18 + rows * 0.32;
+  const halves = st === 5 ? 3 : 2;
+  const per = Math.ceil(rows / halves);
+  for (let h = 0; h < halves; h++) {
+    const walls = new THREE.Group();
+    walls.position.y = h * per * 0.32;
+    for (let i = h * per; i < Math.min(rows, (h + 1) * per); i++) {
       const y = 0.18 + i * 0.32 - walls.position.y;
       for (const s of [-1, 1]) {
-        walls.add(along(logPiece(3.0, 0.155, tones[(i + (s > 0 ? 0 : 1)) % 3]!, 0, y, s * 1.1), 'x'));
-        walls.add(along(logPiece(2.4, 0.155, tones[(i + (s > 0 ? 2 : 1)) % 3]!, s * 1.45, y + 0.16, 0), 'z'));
+        if (i >= 6) {
+          // L'etage : bardage de planches peintes (plus leger que les rondins).
+          const c = [CREAM, 0xe0d4b8, 0xd4c8a8][(i + (s > 0 ? 0 : 1)) % 3]!;
+          walls.add(plank(2.9, 0.31, 0.1, c, 0, y, s * 1.05), plank(0.1, 0.31, 2.2, c, s * 1.4, y, 0));
+        } else {
+          walls.add(along(logPiece(3.0, 0.155, tones[(i + (s > 0 ? 0 : 1)) % 3]!, 0, y, s * 1.1), 'x'));
+          walls.add(along(logPiece(2.4, 0.155, tones[(i + (s > 0 ? 2 : 1)) % 3]!, s * 1.45, y + 0.16, 0), 'z'));
+        }
       }
     }
     g.add(walls);
   }
-  // Pignons : rondins de plus en plus courts sous la pente du toit.
-  g.add(part(2.2,
-    along(logPiece(1.4, 0.14, LOG2, 1.45, 2.25, 0), 'z'), along(logPiece(1.4, 0.14, LOG, -1.45, 2.25, 0), 'z'),
-    along(logPiece(0.5, 0.14, LOG3, 1.45, 2.53, 0), 'z'), along(logPiece(0.5, 0.14, LOG2, -1.45, 2.53, 0), 'z'),
-  ));
-  // Toit a deux pans, faitiere, cheminee.
-  for (const s of [-1, 1]) {
-    const r = tinRoof(3.5, 1.6, roofTone, s > 0 ? mixHex(roofTone, 0x8a8f91, 0.5) : 0);
-    r.position.set(0, 2.45, s * 0.65);
-    r.rotation.x = s * 0.55;
+  // Toit : a un pan pour la cabane basse, a deux pans sinon (faitiere, cheminee).
+  if (st === 2) {
+    const r = tinRoof(3.4, 2.7, roofTone, mixHex(roofTone, 0x8a8f91, 0.5));
+    r.position.set(0, top + 0.12, 0);
+    r.rotation.x = 0.12;
     g.add(r);
+  } else {
+    const ry0 = top - 0.03;
+    g.add(part(ry0 - 0.25,
+      along(logPiece(1.4, 0.14, LOG2, 1.45, ry0 - 0.2, 0), 'z'), along(logPiece(1.4, 0.14, LOG, -1.45, ry0 - 0.2, 0), 'z'),
+      along(logPiece(0.5, 0.14, LOG3, 1.45, ry0 + 0.08, 0), 'z'), along(logPiece(0.5, 0.14, LOG2, -1.45, ry0 + 0.08, 0), 'z'),
+    ));
+    for (const s of [-1, 1]) {
+      const r = tinRoof(3.5, 1.6, roofTone, s > 0 ? mixHex(roofTone, 0x8a8f91, 0.5) : 0);
+      r.position.set(0, ry0, s * 0.65);
+      r.rotation.x = s * 0.55;
+      g.add(r);
+    }
+    g.add(part(ry0 - 0.15,
+      along(rcyl(0.075, 0.075, 3.56, mixHex(roofTone, 0x000000, 0.25), 0.5, 0, ry0 + 0.44, 0), 'x'),
+      cyl(0.12, 0.12, 1.2, 0x55595c, 8, -0.9, ry0 + 0.45, -0.4), cyl(0.135, 0.135, 0.05, IRON, 8, -0.9, ry0 + 0.7, -0.4),
+      rcone(0.2, 0.14, IRON, 0.3, -0.9, ry0 + 1.12, -0.4),
+    ));
   }
-  g.add(part(2.3,
-    along(rcyl(0.075, 0.075, 3.56, mixHex(roofTone, 0x000000, 0.25), 0.5, 0, 2.89, 0), 'x'),
-    cyl(0.12, 0.12, 1.2, 0x55595c, 8, -0.9, 2.9, -0.4), cyl(0.135, 0.135, 0.05, IRON, 8, -0.9, 3.15, -0.4),
-    rcone(0.2, 0.14, IRON, 0.3, -0.9, 3.57, -0.4),
-  ));
   // Porte, marche, fenetre et sa jardiniere.
   g.add(group(
     plankDoor(0.7, 1.3, 0.5, 0.02, 1.3, BOARD2),
     plank(0.86, 0.1, 0.1, C.woodDark, 0.5, 1.38, 1.3),
     plank(0.95, 0.12, 0.26, BOARD3, 0.5, 0.06, 1.39),
   ));
-  const wm = winMat();
   const win = box(0.55, 0.45, 0.05, wm, -0.7, 1.15, 1.28);
   g.add(win);
-  g.add(part(0.9, windowFrame(0.55, 0.45, -0.7, 1.15, 1.3), flowerBox(0.6, -0.7, 0.82, 1.37)));
-  return { group: hidden(g, x, z, ry), glowMats: [wm], live: [win] };
+  lit.push(win);
+  g.add(part(0.9, windowFrame(0.55, 0.45, -0.7, 1.15, 1.3), ...(st >= 3 ? [flowerBox(0.6, -0.7, 0.82, 1.37)] : [])));
+  if (st >= 4) {
+    // Veranda : plancher, deux poteaux, auvent ; jardinet et barriere blanche, boite aux lettres.
+    g.add(group(
+      ...Array.from({ length: 5 }, (_, i) => plank(0.6, 0.08, 0.95, [BOARD, BOARD2, BOARD3][i % 3]!, -1.2 + i * 0.6, 0.08, 1.75)),
+      postPiece(st === 5 ? 2.2 : 1.8, 0.06, LOG2, -1.35, 2.15), postPiece(st === 5 ? 2.2 : 1.8, 0.06, LOG, 1.35, 2.15),
+    ));
+    if (st === 4) {
+      const aw = tinRoof(3.0, 1.0, roofTone);
+      aw.position.set(0, 1.85, 1.75);
+      aw.rotation.x = 0.3;
+      g.add(aw);
+    }
+    // Jardinet sur le cote (devant, c'est la zone ⬆️ et le passage).
+    const garden = new THREE.Group();
+    for (let i = 0; i < 5; i++) garden.add(box(0.04, 0.5, 0.07, 0xeeeee6, 2.3, 0.25, -0.9 + i * 0.5));
+    garden.add(box(0.03, 0.05, 2.1, 0xeeeee6, 2.3, 0.4, 0.1));
+    for (let i = 0; i < 4; i++) garden.add(puff(0.17, [0x7fae4f, 0x6f9a42][i % 2]!, 1.92, 0.17, -0.75 + i * 0.55), sphere(0.06, [0xe8584a, 0xf2c94c, 0xd98ad0, 0xffffff][i]!, 1.95, 0.36, -0.72 + i * 0.55, 6));
+    garden.add(box(0.05, 0.9, 0.05, C.woodDark, 2.0, 0.45, 1.5), rbox(0.3, 0.18, 0.2, 0x3f6a8a, 0.04, 2.0, 0.95, 1.5));
+    g.add(garden);
+  }
+  if (st === 5) {
+    // Balcon a l'etage (sur les poteaux de la veranda), deuxieme fenetre, panneau solaire.
+    g.add(part(2.0,
+      plank(3.0, 0.1, 1.0, BOARD2, 0, 2.2, 1.75),
+      ...Array.from({ length: 9 }, (_, i) => box(0.05, 0.55, 0.05, C.woodDark, -1.4 + i * 0.35, 2.5, 2.22)), box(3.0, 0.06, 0.06, BOARD3, 0, 2.78, 2.22),
+    ));
+    const win2 = box(0.55, 0.45, 0.05, wm, 0.5, 2.75, 1.28);
+    g.add(win2, part(2.5, windowFrame(0.55, 0.45, 0.5, 2.75, 1.3)));
+    lit.push(win2);
+    const solar = group(box(1.0, 0.05, 0.7, IRON, 0, 0, 0), plank(0.92, 0.04, 0.62, 0x2d4a6e, 0, 0.03, 0));
+    solar.position.set(0.7, top + 0.34, 0.7);
+    solar.rotation.x = 0.55;
+    g.add(solar);
+  }
+  return { group: hidden(g, x, z, ry), glowMats: [wm], live: lit };
 }
 
 /** L'armurerie : un atelier blinde, ratelier d'armes, cible d'entrainement. */

@@ -952,6 +952,44 @@ export class Palisade {
     s.seg.off = true;
   }
 
+  /** Camp et ferme reunis (camp niveau 5) : deja fait pour cette palissade. */
+  joined = false;
+
+  /** Une porte qui disparait (le mur ou elle etait n'existe plus). */
+  private hideGate(s: Section): void {
+    s.enabled = false;
+    s.hidden = true;
+    s.root.visible = false;
+    s.seg.off = true;
+  }
+
+  /**
+   * Grand bastion (camp niveau 5) : le mur ouest du camp et sa porte s'effacent, deux murs
+   * relient les coins du camp a ceux de la ferme. Les troncons ajoutes vont en dernier (ordre
+   * des points de vie sauvegardes). Renvoie l'indice du premier troncon ajoute.
+   */
+  joinFarm(): number {
+    if (this.joined) return this.sections.length;
+    this.joined = true;
+    const { minX, minZ, maxZ } = CAMP;
+    for (const s of this.sections) if (s.kind === 'wall' && !s.hidden && Math.abs(s.x - minX) < 0.01) this.cut(s);
+    if (this.west) this.hideGate(this.west);
+    const first = this.sections.length;
+    this.addRuns([
+      { x1: FARM.maxX, z1: FARM.minZ, x2: minX, z2: minZ, h: HIGH },
+      { x1: minX, z1: maxZ, x2: FARM.maxX, z2: FARM.maxZ, h: LOW },
+    ], 2.6);
+    return first;
+  }
+
+  /** La ferme dans le grand bastion : son mur est et sa porte est s'effacent. */
+  joinCamp(): void {
+    if (this.joined) return;
+    this.joined = true;
+    for (const s of this.sections) if (s.kind === 'wall' && !s.hidden && Math.abs(s.x - FARM.maxX) < 0.01) this.cut(s);
+    if (this.west) this.hideGate(this.west);
+  }
+
   /** Le troncon cache de l'etal (camp seulement). */
   readonly stall: Section | null;
 

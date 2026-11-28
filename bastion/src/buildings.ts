@@ -809,9 +809,9 @@ export function shelter(stage = 4): Building {
         ...[0, 1, 2, 3].map((i) => box(0.05, 0.8, 0.05, C.metal, 1.0 + i * 0.36, 2.82, 1.05)), box(1.15, 0.05, 0.05, C.metal, 1.55, 3.2, 1.05),
         ...[0, 1, 2].map((i) => box(0.05, 0.8, 0.05, C.metal, 2.08, 2.82, -0.75 + i * 0.6)), box(0.05, 0.05, 2.0, C.metal, 2.08, 3.2, 0),
       ));
-      // Escalier sur le cote, cinq marches.
-      g.add(group(...Array.from({ length: 6 }, (_, i) => plank(0.55, 0.06, 0.32, BOARD2, 2.55, 0.35 + i * 0.4, -0.9 + i * 0.32)),
-        rot(box(0.06, 2.9, 0.06, IRON, 2.85, 1.25, -0.1), -0.66, 0, 0)));
+      // Escalier contre le mur arriere (rien ne depasse sur les cotes).
+      g.add(group(...Array.from({ length: 6 }, (_, i) => plank(0.32, 0.06, 0.55, BOARD2, 1.6 - i * 0.32, 0.35 + i * 0.4, -1.42)),
+        rot(box(0.06, 2.9, 0.06, IRON, 0.8, 1.25, -1.7), 0, 0, 0.66)));
       // Guirlande d'ampoules du toit jusqu'a l'antenne.
       g.add(part(2.4, ...Array.from({ length: 7 }, (_, i) => sphere(0.05, 0xfff0c0, -2.0 + i * 0.6, 2.55 + 0.12 * Math.sin(i * 0.9), 1.15, 6))));
     }

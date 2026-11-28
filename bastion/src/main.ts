@@ -229,7 +229,7 @@ const forge = new Converter(scene, L.foundryIn, L.foundryOut, ['scrap'], 2, 'met
 const brick = new Converter(scene, L.brickIn, L.brickOut, ['stone'], 1, 'brick', 2.6);
 const reserve = new Reserve(scene, labels);
 const helpers: Helper[] = [];
-const nav: NavState = { northOpen: false, westOpen: false, eastOpen: false };
+const nav: NavState = { northOpen: false, westOpen: false, eastOpen: false, merged: false };
 const R = regions(nav);
 const navAll = [R.camp, R.farm, R.station];
 const navZombies = [R.farm, R.station];
@@ -822,7 +822,7 @@ function placeEdgeArrows(): void {
 // ---- agrandissement du camp : chaque niveau pousse la palissade et ajoute des batiments
 
 /** Largeur du camp a chaque niveau : il s'etend a l'est (niv. 2), puis a l'ouest (niv. 3). */
-const CAMP_SIZES = [{ minX: -13, maxX: 13 }, { minX: -13, maxX: 13 }, { minX: -13, maxX: 19 }, { minX: -19, maxX: 19 }, { minX: -19, maxX: 19 }];
+const CAMP_SIZES = [{ minX: -13, maxX: 13 }, { minX: -13, maxX: 13 }, { minX: -13, maxX: 19 }, { minX: -19, maxX: 19 }, { minX: -19, maxX: 19 }, { minX: -19, maxX: 19 }];
 
 /**
  * Tours d'angle : au niveau 2 du camp, la tour de guet part au coin sud-est ; les trois autres
@@ -839,7 +839,7 @@ const CORNER_COST: Record<string, Cost> = {
 };
 /** Ou la tour de guet s'installe quand le camp s'agrandit vers l'est. */
 const TOWER_CORNER = { x: 19.4, z: 11.4 };
-const TOWER_CORNER_PAD = { x: 13.6, z: 6.9 };
+const TOWER_CORNER_PAD = { x: 13.2, z: 10.2 };
 const cornerClock: number[] = [];
 
 /** Les batiments des extensions, et le niveau qui les apporte. */
@@ -855,17 +855,20 @@ const extDef = (id: string, name: string, icon: string, lv: number, r: number, b
   id, name, icon, lv, r, pad, cost, b,
 });
 const EXT_DEFS = [
-  extDef('armory', 'l’armurerie', '🛡️', 2, 1.9, armory(16.2, 4.5), { x: 13.0, z: 4.5 }, { coins: 3000, plank: 20, scrap: 15 }),
+  extDef('armory', 'l’armurerie', '🛡️', 2, 1.9, armory(16.2, 2.8), { x: 13.0, z: 2.8 }, { coins: 3000, plank: 20, scrap: 15 }),
   extDef('house1', 'une maison', '🏡', 2, 1.7, cabin(16, -2.6, -Math.PI / 2, 0x5f8a85), { x: 13.0, z: -2.6 }, { coins: 1800, plank: 20 }),
-  extDef('house2', 'une maison', '🏡', 2, 1.7, cabin(16, -8.2, -Math.PI / 2, 0x9c4a3c), { x: 13.0, z: -8.2 }, { coins: 1800, plank: 20 }),
+  extDef('house2', 'une maison', '🏡', 2, 1.7, cabin(16, -7.6, -Math.PI / 2, 0x9c4a3c), { x: 13.0, z: -7.6 }, { coins: 1800, plank: 20 }),
   extDef('infirmary', 'l’infirmerie', '🩹', 3, 2.4, infirmary(-16, 4), { x: -12.6, z: 4.0 }, { coins: 5000, plank: 25, bread: 10 }),
   extDef('house3', 'une maison', '🏡', 3, 1.7, cabin(-16, -2.6, Math.PI / 2, 0x6f7a4a), { x: -13.0, z: -2.6 }, { coins: 3000, plank: 25, scrap: 10 }),
-  extDef('house4', 'une maison', '🏡', 3, 1.7, cabin(-16, -8.2, Math.PI / 2, 0xb9874a), { x: -13.0, z: -8.2 }, { coins: 3000, plank: 25, scrap: 10 }),
-  extDef('warehouse', 'l’entrepôt', '🏬', 4, 2.4, warehouse(16, 9.0), { x: 12.9, z: 9.6 }, { coins: 8000, stone: 40, metal: 10 }),
+  extDef('house4', 'une maison', '🏡', 3, 1.7, cabin(-16, -7.6, Math.PI / 2, 0xb9874a), { x: -13.0, z: -7.6 }, { coins: 3000, plank: 25, scrap: 10 }),
+  extDef('warehouse', 'l’entrepôt', '🏬', 4, 2.1, warehouse(16, 7.9), { x: 12.9, z: 7.9 }, { coins: 8000, stone: 40, metal: 10 }),
 ];
+// L'entrepot, un peu plus compact : il tient entre l'armurerie et la tour d'angle.
+EXT_DEFS.find((e) => e.id === 'warehouse')!.b.group.scale.setScalar(0.85);
 for (const e of EXT_DEFS) scene.add(e.b.group);
 const TOWER_PADS: Record<string, { x: number; z: number }> = {
-  towerNE: { x: 17.6, z: -10.2 }, towerNW: { x: -17.6, z: -10.2 }, towerSW: { x: -17.6, z: 10.0 },
+  // Dans le camp, hors des maisons (au pied des tours, il n'y a pas la place).
+  towerNE: { x: 12.6, z: -10.0 }, towerNW: { x: -12.6, z: -10.0 }, towerSW: { x: -16.2, z: 9.4 },
 };
 const EXT: ExtSite[] = [
   ...EXT_DEFS.map((e, i) => ({
@@ -929,6 +932,7 @@ const CAMP_LEVELS: { cost: Cost; title: string; done: string }[] = [
   { cost: { coins: 5000, plank: 30, log: 30 }, title: 'Camp niv. 2 : extension est', done: 'Le camp s’agrandit ! Chantiers : armurerie, 2 maisons, 2 tours' },
   { cost: { coins: 9000, plank: 50, scrap: 30, bread: 20 }, title: 'Camp niv. 3 : extension ouest', done: 'Le camp s’agrandit ! Chantiers : infirmerie, 2 maisons, 2 tours' },
   { cost: { coins: 10000, stone: 80, metal: 25 }, title: 'Camp niv. 4 : bastion', done: 'Bastion : palissade renforcée ! Chantier : entrepôt' },
+  { cost: { coins: 30000, brick: 150, metal: 40 }, title: 'Camp niv. 5 : grand bastion (avec la ferme)', done: 'Grand bastion : le camp et la ferme ne font plus qu’un, derrière une seule palissade' },
 ];
 const CAMP_PAD = { x: -3.6, z: 6.2 };
 const dirtStrips = new Set<number>();
@@ -950,6 +954,50 @@ function rebuildPalisade(): void {
   palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
   if (northOn) palisade.enableNorth();
   repairTarget = null;
+  // Le grand bastion garde ses murs de liaison (la palissade neuve les reprend).
+  if (merged) joinCampWalls();
+}
+
+// ---- le grand bastion (camp niveau 5) : camp et ferme dans une seule enceinte
+
+let merged = false;
+
+/** Le camp perd son mur ouest et gagne ses murs de liaison (points de vie sauvegardes repris). */
+function joinCampWalls(): void {
+  const first = palisade.joinFarm();
+  const added = palisade.sections.slice(first);
+  world.walls.push(...added.map((s) => s.seg));
+  const hp = save.walls;
+  added.forEach((s, k) => {
+    const v = hp?.[first + k];
+    if (typeof v === 'number') palisade.setHp(s, v);
+  });
+  palisade.setTier(save.wallTier);
+}
+
+function applyMerge(instant: boolean): void {
+  if (merged || save.campLv < 5 || !farmWall) return;
+  merged = true;
+  nav.merged = true;
+  joinCampWalls();
+  farmWall.joinCamp();
+  // Une seule palissade : la ferme prend le materiau et la solidite du camp.
+  farmWall.setTier(save.wallTier);
+  farmWall.setLevel(save.up.wall + 1);
+  syncZombieWalls();
+  // Terre battue dans le passage entre le camp et la ferme.
+  const w = CAMP.minX - FARM.maxX;
+  const sg = new THREE.PlaneGeometry(w + 0.6, 22.6);
+  planarUV(sg, 1 / 6);
+  const strip = new THREE.Mesh(sg, campDirt(0xc9a57a));
+  strip.rotation.x = -Math.PI / 2;
+  strip.position.set((CAMP.minX + FARM.maxX) / 2, 0.014, 1);
+  strip.receiveShadow = true;
+  scene.add(strip);
+  if (!instant) {
+    restorer.run(null, farmRoot);
+    particles.burst(new THREE.Vector3((CAMP.minX + FARM.maxX) / 2, 1, 0), [0xb9a58a, 0x9a8a72, 0xffd84a], 40, { speed: 5, up: 5, size: 0.24, life: 1 });
+  }
 }
 
 /** Applique le niveau du camp : taille, palissade, batiments et tours (`instant` au chargement). */
@@ -973,6 +1021,7 @@ function applyCampLevel(instant: boolean): void {
     }
   }
   relocateTower(instant);
+  applyMerge(instant);
   // Chaque niveau ouvre ses emplacements : chantier a payer, ou batiment deja bati.
   for (const e of EXT) {
     // Deja bati (anciennes parties) : on le garde, meme si son niveau a change depuis.
@@ -1201,7 +1250,8 @@ function syncDynPads(): void {
   }
   const next = save.campLv + 1;
   const key = `camp:${next}`;
-  const want = save.obj >= 11 && next < CAMP_LEVELS.length;
+  // Le grand bastion (niveau 5) englobe la ferme : il faut l'avoir fortifiee.
+  const want = save.obj >= 11 && next < CAMP_LEVELS.length && (next < 5 || save.farmLv >= 1);
   if (want && !dynPads.has(key)) {
     const lvl = CAMP_LEVELS[next]!;
     dynPads.set(key, makeDyn(key, CAMP_PAD.x, CAMP_PAD.z, lvl.cost, '🏰', lvl.title, () => {
@@ -1310,7 +1360,8 @@ function refreshTowerSkins(): void {
 function applyFarmWall(instant: boolean): void {
   const n = Math.min(save.farmLv, FARM_WALL.length);
   if (n <= 0) return;
-  const tier = FARM_WALL[n - 1]!.tier;
+  // Grand bastion : la ferme suit la palissade du camp.
+  const tier = merged ? save.wallTier : FARM_WALL[n - 1]!.tier;
   const fence = world.farmFence;
   if (!farmWall) {
     farmWall = new Palisade(farmRoot, labels, 'farm', tier);
@@ -1331,6 +1382,7 @@ function applyFarmWall(instant: boolean): void {
   }
   showFarmTowers(instant);
   refreshTowerSkins();
+  applyMerge(instant);
 }
 
 /** Les emplacements des tours de garde s'ouvrent avec la palissade de la ferme. */
@@ -1354,7 +1406,8 @@ function showFarmTowers(instant: boolean): void {
 /** Chantiers de la ferme fortifiee : la palissade (un niveau a la fois), puis les deux tours. */
 function syncFarmPads(): void {
   const fl = save.farmLv;
-  const fw = FARM_WALL[fl];
+  // Grand bastion : plus de palissade propre a la ferme (elle suit celle du camp).
+  const fw = merged ? undefined : FARM_WALL[fl];
   const key = `farm:wall:${fl + 1}`;
   if (fw && fw.ready() && !dynPads.has(key)) {
     dynPads.set(key, makeDyn(key, FARM_WALL_PAD.x, FARM_WALL_PAD.z, fw.cost, fw.icon, fw.title, () => {
@@ -1381,7 +1434,7 @@ function syncFarmPads(): void {
 // ---- chasseurs de prime : recrutes a l'armurerie, ils defendent la nuit le camp ou la ferme
 
 /** Zone devant l'armurerie (la ou etait son chantier) : elle ouvre le panneau des chasseurs. */
-const HUNT_PAD = { x: 13.0, z: 4.5 };
+const HUNT_PAD = { x: 13.0, z: 2.8 };
 /** Ou ils attendent le jour : pres de l'armurerie ; le chasseur de passage, pres du feu. */
 const HUNT_REST = [{ x: 12.2, z: 2.3 }, { x: 12.2, z: 6.7 }, { x: 11.0, z: 4.5 }];
 const MERC_REST = { x: L.campfire.x - 2.8, z: L.campfire.z + 1.4 };
@@ -1843,6 +1896,7 @@ function applyUpgrades(): void {
   player.hp = Math.min(player.hp, player.maxHp);
   // Portes renforcees (niveau 4 du camp) : un cran de solidite en plus pour toute la palissade.
   palisade.setLevel(save.up.wall + (save.campLv >= 4 ? 1 : 0));
+  if (merged && farmWall) farmWall.setLevel(save.up.wall + 1);
 }
 
 let sheetOpen = false;
@@ -2781,6 +2835,7 @@ function materialUpgrades(): MatUp[] {
       apply: () => {
         save.wallTier = t + 1;
         palisade.setTier(save.wallTier);
+        if (merged && farmWall) farmWall.setTier(save.wallTier);
         toast(`${next.icon} Palissade en ${next.name.toLowerCase()} !`);
       },
     });
@@ -5135,7 +5190,8 @@ applyCampLevel(true);
   const full = palisade.sections.map((s) => s.max);
   // Une sauvegarde plus ancienne a moins de troncons (l'etal a ete ajoute en dernier) : on
   // reprend ce qu'elle connait, le reste est intact.
-  const saved = save.walls && save.walls.length > 0 && save.walls.length <= palisade.sections.length ? save.walls : null;
+  // Plus longue (murs de liaison du grand bastion, ajoutes ensuite) : ils sont repris a part.
+  const saved = save.walls && save.walls.length > 0 ? save.walls : null;
   const hp = saved ? palisade.sections.map((s, i) => saved[i] ?? s.max) : save.campLv > 1 ? full : palisade.initialHp();
   palisade.sections.forEach((s, i) => palisade.setHp(s, hp[i]!));
 }

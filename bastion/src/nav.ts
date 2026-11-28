@@ -13,22 +13,32 @@ export interface Region { inside: (x: number, z: number) => boolean; gates: Gate
 interface Box { x0: number; x1: number; z0: number; z1: number }
 const boxOf = (r: { minX: number; maxX: number; minZ: number; maxZ: number }) => (): Box => ({ x0: r.minX, x1: r.maxX, z0: r.minZ, z1: r.maxZ });
 
-export interface NavState { northOpen: boolean; westOpen: boolean; eastOpen: boolean }
+export interface NavState {
+  northOpen: boolean; westOpen: boolean; eastOpen: boolean;
+  /** Grand bastion (camp niveau 5) : camp, ferme et le passage entre les deux ne font qu'un. */
+  merged?: boolean;
+}
+
+/** Le passage entre le mur ouest du camp et le mur est de la ferme (ferme par le bastion). */
+const inLink = (x: number, z: number) => x > FARM.maxX - 0.3 && x < CAMP.minX + 0.3 && z > CAMP.minZ && z < FARM.maxZ;
 
 export function regions(s: NavState): { camp: Region; farm: Region; station: Region } {
   return {
     camp: {
-      inside: insideCamp,
+      // Grand bastion : la ferme et le passage font partie du camp (on y va tout droit).
+      inside: (x, z) => insideCamp(x, z) || (!!s.merged && (insideFarm(x, z) || inLink(x, z))),
       box: boxOf(CAMP),
       gates: [
         { x: 0, get z() { return CAMP.maxZ; }, nx: 0, nz: 1, half: CAMP.gate, open: () => true },
         { x: 0, get z() { return CAMP.minZ; }, nx: 0, nz: -1, half: CAMP.gate, open: () => s.northOpen },
-        // Porte ouest, vers la ferme : elle suit le mur quand le camp s'agrandit.
-        { get x() { return CAMP.minX; }, z: CAMP_WEST_GATE.z, nx: -1, nz: 0, half: CAMP_WEST_GATE.half, open: () => true },
+        // Porte ouest, vers la ferme : elle suit le mur quand le camp s'agrandit (disparait au bastion).
+        { get x() { return CAMP.minX; }, z: CAMP_WEST_GATE.z, nx: -1, nz: 0, half: CAMP_WEST_GATE.half, open: () => !s.merged },
+        // Bastion : l'entree de la ferme, cote route, devient une porte du camp.
+        { x: FARM.gateX, z: FARM.maxZ, nx: 0, nz: 1, half: FARM.gate, open: () => !!s.merged && s.westOpen },
       ],
     },
     farm: {
-      inside: insideFarm,
+      inside: (x, z) => !s.merged && insideFarm(x, z),
       box: boxOf(FARM),
       gates: [
         { x: FARM.gateX, z: FARM.maxZ, nx: 0, nz: 1, half: FARM.gate, open: () => s.westOpen },

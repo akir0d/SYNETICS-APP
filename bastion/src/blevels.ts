@@ -113,8 +113,9 @@ export const awayOf = (lv: number): number => 1200 * (lv - 1);
 export const regenOf = (lv: number): number => 1 + 0.2 * (lv - 1);
 /** Ponton : on peche 15 % plus vite par niveau (toi et le pecheur). */
 export const fishOf = (lv: number): number => 1 + 0.15 * (lv - 1);
-/** Maison : un loyer verse a chaque aube. */
-export const rentOf = (lv: number): number => Math.round(25 * lv * (1 + 0.1 * (lv - 1)));
+/** Maison : son habitant travaille 8 % plus vite par niveau et porte un objet de plus. */
+export const workOf = (lv: number): number => 1 + 0.08 * (lv - 1);
+export const carryOf = (lv: number): number => lv - 1;
 /** Abri : les survivants, mieux reposes, travaillent 5 % plus vite par niveau. */
 export const crewOf = (lv: number): number => 1 + 0.05 * (lv - 1);
 
@@ -154,7 +155,7 @@ export function bonusText(d: BDef, lv: number): string {
     case 'dock':
       return `Pêche +${Math.round(100 * (fishOf(lv) - 1))} % plus rapide · poisson double ${Math.round(100 * extraOf(lv))} %`;
     case 'house':
-      return `Loyer à chaque aube : ${rentOf(lv)} pièces`;
+      return `Son habitant : +${Math.round(100 * (workOf(lv) - 1))} % plus rapide, porte ${6 + carryOf(lv)} objets`;
     case 'shel':
       return `Survivants +${Math.round(100 * (crewOf(lv) - 1))} % plus rapides`;
     case 'arm': {

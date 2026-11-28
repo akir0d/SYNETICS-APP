@@ -5,8 +5,8 @@ import * as THREE from 'three';
 import * as sfx from './audio';
 import { bakeStatic, consolidate } from './bake';
 import {
-  BDEFS, BMAX, WEAPON_NEED, awayOf, bCost, bdef, bonusText, capOf, cashCapOf, crewOf, doubleOf, extraOf, fishOf, growOf, huntBonusOf, needOf, regenOf,
-  rentOf, resCapOf, sellOf,
+  BDEFS, BMAX, WEAPON_NEED, awayOf, bCost, bdef, bonusText, capOf, carryOf, cashCapOf, crewOf, doubleOf, extraOf, fishOf, growOf, huntBonusOf, needOf, regenOf,
+  resCapOf, sellOf, workOf,
   speedOf, stageName, stageOf, wCost,
   type BDef,
 } from './blevels';
@@ -867,6 +867,36 @@ if (!save.seen.includes('ext-v1')) {
 const HOUSED = ['fisher', 'scav', 'porter', 'cashier'];
 const houses = () => ['house1', 'house2', 'house3', 'house4'].filter((id) => isBuilt(id)).length;
 const freeHouse = () => houses() - HOUSED.filter((id) => isBuilt(id)).length > 0;
+/** Qui habite ou : les artisans dans l'ordre de leur recrutement, les maisons dans l'ordre ou on les a baties. */
+let resKeyN = -1;
+let residentsOf: Record<string, string> = {};
+function residents(): Record<string, string> {
+  if (resKeyN !== save.built.length) {
+    resKeyN = save.built.length;
+    const hs = save.built.filter((id) => /^house\d$/.test(id));
+    const ws = save.built.filter((id) => HOUSED.includes(id));
+    residentsOf = {};
+    hs.forEach((h, i) => { if (ws[i]) residentsOf[h] = ws[i]!; });
+  }
+  return residentsOf;
+}
+const homeOf = (job: string) => Object.keys(residents()).find((h) => residents()[h] === job);
+const ROLE: Record<string, string> = { fisher: 'le pêcheur', scav: 'le ferrailleur', porter: 'le porteur', cashier: 'la caissière' };
+/** Le nom d'un batiment a niveaux ; une maison porte le nom de son habitant. */
+function bName(id: string): string {
+  const job = residents()[id];
+  return job ? `Maison de ${CREW[job]?.name ?? ''}` : bdef(id)!.name;
+}
+/** Le bonus d'un niveau, dit pour l'habitant quand c'est une maison. */
+function bBonus(id: string, lv: number): string {
+  const d = bdef(id)!;
+  if (d.kind !== 'house') return bonusText(d, lv);
+  const job = residents()[id];
+  const pct = Math.round(100 * (workOf(lv) - 1));
+  if (!job) return pct > 0 ? `Personne n’y vit encore · son habitant sera +${pct} % plus rapide` : 'Personne n’y vit encore : recrute un artisan';
+  const who = `${CREW[job]?.name ?? ''}, ${ROLE[job] ?? ''}`;
+  return job === 'cashier' ? `${who} : sert +${pct} % plus vite` : `${who} : +${pct} % plus rapide, porte ${6 + carryOf(lv)} objets`;
+}
 
 /** Les niveaux du camp : ce que chacun coute et apporte. */
 const CAMP_LEVELS: { cost: Cost; title: string; done: string }[] = [
@@ -2066,7 +2096,7 @@ function setPanel(p: Panel): void {
   sheetRest();
   ui.sheet.classList.remove('min');
   const bd = p === 'bld' ? bdef(bldId) : undefined;
-  setText(ui.sheetTitle, p === 'bench' ? '🔨 Établi' : p === 'reserve' ? '📦 Réserve' : p === 'hunters' ? '🛡️ Armurerie' : bd ? `${bd.icon} ${bd.name}` : '');
+  setText(ui.sheetTitle, p === 'bench' ? '🔨 Établi' : p === 'reserve' ? '📦 Réserve' : p === 'hunters' ? '🛡️ Armurerie' : bd ? `${bd.icon} ${bName(bldId)}` : '');
   document.body.classList.toggle('sheet-open', sheetOpen);
   ui.sheetBody.scrollTop = 0;
   if (p === 'bench') renderSheet();
@@ -2948,8 +2978,8 @@ function bLevelUp(id: string): void {
   if (newLook) {
     sfx.sfxVictory();
     shake = Math.max(shake, 0.25);
-    objBanner(`✨ ${s.d.name} : ${stageName(s.d, s.next)}`, `Niveau ${s.next} · ${bonusText(s.d, s.next)}`);
-  } else toast(`⬆️ ${s.d.icon} ${s.d.name} niveau ${s.next}`);
+    objBanner(`✨ ${bName(id)} : ${stageName(s.d, s.next)}`, `Niveau ${s.next} · ${bBonus(id, s.next)}`);
+  } else toast(`⬆️ ${s.d.icon} ${bName(id)} niveau ${s.next}`);
   buzz(newLook ? 60 : 30);
   bldKey = '';
   huntKey = '';
@@ -2985,18 +3015,18 @@ function bldCard(id: string): string {
       <button class="btn big ${bCanDeposit(s) ? '' : 'poor'}" data-bup="${id}">${canAfford(s.rem) ? `⬆️ Niveau ${s.next}` : 'Déposer'}</button>`;
   }
   return `<div class="bld">
-    <div class="bld-head"><span class="bld-icon">${d.icon}</span><div><div class="bld-name">${d.name} <span class="lv">niv. ${s.lv}/${BMAX}</span></div>
+    <div class="bld-head"><span class="bld-icon">${d.icon}</span><div><div class="bld-name">${bName(id)} <span class="lv">niv. ${s.lv}/${BMAX}</span></div>
     <div class="bld-stage">${stageName(d, s.lv)}</div></div></div>
     <div class="pips">${pips}</div>
-    <div class="bld-row"><span>Actuel</span><b>${bonusText(d, s.lv)}</b></div>
-    ${s.max ? '' : `<div class="bld-row next"><span>Niv. ${s.next}</span><b>${bonusText(d, s.next)}</b></div>`}
+    <div class="bld-row"><span>Actuel</span><b>${bBonus(id, s.lv)}</b></div>
+    ${s.max ? '' : `<div class="bld-row next"><span>Niv. ${s.next}</span><b>${bBonus(id, s.next)}</b></div>`}
     ${look}${foot}
   </div>`;
 }
 
 function bldKeyOf(id: string): string {
   const s = bState(id);
-  return `${id}|${s.lv}|${s.locked}|${JSON.stringify(save.fixPaid[s.key] ?? null)}|${canAfford(s.rem) ? 1 : 0}`;
+  return `${id}|${residents()[id] ?? ''}|${s.lv}|${s.locked}|${JSON.stringify(save.fixPaid[s.key] ?? null)}|${canAfford(s.rem) ? 1 : 0}`;
 }
 
 function renderBld(): void {
@@ -3072,7 +3102,7 @@ function openBld(id: string): void {
   bldId = id;
   if (panel === 'bld') {
     const d = bdef(id)!;
-    setText(ui.sheetTitle, `${d.icon} ${d.name}`);
+    setText(ui.sheetTitle, `${d.icon} ${bName(id)}`);
     ui.sheet.classList.remove('min');
     ui.sheetBody.scrollTop = 0;
   }
@@ -3265,7 +3295,7 @@ function updateUpPads(time: number): void {
     }
     const d = bdef(u.id)!;
     const lv = blvOf(u.id);
-    const html = `<span class="pl-icon">${d.icon}</span><span class="pl-name">${d.name}</span><span class="pl-cost">${lv >= BMAX ? 'niv. MAX' : `niv. ${lv} ${ready ? '⬆️' : '→ ' + (lv + 1)}`}</span>`;
+    const html = `<span class="pl-icon">${d.icon}</span><span class="pl-name">${bName(u.id)}</span><span class="pl-cost">${lv >= BMAX ? 'niv. MAX' : `niv. ${lv} ${ready ? '⬆️' : '→ ' + (lv + 1)}`}</span>`;
     if (u.html !== html) {
       u.html = html;
       u.label.innerHTML = html;
@@ -3789,7 +3819,7 @@ function interact(dt: number): void {
     bldId = up;
     bldKey = '';
     const d = bdef(up)!;
-    if (panel === 'bld') setText(ui.sheetTitle, `${d.icon} ${d.name}`);
+    if (panel === 'bld') setText(ui.sheetTitle, `${d.icon} ${bName(up)}`);
   }
   const zone: Panel = atBench ? 'bench' : atReserve ? 'reserve' : atHunt ? 'hunters' : atUp ? 'bld' : null;
   // Un panneau ouvert d'un toucher reste ouvert tant qu'on ne s'eloigne pas de plus de 7 m.
@@ -3947,16 +3977,7 @@ function startDay(): void {
   save.phaseT = 0;
   sfx.sfxToggle(false);
   save.gems += 1;
-  // Les maisons paient leur loyer a l'aube (selon leur niveau).
-  let rent = 0;
-  for (const e of EXT) {
-    if (!e.id.startsWith('house') || !isBuilt(e.id) || isBroken(e.id)) continue;
-    const n = rentOf(blvOf(e.id));
-    rent += n;
-    hudCoins(new THREE.Vector3(e.x, 2.4, e.z), 4);
-  }
-  if (rent > 0) earn(rent);
-  toast(`☀️ Jour ${save.day} : le camp a tenu ! +1 💎${rent > 0 ? ` · 🏡 loyers +${fmt(rent)}` : ''}`);
+  toast(`☀️ Jour ${save.day} : le camp a tenu ! +1 💎`);
   document.body.classList.remove('night');
   planDay(0);
   persist();
@@ -4774,7 +4795,13 @@ function step(dt: number, time: number): void {
   // Abri demoli : les survivants n'ont plus de toit et restent pres du feu.
   helperCtx.night = (save.cycle && save.phase === 'night') || isBroken('shelter');
   const cdt = dt * crewMul();
-  for (const h of helpers) h.update(cdt, helperCtx);
+  for (const h of helpers) {
+    // Un artisan loge dans une maison amelioree travaille plus vite et porte davantage.
+    const home = homeOf(h.job);
+    const lv = home && !isBroken(home) ? blvOf(home) : 1;
+    h.stack.cap = 6 + carryOf(lv);
+    h.update(cdt * workOf(lv), helperCtx);
+  }
   updateHunters(dt);
   drainHints();
 
@@ -5119,5 +5146,5 @@ requestAnimationFrame(frame);
   world, ext: EXT, bld: B, watch: tower, bus, ruins: RUINS, pal: () => palisade, navAll, navState: nav, joy: joyVec,
   gateBarrier, dockWalls, huntCtx, ui,
   // Batiments a niveaux.
-  bState, bLevelUp, depositInto, openBld, upPadAt, upPads, testMode, toggleTestMode, applyLook, blvOf, wlvOf, renderBld, panel: () => panel, tapPanel: () => tapPanel,
+  bState, bLevelUp, depositInto, openBld, residents, bName, bBonus, upPadAt, upPads, testMode, toggleTestMode, applyLook, blvOf, wlvOf, renderBld, panel: () => panel, tapPanel: () => tapPanel,
 };

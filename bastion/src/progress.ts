@@ -50,6 +50,7 @@ export const PADS: PadDef[] = [
   { id: 'field3', name: 'Remettre un champ en culture', icon: '🌾', ...L.pads.field3, site: L.fields[2]!, cost: { coins: 9000, plank: 18 }, after: 34 },
   // ---- materiaux : pierre et metal
   { id: 'quarry', name: 'Ouvrir la carrière', icon: '⛏️', ...L.pads.quarry, site: L.quarryShed, cost: { coins: 11000, plank: 30, scrap: 10 }, after: 35 },
+  { id: 'brickworks', name: 'Bâtir la fonderie de pierre', icon: '🧱', ...L.pads.brickworks, site: L.brickworks, cost: { coins: 6000, stone: 60, plank: 30 }, after: 37 },
   { id: 'foundry', name: 'Restaurer la fonderie', icon: '🔥', ...L.pads.foundry, site: L.foundry, cost: { coins: 8500, stone: 60, scrap: 30 }, after: 38 },
   { id: 'bus1', name: 'Bus : moteur', icon: '🔧', ...L.busPad, site: L.bus, cost: { coins: 13500, scrap: 40, metal: 10 }, after: 42 },
   { id: 'bus2', name: 'Bus : carrosserie', icon: '🚌', ...L.busPad, site: L.bus, cost: { coins: 18000, plank: 50, stone: 40, scrap: 20 }, after: 43 },

@@ -1349,6 +1349,127 @@ export function foundry(stage = 3): Building {
   };
 }
 
+// ---------------------------------------------------------------- la fonderie de pierre (briqueterie)
+
+/** Rangees de briques crues qui sechent au sol, ou empilees sur palette. */
+function brickPile(x: number, z: number, layers: number, raw: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const tones = raw ? [0xb08a62, 0xa07a54, 0xbc966c] : [0xa8553a, 0x9a4a32, 0xb8623f];
+  if (!raw) g.add(plank(1.0, 0.12, 0.8, BOARD2, x, 0.06, z));
+  for (let l = 0; l < layers; l++) for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {
+    const b = box(0.3, 0.1, 0.15, tones[(i + j + l) % 3]!, x - 0.32 + i * 0.32, (raw ? 0.05 : 0.17) + l * 0.11, z - 0.2 + j * 0.4);
+    if (l % 2) b.rotation.y = Math.PI / 2;
+    g.add(b);
+  }
+  return g;
+}
+
+/**
+ * La fonderie de pierre, bâtie dans l'angle de l'immeuble effondre (ses deux murs gardent leur
+ * place : z = -2 au fond, x = -2.7 a gauche, en coordonnees locales). Cinq aspects : fosse et
+ * moules, four de briques, briqueterie, fours jumeaux, fonderie industrielle.
+ */
+export function brickworks(stage = 1): Building {
+  const st = Math.max(1, Math.min(5, Math.round(stage)));
+  const g = new THREE.Group();
+  const BR = [0xa8553a, 0x9a4a32, 0xb8623f];
+  const CON = [0xb8b4aa, 0xa8a49a, 0xc4c0b6];
+  // Les deux murs de l'angle : beton casse et nettoye, rapieces de briques, puis tout en briques.
+  const wallH = st === 1 ? 1.0 : st === 2 ? 1.6 : st === 5 ? 3.0 : 2.2;
+  const walls = new THREE.Group();
+  const r = rng(77);
+  const run = (x0: number, z0: number, len: number, axis: 'x' | 'z') => {
+    const n = Math.round(len / 0.8);
+    for (let i = 0; i < n; i++) {
+      const h = st === 1 ? wallH * (0.6 + r() * 0.6) : wallH;
+      const brick = st >= 3 || (st === 2 && r() < 0.5);
+      const c = brick ? BR[i % 3]! : CON[i % 3]!;
+      const px = axis === 'x' ? x0 + (i + 0.5) * (len / n) : x0;
+      const pz = axis === 'z' ? z0 + (i + 0.5) * (len / n) : z0;
+      walls.add(box(axis === 'x' ? len / n + 0.01 : 0.45, h, axis === 'z' ? len / n + 0.01 : 0.45, c, px, h / 2, pz));
+      // Joints clairs des briques (deux bandes de mortier par segment).
+      if (brick) for (const y of [h * 0.33, h * 0.66]) walls.add(box(axis === 'x' ? len / n + 0.02 : 0.47, 0.04, axis === 'z' ? len / n + 0.02 : 0.47, 0xd8ccb8, px, y, pz));
+      // Fenetres de l'usine.
+      if (st === 5 && i % 3 === 1) walls.add(box(axis === 'x' ? 0.5 : 0.48, 0.6, axis === 'z' ? 0.5 : 0.48, 0x2e3439, px, 1.8, pz));
+    }
+  };
+  run(-2.7, -2.0, 8.0, 'x');
+  run(-2.7, -2.0, 7.0, 'z');
+  if (st >= 3) walls.add(box(8.1, 0.12, 0.55, 0xb8b0a0, 1.35, wallH + 0.06, -2.0), box(0.55, 0.12, 7.1, 0xb8b0a0, -2.7, wallH + 0.06, 1.5));
+  g.add(walls);
+  const fireMat = uniqueMat(0xff8a2a, 0xff5a10);
+  const live: THREE.Object3D[] = [];
+  // Le four : tas de briques cuit en meule (fosse), dome de briques (ensuite), deux domes (fours jumeaux).
+  const kiln = (x: number, z: number, s: number) => {
+    const dome = paint(lathe(KILN, C.white, x, 0, z), 'brickkiln', (_x, y, _z, out) => {
+      out.setHex(y < 0.33 ? 0x8a8780 : y > 1.5 ? 0x5e3426 : 0xa8553a);
+    });
+    dome.scale.set(s, s, s);
+    g.add(group(dome));
+    const mouth = box(0.5 * s, 0.4 * s, 0.06, fireMat, x, 0.45 * s, z + 1.13 * s);
+    g.add(mouth);
+    live.push(mouth);
+  };
+  if (st === 1) {
+    // Fosse a argile, moules de bois, briques crues qui sechent, meule de cuisson fumante.
+    const pit = blob(0.9, 0x6a4a30, -0.6, 0.02, 0.4);
+    pit.scale.set(1.2, 0.12, 0.9);
+    g.add(group(pit, ...[0, 1, 2].map((i) => box(0.5, 0.08, 0.3, BOARD2, 0.8 + i * 0.55, 0.04, -0.6))));
+    g.add(brickPile(1.2, 0.6, 1, true), brickPile(2.4, 0.6, 1, true));
+    const mound = new THREE.Group();
+    for (let l = 0; l < 4; l++) for (let i = 0; i < 6 - l; i++) mound.add(box(0.3, 0.12, 0.6, BR[(i + l) % 3]!, -1.6 + l * 0.15 + i * 0.32, 0.06 + l * 0.13, -1.0));
+    g.add(mound);
+    const fire = box(0.5, 0.25, 0.06, fireMat, -0.85, 0.15, -0.68);
+    g.add(fire);
+    live.push(fire);
+  } else {
+    kiln(-1.2, -0.6, st === 2 ? 0.75 : 0.9);
+    if (st >= 4) kiln(1.4, -0.7, 0.85);
+    // Cheminee : de plus en plus haute.
+    const ch = st === 2 ? 2.2 : st === 3 ? 3.6 : st === 4 ? 5.0 : 7.5;
+    g.add(part(1.2, cyl(0.32, 0.4, ch, 0x9a4a32, 10, -1.9, ch / 2, -1.4), ...(st === 5 ? [3.0, 5.0, 7.0].map((y) => cyl(0.36 - y * 0.008, 0.36 - y * 0.008, 0.14, 0xeeeee6, 10, -1.9, y, -1.4)) : [])));
+    // Etagere de sechage et palettes de briques cuites.
+    g.add(group(
+      ...[-1, 1].flatMap((s) => [box(0.06, 1.3, 0.06, C.woodDark, 2.2 + s * 0.6, 0.65, 0.6), box(0.06, 1.3, 0.06, C.woodDark, 2.2 + s * 0.6, 0.65, 1.0)]),
+      plank(1.3, 0.05, 0.5, BOARD2, 2.2, 0.5, 0.8), plank(1.3, 0.05, 0.5, BOARD3, 2.2, 1.0, 0.8),
+      ...[0, 1, 2].map((i) => box(0.3, 0.1, 0.15, 0xb08a62, 1.8 + i * 0.4, 0.58, 0.8)), ...[0, 1, 2].map((i) => box(0.3, 0.1, 0.15, 0xa07a54, 1.8 + i * 0.4, 1.08, 0.8)),
+    ));
+    g.add(brickPile(3.8, -0.9, st >= 4 ? 4 : 2, false));
+    if (st >= 3) g.add(brickPile(3.8, 0.4, st >= 4 ? 3 : 1, false));
+  }
+  if (st >= 3) {
+    // Appentis de tole au fond (toit complet pour l'usine).
+    const roof = tinRoof(st === 5 ? 7.6 : 4.4, 2.6, st === 5 ? 0x8a949c : C.rust, 0x8a8f91);
+    roof.position.set(st === 5 ? 1.2 : -0.6, wallH + 0.1, -0.85);
+    roof.rotation.x = -0.12;
+    g.add(roof, group(postPiece(wallH, 0.07, LOG2, st === 5 ? 4.9 : 1.6, 0.4), postPiece(wallH, 0.07, LOG, -2.2, 0.4)));
+  }
+  if (st >= 4) {
+    // Presse a briques : bati d'acier, levier, bac d'argile ; lampes au mur.
+    g.add(group(
+      box(0.9, 0.8, 0.6, 0x5a6066, 0.3, 0.4, 0.8), box(0.08, 1.0, 0.08, IRON, 0.65, 1.2, 0.8), rot(box(0.06, 0.9, 0.06, 0xc9412f, 0.4, 1.6, 0.8), 0, 0, 0.9),
+      rbox(0.7, 0.3, 0.5, 0x6a4a30, 0.05, -0.4, 0.15, 1.1),
+    ));
+    g.add(part(1.8, ...[-0.5, 2.5].map((x) => sphere(0.08, 0xfff0c0, x, 1.95, -1.72, 6))));
+  }
+  if (st === 5) {
+    // Chariot elevateur jaune et sa palette, rampe de convoyeur jusqu'au four.
+    g.add(group(
+      rbox(0.8, 0.6, 1.2, 0xe8b84a, 0.08, 2.8, 0.5, 2.6), box(0.6, 0.5, 0.5, 0x2e3439, 2.8, 1.0, 2.4),
+      box(0.06, 1.6, 0.06, 0x3a3d40, 2.55, 0.8, 1.95), box(0.06, 1.6, 0.06, 0x3a3d40, 3.05, 0.8, 1.95),
+      ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => rot(cyl(0.16, 0.16, 0.12, 0x2b2b2b, 10, 2.8 + sx * 0.38, 0.16, 2.6 + sz * 0.4), 0, 0, Math.PI / 2))),
+    ));
+    g.add(brickPile(2.8, 1.55, 2, false));
+    g.add(rot(box(2.6, 0.08, 0.5, 0x55595c, -0.1, 0.9, 0.9), 0, 0.2, 0.3));
+  }
+  return {
+    group: hidden(g, L.brickworks.x, L.brickworks.z),
+    glowMats: [fireMat],
+    live,
+    anim: (_dt, t, busy) => { fireMat.emissiveIntensity = busy ? 1.2 + Math.sin(t * 14) * 0.3 : 0.25; },
+  };
+}
+
 // ---------------------------------------------------------------- batiments des extensions du camp
 
 /**

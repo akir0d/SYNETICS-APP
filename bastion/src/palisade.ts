@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { mergeColored } from './bake';
-import { C, blob, box, cone, corrugated, cyl, group, lathe, mixHex, paint, plank, rbox, rng, vgrad } from './kit';
+import { C, blob, box, cone, corrugated, cyl, group, lathe, mat, mixHex, paint, plank, rbox, rcyl, rng, sphere, torus, vgrad } from './kit';
 import { CAMP, CAMP_WEST_GATE, FARM, FARM_EAST_GATE, L } from './layout';
 import type { Segment } from './physics';
 import { SCRAP_TONES } from './props';
@@ -19,7 +19,8 @@ export const LOG_HP = 10;
 export const TIERS = [
   { name: 'Bois simple', icon: '🪵', item: 'log', mul: 1 },
   { name: 'Pieux taillés', icon: '🪓', item: 'log', mul: 1.8 },
-  { name: 'Pierre', icon: '🧱', item: 'stone', mul: 3 },
+  { name: 'Pierre', icon: '🪨', item: 'stone', mul: 3 },
+  { name: 'Rempart de briques', icon: '🧱', item: 'brick', mul: 3.6 },
   { name: 'Ferraille', icon: '🔩', item: 'scrap', mul: 4.2 },
   { name: 'Fer fondu', icon: '⚙️', item: 'metal', mul: 6 },
 ] as const;
@@ -233,8 +234,9 @@ function cheval(x: number, H: number): THREE.Group {
 function wallStates(len: number, H: number, seed: number, tier: number): THREE.Group[] {
   if (tier === 1) return plankStates(len, H, seed);
   if (tier === 3) return stoneStates(len, H, seed);
-  if (tier === 4) return scrapStates(len, H, seed);
-  if (tier === 5) return metalStates(len, H, seed);
+  if (tier === 4) return brickStates(len, H, seed);
+  if (tier === 5) return scrapStates(len, H, seed);
+  if (tier === 6) return metalStates(len, H, seed);
   return pikeStates(len, H, seed);
 }
 
@@ -673,6 +675,189 @@ function door(width: number, H: number, dir: number, seed: number, dmg = 0): THR
 }
 
 
+/**
+ * Rempart de briques : assises regulieres decalees sur une ame de mortier clair, chaperon de
+ * pierre et creneaux. Abime, il perd ses creneaux puis ses assises du haut.
+ */
+function brickStates(len: number, H: number, seed: number): THREE.Group[] {
+  const r = rng(seed);
+  const BH = 0.22;
+  const rows = Math.max(5, Math.round((H * 0.95) / BH));
+  const wallH = rows * BH;
+  const cols = Math.max(2, Math.round(len / 0.5));
+  const bw = len / cols;
+  const TONES = [0xa8553a, 0x9a4a32, 0xb8623f, 0x8a4430, 0xb05a3a];
+  type Brick = { x: number; y: number; row: number; w: number; roll: number; tone: number };
+  const bricks: Brick[] = [];
+  for (let j = 0; j < rows; j++) {
+    const y = (j + 0.5) * BH;
+    const add = (x: number, w: number) => bricks.push({ x, y, row: j, w, roll: r(), tone: TONES[Math.floor(r() * TONES.length)]! });
+    if (j % 2 === 0) for (let i = 0; i < cols; i++) add(-len / 2 + (i + 0.5) * bw, bw);
+    else {
+      add(-len / 2 + bw / 4, bw / 2);
+      for (let i = 0; i < cols - 1; i++) add(-len / 2 + bw + i * bw, bw);
+      add(len / 2 - bw / 4, bw / 2);
+    }
+  }
+  const nm = Math.max(1, Math.round(len / 1.0));
+  const build = (keep: (b: Brick) => boolean, top: boolean) => {
+    const g = new THREE.Group();
+    let hi = 0;
+    for (const b of bricks) if (keep(b)) hi = Math.max(hi, b.row + 1);
+    // Ame de mortier, un peu en retrait : les joints clairs se voient entre les briques.
+    if (hi > 0) g.add(box(len, hi * BH - 0.02, 0.46, 0xcfc4b0, 0, (hi * BH - 0.02) / 2, 0));
+    for (const b of bricks) if (keep(b)) g.add(box(b.w - 0.035, BH - 0.03, 0.52, b.tone, b.x, b.y, 0));
+    if (top) {
+      g.add(box(len + 0.04, 0.1, 0.62, 0xb8b0a0, 0, wallH + 0.05, 0));
+      // Creneaux : un merlon sur deux, de briques, coiffe de pierre.
+      for (let i = 0; i < nm; i++) {
+        const x = -len / 2 + (i + 0.5) * (len / nm);
+        g.add(box(0.5, 0.44, 0.5, TONES[i % TONES.length]!, x, wallH + 0.32, 0), box(0.56, 0.07, 0.56, 0xb8b0a0, x, wallH + 0.57, 0));
+      }
+    }
+    return g;
+  };
+  const rubble = (g: THREE.Group, n: number) => {
+    for (let i = 0; i < n; i++) {
+      const b = box(0.34, 0.12, 0.17, TONES[i % TONES.length]!, (r() - 0.5) * len, 0.06, (r() < 0.5 ? -1 : 1) * (0.5 + r() * 0.5));
+      b.rotation.set((r() - 0.5) * 0.4, r() * 3, (r() - 0.5) * 0.4);
+      g.add(b);
+    }
+  };
+  const intact = build(() => true, true);
+  const damaged = build((b) => b.row < rows - 2 || (b.row < rows - 1 && b.roll > 0.3), false);
+  rubble(damaged, 4);
+  const heavy = build((b) => b.row < Math.ceil(rows / 2) || (b.row < rows - 2 && b.roll > 0.7), false);
+  rubble(heavy, 7);
+  const broken = build((b) => b.row < 2 || (b.row < 3 && b.roll > 0.5), false);
+  rubble(broken, 10);
+  return [broken, heavy, damaged, intact];
+}
+
+function rot<T extends THREE.Object3D>(o: T, x: number, y = 0, z = 0): T {
+  o.rotation.set(x, y, z);
+  return o;
+}
+
+/** Bandes de fer et clous d'un battant (cote exterieur). */
+function studs(g: THREE.Group, width: number, H: number, dir: number, color: number): void {
+  for (const y of [0.45, H / 2, H - 0.45]) {
+    g.add(plank(width * 0.92, 0.1, 0.035, color, (dir * width) / 2, y, -0.1));
+    for (let k = 0; k < 4; k++) g.add(blob(0.035, 0x9aa3a8, dir * (0.12 + k * ((width - 0.24) / 3)), y, -0.13));
+  }
+}
+
+/**
+ * Un battant de porte selon le materiau de la palissade : pieux (bois), planches cerclees de
+ * fer (pierre), chene clouté (briques), toles soudees (ferraille), acier rivete (metal).
+ * `dmg` : 0 intact, 1 abime, 2 tres abime.
+ */
+function doorFor(tier: number, width: number, H: number, dir: number, seed: number, dmg = 0): THREE.Group {
+  if (tier <= 2) return door(width, H, dir, seed, dmg);
+  const d = rng(seed * 31 + 7 + dmg * 101);
+  const g = new THREE.Group();
+  const lost = dmg === 0 ? 0 : dmg === 1 ? 0.2 : 0.45;
+  if (tier === 3 || tier === 4) {
+    // Planches verticales jointives ; abimees, certaines cassees plus court.
+    const n = Math.max(3, Math.round(width / 0.22));
+    const tones = tier === 4 ? [0x5a3a24, 0x4e321f, 0x64422a] : [0x8a6440, 0x7a5636, 0x94704a];
+    for (let i = 0; i < n; i++) {
+      const x = dir * (i + 0.5) * (width / n);
+      const h = d() < lost ? H * (0.4 + d() * 0.35) : H;
+      if (dmg === 2 && i > 0 && i < n - 1 && d() < 0.25) continue;
+      g.add(plank(width / n - 0.015, h, 0.12, tones[i % 3]!, x, h / 2, 0));
+    }
+    studs(g, width, H, dir, tier === 4 ? 0x2b2b2b : 0x3f4246);
+    if (tier === 4) g.add(torus(0.09, 0.02, 0x9aa3a8, dir * (width - 0.18), H * 0.5, -0.15));
+  } else if (tier === 5) {
+    // Cadre de tubes, toles ondulees de couleurs differentes, soudures.
+    g.add(box(0.08, H, 0.08, 0x4a4d50, dir * 0.04, H / 2, 0), box(0.08, H, 0.08, 0x4a4d50, dir * (width - 0.04), H / 2, 0));
+    g.add(box(width, 0.08, 0.08, 0x4a4d50, (dir * width) / 2, 0.1, 0), box(width, 0.08, 0.08, 0x4a4d50, (dir * width) / 2, H - 0.05, 0));
+    const sheets = [0x8a6a4a, 0x5f7a6a, 0x9c5a3a];
+    for (let k = 0; k < 3; k++) {
+      if (dmg > 0 && d() < lost * 1.4) continue;
+      const sh = box(width - 0.1, H / 3 - 0.04, 0.04, sheets[k]!, (dir * width) / 2, (k + 0.5) * (H / 3), -0.05);
+      if (dmg > 0) sh.rotation.z = (d() - 0.5) * 0.2 * dmg;
+      g.add(sh);
+    }
+    g.add(rot(box(0.07, Math.hypot(width, H), 0.06, 0x4a4d50, (dir * width) / 2, H / 2, 0.04), 0, 0, dir * Math.atan2(width, H)));
+  } else {
+    // Plaque d'acier, rivets, echarpe, bandes de danger au pied ; cabossee quand elle encaisse.
+    const plate = box(width, H, 0.1, 0x6a7076, (dir * width) / 2, H / 2, 0);
+    if (dmg > 0) plate.rotation.z = dir * 0.03 * dmg;
+    g.add(plate);
+    for (const y of [0.15, H - 0.15]) for (let k = 0; k < 5; k++) g.add(blob(0.03, 0xaab3ba, dir * (0.1 + k * ((width - 0.2) / 4)), y, -0.06));
+    for (let k = 0; k < 4; k++) g.add(box(width / 4, 0.18, 0.02, k % 2 ? 0x2b2b2b : 0xe8b84a, dir * (k + 0.5) * (width / 4), 0.32, -0.06));
+    if (dmg < 2) g.add(rot(box(0.1, Math.hypot(width, H) - 0.2, 0.05, 0x55595c, (dir * width) / 2, H / 2, 0.07), 0, 0, dir * Math.atan2(width, H)));
+    if (dmg === 2) g.add(box(width * 0.4, H * 0.3, 0.12, 0x2b2b2b, dir * width * 0.6, H * 0.6, 0));
+  }
+  // Eclats au pied quand la porte encaisse.
+  for (let i = 0; i < dmg * 3; i++) {
+    const c = box(0.22 + d() * 0.2, 0.04, 0.08, tier >= 5 ? 0x6a7076 : 0x8a6440, dir * width * d(), 0.03, (d() - 0.5) * 0.8);
+    c.rotation.y = d() * 3;
+    g.add(c);
+  }
+  if (dmg === 2) g.rotation.z = -dir * 0.04;
+  // Gonds.
+  for (const y of [0.45, H - 0.45]) g.add(cyl(0.05, 0.05, 0.24, 0x3f4246, 8, 0, y, 0));
+  return g;
+}
+
+/** Le cadre de la porte selon le materiau : rondins, piliers de pierre, acier, tour de briques. */
+function gateFrame(tier: number, len: number, postH: number, lintel: number): THREE.Group {
+  const half = len / 2;
+  if (tier <= 2) {
+    const frame = group(
+      put(pikeMesh(0.27, postH, BARK[2]!, [0.8, lintel], 16), -half, 0, 0),
+      put(pikeMesh(0.27, postH, BARK[2]!, [0.8, lintel], 16), half, 0, 0),
+    );
+    frame.add(put(cyl(0.16, 0.16, len + 0.7, BARK[0]!), 0, lintel, 0, 0, 0, Math.PI / 2));
+    for (const sx of [-1, 1]) frame.add(put(cyl(0.135, 0.135, 0.03, CUT), sx * (len / 2 + 0.35), lintel, 0, 0, 0, Math.PI / 2));
+    return frame;
+  }
+  const g = new THREE.Group();
+  if (tier === 3) {
+    // Piliers de moellons, linteau de pierre taillee.
+    const TONES = [0xa39d90, 0x8c877c, 0xb0aa9c];
+    for (const sx of [-1, 1]) {
+      const n = Math.round(postH / 0.4);
+      for (let i = 0; i < n; i++) g.add(rbox(0.72, 0.38, 0.72, TONES[(i + (sx > 0 ? 1 : 0)) % 3]!, 0.06, sx * (half + 0.15), 0.2 + i * 0.4, 0));
+      g.add(rbox(0.86, 0.16, 0.86, 0x8f897d, 0.05, sx * (half + 0.15), postH + 0.05, 0));
+    }
+    g.add(rbox(len + 1.2, 0.42, 0.7, 0x9a9487, 0.06, 0, lintel, 0));
+  } else if (tier === 5 || tier === 6) {
+    // Poteaux d'acier en H (tole rapportee pour la ferraille), poutre, gyrophare.
+    const steel = tier === 5 ? 0x5a5e62 : 0x6a7076;
+    for (const sx of [-1, 1]) {
+      const x = sx * (half + 0.12);
+      g.add(box(0.36, postH, 0.08, steel, x, postH / 2, -0.16), box(0.36, postH, 0.08, steel, x, postH / 2, 0.16), box(0.08, postH, 0.32, steel, x, postH / 2, 0));
+      if (tier === 5) g.add(box(0.5, 0.9, 0.04, 0x8a6a4a, x, 1.0, -0.22), box(0.45, 0.6, 0.04, 0x9c5a3a, x, 2.0, -0.22));
+      else for (let k = 0; k < 4; k++) g.add(box(0.37, 0.12, 0.09, k % 2 ? 0x2b2b2b : 0xe8b84a, x, 0.3 + k * 0.12, -0.2));
+    }
+    g.add(box(len + 0.8, 0.3, 0.3, steel, 0, lintel, 0));
+    if (tier === 6) g.add(sphere(0.12, 0xff9a30, 0, lintel + 0.25, 0, 8));
+    else g.add(box(1.2, 0.35, 0.04, 0x8a3f30, 0, lintel - 0.05, -0.18));
+  } else {
+    // Tour-porte de briques : deux piliers larges crenelés, arche, lanternes.
+    const TONES = [0xa8553a, 0x9a4a32, 0xb8623f];
+    for (const sx of [-1, 1]) {
+      const x = sx * (half + 0.35);
+      const n = Math.round(postH / 0.22) + 2;
+      for (let i = 0; i < n; i++) g.add(box(1.1, 0.2, 1.0, TONES[(i + (sx > 0 ? 1 : 0)) % 3]!, x, 0.11 + i * 0.22, 0));
+      const top = n * 0.22;
+      g.add(box(1.2, 0.1, 1.1, 0xb8b0a0, x, top + 0.05, 0));
+      for (const mx of [-0.35, 0.35]) g.add(box(0.36, 0.4, 1.0, TONES[1]!, x + mx, top + 0.3, 0));
+      g.add(cyl(0.03, 0.03, 0.4, 0x2b2b2b, 6, x - sx * 0.62, 2.0, -0.55), rcyl(0.1, 0.1, 0.22, 0xffd27a, 0.03, x - sx * 0.62, 1.75, -0.55));
+    }
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(half + 0.05, 0.22, 6, 16, Math.PI), mat(0x9a4a32));
+    arch.position.y = lintel - half * 0.55;
+    arch.scale.set(1, 0.55, 2.2);
+    g.add(arch);
+    g.add(box(len + 0.4, 0.5, 1.0, TONES[2]!, 0, lintel + 0.2, 0), box(len + 0.5, 0.1, 1.1, 0xb8b0a0, 0, lintel + 0.5, 0));
+  }
+  return g;
+}
+
 interface RunDef { x1: number; z1: number; x2: number; z2: number; h: number }
 
 export class Palisade {
@@ -850,7 +1035,7 @@ export class Palisade {
     this.refresh(s);
   }
 
-  /** Niveau de materiau de la palissade (1 a 5). */
+  /** Niveau de materiau de la palissade (1 a 6). */
   tier = 1;
   private lvl = 0;
 
@@ -873,7 +1058,14 @@ export class Palisade {
   setTier(tier: number): void {
     if (tier === this.tier) return;
     this.tier = tier;
-    for (const s of this.sections) if (s.kind === 'wall') this.buildStates(s);
+    for (const s of this.sections) {
+      if (s.kind === 'wall') this.buildStates(s);
+      else if (s.gate) {
+        // Les portes changent aussi de materiau (cadre et battants).
+        this.buildGate(s, s.gate.swing);
+        this.refresh(s);
+      }
+    }
     this.applyMax();
   }
 
@@ -884,18 +1076,27 @@ export class Palisade {
 
   private addGate(x1: number, z1: number, x2: number, z2: number, h: number, swing: number): Section {
     const s = this.base('gate', x1, z1, x2, z2, GATE_HP);
+    s.h = h;
+    this.buildGate(s, swing);
+    this.gateWalls.push(s.seg);
+    this.refresh(s);
+    return s;
+  }
+
+  /** (Re)construit le cadre et les battants d'une porte au materiau de la palissade. */
+  private buildGate(s: Section, swing: number): void {
+    const old = s.gate;
+    for (const o of [...s.root.children]) {
+      if (!o.userData.gatePart) continue;
+      s.root.remove(o);
+      o.traverse((c) => { if ((c as THREE.Mesh).isMesh) (c as THREE.Mesh).geometry.dispose(); });
+    }
+    const t = this.tier;
+    const h = s.h;
     const half = s.len / 2;
     const postH = Math.max(h, 2.4) + 0.6;
     const lintel = postH - 0.35;
-    const frame = group(
-      put(pikeMesh(0.27, postH, BARK[2]!, [0.8, lintel], 16), -half, 0, 0),
-      put(pikeMesh(0.27, postH, BARK[2]!, [0.8, lintel], 16), half, 0, 0),
-    );
-    // Linteau en rondin, ses deux bouts de bois clair qui depassent.
-    const top = put(cyl(0.16, 0.16, s.len + 0.7, BARK[0]!), 0, lintel, 0, 0, 0, Math.PI / 2);
-    frame.add(top);
-    for (const sx of [-1, 1]) frame.add(put(cyl(0.135, 0.135, 0.03, CUT), sx * (s.len / 2 + 0.35), lintel, 0, 0, 0, Math.PI / 2));
-    s.root.add(mergeColored(frame));
+    const frame = mergeColored(gateFrame(t, s.len, postH, lintel));
     const leftPivot = new THREE.Group();
     leftPivot.position.x = -half + 0.2;
     const rightPivot = new THREE.Group();
@@ -903,8 +1104,8 @@ export class Palisade {
     const leftV: THREE.Object3D[] = [];
     const rightV: THREE.Object3D[] = [];
     for (let dmg = 0; dmg < 3; dmg++) {
-      const lv = mergeColored(door(half - 0.2, h - 0.1, 1, s.id, dmg));
-      const rv = mergeColored(door(half - 0.2, h - 0.1, -1, s.id + 1, dmg));
+      const lv = mergeColored(doorFor(t, half - 0.2, h - 0.1, 1, s.id, dmg));
+      const rv = mergeColored(doorFor(t, half - 0.2, h - 0.1, -1, s.id + 1, dmg));
       lv.visible = rv.visible = dmg === 0;
       leftPivot.add(lv);
       rightPivot.add(rv);
@@ -913,7 +1114,7 @@ export class Palisade {
     }
     const brokenG = new THREE.Group();
     for (const sx of [-1, 1]) {
-      const d = door(half - 0.3, h - 0.1, 1, s.id + 3);
+      const d = doorFor(t, half - 0.3, h - 0.1, 1, s.id + 3);
       // Enfoncees par les zombies : les battants tombent vers l'interieur.
       d.rotation.set(Math.PI / 2, 0, 0);
       d.position.set(sx < 0 ? -half + 0.3 : 0.3, 0.12, sx * 0.4);
@@ -921,11 +1122,12 @@ export class Palisade {
     }
     const broken = mergeColored(brokenG);
     broken.visible = false;
-    s.root.add(leftPivot, rightPivot, broken);
-    s.gate = { left: leftPivot, right: rightPivot, leftV, rightV, broken, swing, angle: Math.PI / 2, closed: false };
-    this.gateWalls.push(s.seg);
-    this.refresh(s);
-    return s;
+    for (const o of [frame, leftPivot, rightPivot, broken]) o.userData.gatePart = true;
+    s.root.add(frame, leftPivot, rightPivot, broken);
+    const angle = old ? old.angle : Math.PI / 2;
+    leftPivot.rotation.y = -angle * swing;
+    rightPivot.rotation.y = angle * swing;
+    s.gate = { left: leftPivot, right: rightPivot, leftV, rightV, broken, swing, angle, closed: old ? old.closed : false };
   }
 
   /** Met a jour le visuel et la collision d'un troncon apres un changement de PV. */

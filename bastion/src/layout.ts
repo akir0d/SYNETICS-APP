@@ -63,6 +63,10 @@ export const L = {
   quarryShed: { x: 25.5, z: -17 },
   rocks: [{ x: 27, z: -21 }, { x: 31.5, z: -26.5 }, { x: 35.5, z: -21.5 }, { x: 29, z: -31 }, { x: 36.5, z: -29 }],
   foundry: { x: 36.5, z: 27 },
+  // La fonderie de pierre, dans l'angle de l'immeuble effondre sous la carriere.
+  brickworks: { x: 25.2, z: -5.0 },
+  brickIn: { x: 24.0, z: -1.8 },
+  brickOut: { x: 27.6, z: -1.8 },
   foundryIn: { x: 33.2, z: 24.6 },
   foundryOut: { x: 39.8, z: 24.6 },
 
@@ -97,6 +101,7 @@ export const L = {
     scav: { x: 29, z: 9 },
     quarry: { x: 23, z: -14.6 },
     foundry: { x: 36.5, z: 22.4 },
+    brickworks: { x: 29.8, z: -3.4 },
   },
   bus: { x: -14, z: 19.4 },
   busPad: { x: -14, z: 15.7 },

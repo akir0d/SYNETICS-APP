@@ -29,6 +29,8 @@ export interface World {
   glows: { s: THREE.Sprite; night: number; day: number }[];
   bulbMats: THREE.MeshLambertMaterial[];
   keep: Set<THREE.Object3D>;
+  /** L'immeuble effondre sous la carriere (la ruine de la fonderie de pierre). */
+  ruinBlock: THREE.Object3D;
   bounds: number;
   /** Passages bloques tant qu'on ne les a pas degages (ou construits). */
   locks: { west: Segment; east: Segment; dock: Segment };
@@ -64,6 +66,7 @@ export function buildWorld(scene: THREE.Scene): World {
   const w: World = {
     walls: [], solids: [], swayers: [], flames: [], nightLights: [], glows: [], bulbMats: [],
     keep: new Set(),
+    ruinBlock: new THREE.Group(),
     bounds: 54,
     locks: { west: { x1: 0, z1: 0, x2: 0, z2: 0 }, east: { x1: 0, z1: 0, x2: 0, z2: 0 }, dock: { x1: 0, z1: 0, x2: 0, z2: 0 } },
     farmFence: { mesh: new THREE.Group(), segs: [] },
@@ -869,12 +872,13 @@ function surroundings(scene: THREE.Scene, w: World, r: () => number): void {
   }
   scene.add(shadow(at(wreck(0x5f7a8a), 19.6, 0, -16.2, 1.2)));
   w.solids.push({ x: 19.6, z: -16.2, r: 1.8 });
-  ruinsBlock(scene, w, r, 26.5, -3);
+  // L'immeuble effondre : il garde son maillage (il s'affaisse quand on bâtit la fonderie de pierre).
+  w.ruinBlock = ruinsBlock(scene, w, r, 26.5, -3);
   pylon(scene, w, -21, -4);
 }
 
 /** Un angle d'immeuble effondre : murs en escalier casses, mousse, lierre, gravats, distributeur couche. */
-function ruinsBlock(scene: THREE.Scene, w: World, r: () => number, x: number, z: number): void {
+function ruinsBlock(scene: THREE.Scene, w: World, r: () => number, x: number, z: number): THREE.Group {
   const g = new THREE.Group();
   const grime = (c: number) => mixHex(c, 0x6f685c, 0.3);
   const wall = (len: number, along: 'x' | 'z', ox: number, oz: number) => {
@@ -923,7 +927,9 @@ function ruinsBlock(scene: THREE.Scene, w: World, r: () => number, x: number, z:
   vending.position.set(1, 0.45, 1.5);
   g.add(vending);
   scene.add(shadow(at(g, x, 0, z)));
+  w.keep.add(g);
   w.walls.push({ x1: x - 4, z1: z - 4, x2: x + 4, z2: z - 4 }, { x1: x - 4, z1: z - 4, x2: x - 4, z2: z + 3 });
+  return g;
 }
 
 /** Pylone electrique abandonne : treillis, isolateurs, envahi de plantes grimpantes. */

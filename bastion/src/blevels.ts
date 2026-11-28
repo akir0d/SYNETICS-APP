@@ -5,8 +5,8 @@
 import type { Cost } from './progress';
 
 export type BId = 'bed1' | 'bed2' | 'bed3' | 'bed4' | 'field1' | 'field2' | 'field3' | 'sawmill' | 'kitchen' | 'armory'
-  | 'mill' | 'stall' | 'reserve' | 'shelter' | 'quarry' | 'foundry' | 'dock' | 'house1' | 'house2' | 'house3' | 'house4';
-type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm' | 'mill' | 'stall' | 'res' | 'shel' | 'quarry' | 'forge' | 'dock' | 'house';
+  | 'mill' | 'stall' | 'reserve' | 'shelter' | 'quarry' | 'foundry' | 'dock' | 'house1' | 'house2' | 'house3' | 'house4' | 'brickworks';
+type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm' | 'mill' | 'stall' | 'res' | 'shel' | 'quarry' | 'forge' | 'dock' | 'house' | 'brick';
 
 export const BMAX = 10;
 
@@ -41,6 +41,7 @@ export const BDEFS: BDef[] = [
   { id: 'house2', kind: 'house', name: 'Maison 2', icon: '🏡', base: 400 },
   { id: 'house3', kind: 'house', name: 'Maison 3', icon: '🏡', base: 450 },
   { id: 'house4', kind: 'house', name: 'Maison 4', icon: '🏡', base: 450 },
+  { id: 'brickworks', kind: 'brick', name: 'Fonderie de pierre', icon: '🧱', base: 700 },
 ];
 export const bdef = (id: string): BDef | undefined => BDEFS.find((d) => d.id === id);
 
@@ -58,6 +59,7 @@ const STAGES: Record<Kind, string[]> = {
   quarry: ['Pioche et brouette', 'Appentis à outils', 'Cabane et treuil', 'Concasseur', 'Grue de levage'],
   forge: ['Bas fourneau', 'Four de briques', 'Halle d’acier', 'Creuset au palan', 'Usine'],
   dock: ['Planches de fortune', 'Ponton', 'Ponton et barque', 'Ponton à garde-corps', 'Port de pêche'],
+  brick: ['Fosse et moules', 'Four de briques', 'Briqueterie', 'Fours jumeaux', 'Fonderie industrielle'],
   house: ['Cabane sous bâche', 'Cabane de rondins', 'Maison de rondins', 'Maison à véranda', 'Maison à étage'],
 };
 
@@ -152,6 +154,8 @@ export function bonusText(d: BDef, lv: number): string {
       return `Pierre qui repousse +${Math.round(100 * (regenOf(lv) - 1))} % · pierre double ${Math.round(100 * doubleOf(lv))} %`;
     case 'forge':
       return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · lingot en plus ${Math.round(100 * extraOf(lv))} %`;
+    case 'brick':
+      return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · brique en plus ${Math.round(100 * extraOf(lv))} %`;
     case 'dock':
       return `Pêche +${Math.round(100 * (fishOf(lv) - 1))} % plus rapide · poisson double ${Math.round(100 * extraOf(lv))} %`;
     case 'house':

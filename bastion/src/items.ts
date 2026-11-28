@@ -3,10 +3,10 @@
 // un appel de dessin par objet, geometries et materiaux partages, moins de 250 triangles.
 
 import * as THREE from 'three';
-import { C, blob, box, cone, cyl, group, lathe, lookMat, paint, plank, type Profile } from './kit';
+import { C, blob, box, cone, cyl, group, lathe, lookMat, paint, plank, rbox, type Profile } from './kit';
 import { merged } from './props';
 
-export type ItemType = 'carrot' | 'tomato' | 'log' | 'plank' | 'soup' | 'scrap' | 'wheat' | 'bread' | 'fish' | 'fuel' | 'stone' | 'metal';
+export type ItemType = 'carrot' | 'tomato' | 'log' | 'plank' | 'soup' | 'scrap' | 'wheat' | 'bread' | 'fish' | 'fuel' | 'stone' | 'metal' | 'brick';
 
 export interface ItemDef {
   name: string;
@@ -29,8 +29,10 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   bread: { name: 'Pain', icon: '🍞', price: 16, h: 0.2 },
   fish: { name: 'Poisson', icon: '🐟', price: 8, h: 0.16 },
   fuel: { name: 'Carburant', icon: '⛽', price: 10, h: 0.5 },
-  stone: { name: 'Pierre', icon: '🧱', price: 3, h: 0.24 },
+  stone: { name: 'Pierre', icon: '🪨', price: 3, h: 0.24 },
   metal: { name: 'Métal', icon: '⚙️', price: 18, h: 0.16 },
+  // Cuite a la briqueterie : elle ne se vend pas, elle sert aux remparts.
+  brick: { name: 'Briques', icon: '🧱', price: 0, h: 0.2 },
 };
 
 const col = (hex: number): THREE.Color => new THREE.Color(hex);
@@ -241,6 +243,13 @@ function stone(): THREE.Object3D {
   return group(a, b, c);
 }
 
+/** Deux briques rouges croisees, joint de mortier clair. */
+function brick(): THREE.Object3D {
+  const top = rbox(0.34, 0.09, 0.16, 0xb8623f, 0.025, 0, 0.145, 0);
+  top.rotation.y = Math.PI / 2;
+  return group(rbox(0.34, 0.09, 0.16, 0xa8553a, 0.025, 0, 0.045, -0.085), rbox(0.34, 0.09, 0.16, 0x9a4a32, 0.025, 0, 0.045, 0.085), box(0.3, 0.012, 0.3, 0xd8ccb8, 0, 0.096, 0), top);
+}
+
 function metal(): THREE.Object3D {
   const top = ingot(0xc9d1d8, 0, 0.1125, 0);
   top.rotation.y = Math.PI / 2;
@@ -248,7 +257,7 @@ function metal(): THREE.Object3D {
 }
 
 const BUILD: Record<ItemType, () => THREE.Object3D> = {
-  carrot, tomato, log, plank: planks, soup, scrap, wheat, bread, fish, fuel, stone, metal,
+  carrot, tomato, log, plank: planks, soup, scrap, wheat, bread, fish, fuel, stone, metal, brick,
 };
 
 export function itemMesh(t: ItemType): THREE.Group {

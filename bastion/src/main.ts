@@ -11,7 +11,7 @@ import {
   type BDef,
 } from './blevels';
 import {
-  Bus, armory, cabin, dock, foundry, infirmary, kitchen, quarryShed, reserveDeco, sawmill, shelter, stallStand, towerSkin, warehouse, watchTower, windmill,
+  Bus, armory, brickworks, cabin, dock, foundry, infirmary, kitchen, quarryShed, reserveDeco, sawmill, shelter, stallStand, towerSkin, warehouse, watchTower, windmill,
   workbench,
   type Building,
 } from './buildings';
@@ -150,6 +150,7 @@ const B: Record<string, Building> = {
   quarry: quarryShed(), foundry: foundry(),
   // L'etal (toujours la, encastre dans la palissade sud) : son aspect suit son niveau.
   stall: stallStand(),
+  brickworks: brickworks(),
 };
 for (const b of Object.values(B)) scene.add(b.group);
 B.tower = tower;
@@ -170,6 +171,8 @@ const SOLIDS: Record<string, { x: number; z: number; r: number }[]> = {
   chest: [{ x: L.chest.x, z: L.chest.z, r: 0.9 }],
   foundry: [{ x: L.foundry.x - 0.6, z: L.foundry.z, r: 1.3 }, { x: L.foundry.x + 1.2, z: L.foundry.z + 0.2, r: 0.6 }],
   quarry: [{ x: L.quarryShed.x - 2.2, z: L.quarryShed.z + 0.4, r: 1.3 }],
+  // Le four et la cheminee de la fonderie de pierre (les murs de l'angle sont ceux de la ruine).
+  brickworks: [{ x: L.brickworks.x - 1.2, z: L.brickworks.z - 0.6, r: 1.1 }],
 };
 for (const list of Object.values(SOLIDS)) for (const s of list) world.solids.push({ ...s });
 boot('ruines');
@@ -222,6 +225,8 @@ const saw = new Converter(scene, L.sawIn, L.sawOut, ['log'], 1, 'plank', 1.6);
 const cook = new Converter(scene, L.kitchenIn, L.kitchenOut, ['carrot', 'tomato'], 2, 'soup', 2.4);
 const mill = new Converter(scene, L.millIn, L.millOut, ['wheat'], 2, 'bread', 2.8);
 const forge = new Converter(scene, L.foundryIn, L.foundryOut, ['scrap'], 2, 'metal', 3.2);
+/** La fonderie de pierre : une pierre donne une brique. */
+const brick = new Converter(scene, L.brickIn, L.brickOut, ['stone'], 1, 'brick', 2.6);
 const reserve = new Reserve(scene, labels);
 const helpers: Helper[] = [];
 const nav: NavState = { northOpen: false, westOpen: false, eastOpen: false };
@@ -374,6 +379,11 @@ if (!save.seen.includes('blv-v2')) {
   up('mill', 1 + Math.round((old.mill ?? 0) * 0.5) + 2 * ((save.bt.mill ?? 1) - 1));
   up('shelter', 1 + 2 * ((save.bt.shelter ?? 1) - 1));
 }
+// La brique s'insere apres la pierre : ferraille et fer fondu passent aux paliers 5 et 6.
+if (!save.seen.includes('wall-brick')) {
+  save.seen.push('wall-brick');
+  if (save.wallTier >= 4) save.wallTier += 1;
+}
 // Lot 3 : la fonderie en dur (palier) devient un niveau ; carriere, ponton et maisons partent du 1.
 if (!save.seen.includes('blv-v3')) {
   save.seen.push('blv-v3');
@@ -510,6 +520,7 @@ function applyBuild(id: string, instant: boolean): void {
     case 'mill': restoreBuilding(id, B.mill!, instant, () => { mill.built = true; mill.setVisible(true); }); break;
     case 'quarry': restoreBuilding(id, B.quarry!, instant); break;
     case 'foundry': restoreBuilding(id, B.foundry!, instant, () => { forge.built = true; forge.setVisible(true); }); break;
+    case 'brickworks': restoreBuilding(id, B.brickworks!, instant, () => { brick.built = true; brick.setVisible(true); }); break;
     case 'dock':
       world.locks.dock.off = true;
       for (const w of dockWalls) w.off = false;
@@ -553,7 +564,7 @@ function revealAt(x: number, z: number, secs = 1.8): void {
 
 const DONE: Record<string, string> = {
   bed2: 'Potager remis en état', bed3: 'Potager remis en état', bed4: 'Potager remis en état',
-  gate: 'Porte nord dégagée', bench: 'Établi réparé', sawmill: 'La scierie tourne',
+  gate: 'Porte nord dégagée', bench: 'Établi réparé', sawmill: 'La scierie tourne', brickworks: 'La fonderie de pierre cuit ses briques',
   tower: 'Tour de guet relevée', kitchen: 'La cuisine fume', shelter: 'Abri retapé',
   farmer: 'La fermière rejoint le camp', lumber: 'Le bûcheron rejoint le camp',
   scav: 'Le ferrailleur rejoint le camp', fisher: 'Le pêcheur rejoint le camp',
@@ -568,6 +579,8 @@ const DONE: Record<string, string> = {
 
 /** Le premier potager n'a pas de chantier : il lui faut sa ruine pour le jour ou on le demolit. */
 RUINS.bed1 = bedRuin(scene, beds[0]!.x, beds[0]!.z);
+// L'immeuble effondre sous la carriere s'affaisse quand on y bâtit la fonderie de pierre.
+RUINS.brickworks = world.ruinBlock;
 RUINS.bed1.visible = false;
 
 /** Ce que coute la remise en etat d'un batiment demoli. Les potagers se reparent au bois. */
@@ -583,7 +596,7 @@ const STRUCT_HP: Record<string, number> = {
 };
 const NAMES: Record<string, string> = {
   bed1: 'Le potager', bed2: 'Le potager', bed3: 'Le potager', bed4: 'Le potager',
-  field1: 'Un champ', field2: 'Un champ', field3: 'Un champ', bench: 'L’établi', sawmill: 'La scierie',
+  field1: 'Un champ', field2: 'Un champ', field3: 'Un champ', bench: 'L’établi', sawmill: 'La scierie', brickworks: 'La fonderie de pierre',
   kitchen: 'La cuisine', tower: 'La tour de guet', shelter: 'L’abri', mill: 'Le moulin',
 };
 
@@ -1200,8 +1213,8 @@ const FARM_WALL: { tier: number; cost: Cost; icon: string; title: string; done: 
     done: '🪓 La ferme est fortifiée : palissade de pieux, porte fermée la nuit', ready: () => isBuilt('mill'),
   },
   {
-    tier: 3, cost: { coins: 7000, stone: 100 }, icon: '🧱', title: 'Ferme : palissade en pierre',
-    done: '🧱 La palissade de la ferme passe à la pierre', ready: () => isBuilt('quarry'),
+    tier: 3, cost: { coins: 7000, stone: 100 }, icon: '🪨', title: 'Ferme : palissade en pierre',
+    done: '🪨 La palissade de la ferme passe à la pierre', ready: () => isBuilt('quarry'),
   },
 ];
 /** Chantier de la palissade : devant l'entree de la ferme, a gauche de la porte, hors du passage. */
@@ -1277,7 +1290,7 @@ function onDynPad(): boolean {
  * palissade de la ferme.
  */
 function refreshTowerSkins(): void {
-  const camp = save.wallTier >= 5 ? 2 : save.wallTier >= 3 ? 1 : 0;
+  const camp = save.wallTier >= 6 ? 2 : save.wallTier >= 3 ? 1 : 0;
   towerSkin(tower.group, Math.max(camp, bt('tower') - 1));
   for (const c of corners) towerSkin(c.tower.group, camp);
   const farm = save.farmLv >= 2 ? 1 : 0;
@@ -1696,8 +1709,8 @@ const OBJECTIVES: Objective[] = [
   { icon: '🌾', text: 'Remets le dernier champ en culture', target: padPos('field3'), done: () => isBuilt('field3') },
   // ---- les materiaux (33 a 37)
   { icon: '⛏️', text: 'Ouvre la carrière, au nord-est', target: padPos('quarry'), done: () => isBuilt('quarry') },
-  { icon: '🧱', text: 'Extrais de la pierre à la pioche', target: nearestOf(rocks, (r) => r.amount > 0), done: stat('stone') },
-  { icon: '🧱', text: 'Monte la palissade en pierre (établi)', target: at(L.benchZone), done: () => save.wallTier >= 3 },
+  { icon: '🪨', text: 'Extrais de la pierre à la pioche', target: nearestOf(rocks, (r) => r.amount > 0), done: stat('stone') },
+  { icon: '🪨', text: 'Monte la palissade en pierre (établi)', target: at(L.benchZone), done: () => save.wallTier >= 3 },
   { icon: '🔥', text: 'Restaure la fonderie de la station', target: padPos('foundry'), done: () => isBuilt('foundry') },
   { icon: '⚙️', text: 'Fonds du métal (ferraille à la fonderie)', target: at(L.foundryIn), done: stat('metal') },
   { icon: '🛡️', text: 'Renforce la palissade à l’établi', target: at(L.benchZone), done: () => save.up.wall > 0 },
@@ -1856,7 +1869,7 @@ function renderSheet(): void {
 // ---- reserve : on choisit ce qu'on prend
 
 /** Ordre des objets dans le panneau (les boutons ne bougent pas sous le doigt). */
-const RES_ORDER: ItemType[] = ['log', 'plank', 'scrap', 'stone', 'metal', 'fuel', 'carrot', 'tomato', 'wheat', 'soup', 'bread', 'fish'];
+const RES_ORDER: ItemType[] = ['log', 'plank', 'scrap', 'stone', 'brick', 'metal', 'fuel', 'carrot', 'tomato', 'wheat', 'soup', 'bread', 'fish'];
 /** Vide quand le panneau vient d'ouvrir : la grille est alors reconstruite une fois. */
 let resKey = '';
 /** Types deja affiches depuis l'ouverture, dans l'ordre d'apparition (on ajoute a la fin seulement). */
@@ -2223,6 +2236,8 @@ function applyMeta(dt: number): void {
   mill.extra = extraOf(blvOf('mill'));
   forge.speed = speedOf(blvOf('foundry')) * grow;
   forge.extra = extraOf(blvOf('foundry'));
+  brick.speed = speedOf(blvOf('brickworks')) * grow;
+  brick.extra = extraOf(blvOf('brickworks'));
   const rg = regenOf(blvOf('quarry'));
   for (const r of rocks) r.regenMul = rg;
   reserve.cap = resCapOf(blvOf('reserve')) + (isBuilt('warehouse') ? 200 : 0);
@@ -2717,8 +2732,9 @@ const WALL_COSTS: Cost[] = [
   { coins: 0 },
   { coins: 700, log: 50 },
   { coins: 4500, stone: 150 },
-  { coins: 9000, scrap: 150, stone: 40 },
-  { coins: 18000, metal: 80 },
+  { coins: 7000, brick: 120, stone: 20 },
+  { coins: 12000, scrap: 150, brick: 40 },
+  { coins: 22000, metal: 80 },
 ];
 
 /** On paie avec ce qu'on porte et ce qui est dans la reserve. */
@@ -2745,13 +2761,14 @@ interface MatUp { key: string; pkey: string; icon: string; title: string; desc: 
 function materialUpgrades(): MatUp[] {
   const out: MatUp[] = [];
   const t = save.wallTier;
-  if (t < 5) {
+  if (t < TIERS.length) {
     const next = TIERS[t]!;
-    const ready = t + 1 === 3 ? isBuilt('quarry') : t + 1 === 5 ? isBuilt('foundry') : true;
+    const need = t + 1 === 3 ? 'quarry' : t + 1 === 4 ? 'brickworks' : t + 1 === 6 ? 'foundry' : '';
+    const ready = !need || isBuilt(need);
     out.push({
       key: 'wall', pkey: `mat:wall:${t + 1}`, icon: next.icon, title: `Palissade : ${next.name}`,
       desc: `Actuelle : ${TIERS[t - 1]!.name} · solidité ×${(next.mul / TIERS[t - 1]!.mul).toFixed(1)}, se répare en ${ITEMS[next.item].icon}`,
-      cost: WALL_COSTS[t]!, ready, why: t + 1 === 3 ? 'Il faut la carrière' : 'Il faut la fonderie',
+      cost: WALL_COSTS[t]!, ready, why: need === 'quarry' ? 'Il faut la carrière' : need === 'brickworks' ? 'Il faut la fonderie de pierre' : 'Il faut la fonderie',
       apply: () => {
         save.wallTier = t + 1;
         palisade.setTier(save.wallTier);
@@ -2942,7 +2959,7 @@ function applyLook(id: string, animate: boolean): void {
   const make: Record<string, () => Building> = {
     sawmill: () => sawmill(st), kitchen: () => kitchen(st), armory: () => armory(0, 0, st, save.weapons),
     mill: () => windmill(st), shelter: () => shelter(st), stall: () => stallStand(st),
-    quarry: () => quarryShed(st), foundry: () => foundry(st), dock: () => dock(st),
+    quarry: () => quarryShed(st), foundry: () => foundry(st), dock: () => dock(st), brickworks: () => brickworks(st),
     house1: () => cabin(0, 0, 0, HOUSE_TONE.house1!, st), house2: () => cabin(0, 0, 0, HOUSE_TONE.house2!, st),
     house3: () => cabin(0, 0, 0, HOUSE_TONE.house3!, st), house4: () => cabin(0, 0, 0, HOUSE_TONE.house4!, st),
   };
@@ -3237,7 +3254,7 @@ const UP_AT: Record<string, { x: number; z: number }> = {
   field1: L.pads.field1, field2: L.pads.field2, field3: L.pads.field3,
   sawmill: { x: 9.6, z: -8.6 }, kitchen: L.pads.kitchen,
   mill: L.pads.mill, shelter: L.pads.shelter, stall: { x: 10.2, z: 9.6 },
-  quarry: L.pads.quarry, foundry: L.pads.foundry, dock: L.pads.dock,
+  quarry: L.pads.quarry, foundry: L.pads.foundry, dock: L.pads.dock, brickworks: L.pads.brickworks,
   // Les maisons : la ou on a paye leur chantier.
   ...Object.fromEntries(EXT.filter((e) => e.id.startsWith('house')).map((e) => [e.id, e.pad])),
 };
@@ -3458,7 +3475,7 @@ const playerChest = () => player.position.clone().setY(1.3);
 
 /** Objets en vol vers chaque bac de l'etal. */
 const shelfPending = new Map<ItemType, number>();
-const convPending = new Map<Converter, number>([[saw, 0], [cook, 0], [mill, 0], [forge, 0]]);
+const convPending = new Map<Converter, number>([[saw, 0], [cook, 0], [mill, 0], [forge, 0], [brick, 0]]);
 
 function putOnShelf(t: ItemType, from: THREE.Vector3): void {
   shelfPending.set(t, (shelfPending.get(t) ?? 0) + 1);
@@ -3482,7 +3499,7 @@ function putInConverter(c: Converter, t: ItemType, from: THREE.Vector3): void {
 const shelfRoom = (t: ItemType) => ITEMS[t].price > 0 ? BIN_CAP - market.bins.countOf(t) - (shelfPending.get(t) ?? 0) : 0;
 
 /** Les materiaux de construction : ils ne partent a l'etal que si aucun chantier ouvert n'en veut. */
-const MATERIALS: ItemType[] = ['log', 'plank', 'scrap', 'stone', 'metal', 'fuel'];
+const MATERIALS: ItemType[] = ['log', 'plank', 'scrap', 'stone', 'brick', 'metal', 'fuel'];
 let neededSet = new Set<ItemType>();
 let neededClock = 0;
 /** Ce que reclament les chantiers ouverts (zones, reparations, materiaux en cours). */
@@ -3679,7 +3696,7 @@ function interact(dt: number): void {
   // le bois va la ou on l'a voulu.
   const busyZone = near(L.shelf.x, L.shelf.z, 1.8) || near(reserve.zone.x, reserve.zone.z, 1.3)
     || pads.some((q) => q.shown && !isBuilt(q.def.id) && near(q.def.x, q.def.z, 1.6))
-    || [saw, cook, mill, forge].some((c) => c.built && near(c.input.x, c.input.z, 1.5)) || onDynPad();
+    || [saw, cook, mill, forge, brick].some((c) => c.built && near(c.input.x, c.input.z, 1.5)) || onDynPad();
   // Le troncon abime a portee, sur la palissade du camp ou sur celle de la ferme.
   repairTarget = null;
   let repairWall = palisade;
@@ -3702,7 +3719,7 @@ function interact(dt: number): void {
     }
   }
   // Nourrir les machines, ramasser ce qu'elles produisent.
-  for (const c of [saw, cook, mill, forge]) {
+  for (const c of [saw, cook, mill, forge, brick]) {
     if (!c.built) continue;
     if (settled && dropClock <= 0 && near(c.input.x, c.input.z, 1.35) && convRoom(c) > 0) {
       const item = player.stack.take((t) => c.accepts.includes(t));
@@ -4538,7 +4555,7 @@ function showOffline(): void {
 
 // ================================================================ sauvegarde
 
-const CONVS: Record<string, Converter> = { saw, cook, mill, forge };
+const CONVS: Record<string, Converter> = { saw, cook, mill, forge, brick };
 
 function persist(): void {
   if (resetting) return;
@@ -4762,6 +4779,8 @@ function step(dt: number, time: number): void {
   for (const u of pumps) u.update(dt);
   for (const r of rocks) r.update(dt);
   if (forge.update(dt, time)) save.stats.metal++;
+  brick.update(dt, time);
+  B.brickworks!.anim?.(dt, time, brick.busy);
   B.foundry!.anim?.(dt, time, forge.busy);
   if (saw.update(dt, time)) save.stats.planks++;
   if (cook.update(dt, time)) save.stats.soup++;

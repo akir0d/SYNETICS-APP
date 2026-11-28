@@ -1529,7 +1529,8 @@ export function cabin(x: number, z: number, ry: number, roofTone: number, stage 
     r.rotation.x = 0.12;
     g.add(r);
   } else {
-    const ry0 = top - 0.03;
+    // Le toit pose sur les murs (comme avant les niveaux : 2,45 m pour six rangs).
+    const ry0 = top + 0.35;
     g.add(part(ry0 - 0.25,
       along(logPiece(1.4, 0.14, LOG2, 1.45, ry0 - 0.2, 0), 'z'), along(logPiece(1.4, 0.14, LOG, -1.45, ry0 - 0.2, 0), 'z'),
       along(logPiece(0.5, 0.14, LOG3, 1.45, ry0 + 0.08, 0), 'z'), along(logPiece(0.5, 0.14, LOG2, -1.45, ry0 + 0.08, 0), 'z'),
@@ -1958,9 +1959,9 @@ const TOWER_MORTAR = 0x6c685f;
 const TOWER_STEEL = 0x50565c;
 
 /**
- * Habillage d'une tour selon son materiau : 0 bois (rien), 1 pierre (fut de moellons autour des
- * pieds, corniche sous le plancher), 2 fer (la pierre, cerclee d'acier, parapet blinde).
- * L'habillage reste a part (userData.keep) : on peut le changer apres coup.
+ * L'habillage d'une tour selon son aspect (1 a 5, un tous les deux niveaux) : bois nu, bois
+ * renforce (sacs de sable, contrefiches, fanion), fut de pierre, fut de briques crenele, fut
+ * cercle d'acier a parapet blinde, projecteur et mitrailleuse.
  */
 export function towerSkin(g: THREE.Object3D, stage: number): void {
   if ((g.userData.skin ?? 0) === stage) return;
@@ -1970,46 +1971,73 @@ export function towerSkin(g: THREE.Object3D, stage: number): void {
     g.remove(old);
     old.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).geometry.dispose(); });
   }
-  if (stage <= 0) return;
+  if (stage <= 1) return;
   const legH = 4.2;
   const k = new THREE.Group();
   const r = rng(77);
-  // Fut de pierre : six assises de moellons, a peine evase vers le bas, joints en retrait.
-  const courses = 6;
-  const h = legH / courses;
-  for (let i = 0; i < courses; i++) {
-    const w = 2.16 - i * 0.04;
-    const y = h * (i + 0.5);
-    k.add(rbox(w, h - 0.07, w, TOWER_STONE[i % 4]!, 0.07, 0, y, 0));
-    k.add(box(w - 0.1, 0.07, w - 0.1, TOWER_MORTAR, 0, h * (i + 1) - 0.035, 0));
-    // Quelques pierres qui ressortent : la facade n'est pas un aplat.
+  if (stage === 2) {
+    // Bois renforce : sacs de sable autour du plancher, contrefiches, fanion rouge.
     for (let f = 0; f < 4; f++) {
       const a = (f * Math.PI) / 2;
-      const along = (r() - 0.5) * w * 0.7;
-      const out = w / 2 + 0.02;
-      const s = blob(0.16 + r() * 0.06, TOWER_STONE[(i + f + 1) % 4]!, Math.cos(a) * out - Math.sin(a) * along, y + (r() - 0.5) * h * 0.4, Math.sin(a) * out + Math.cos(a) * along);
-      s.scale.set(1, 0.7, 0.45);
-      s.rotation.y = -a;
-      k.add(s);
+      const sb = sandbags(2.2, 1, 60 + f);
+      sb.position.set(Math.sin(a) * 1.05, legH + 0.08, Math.cos(a) * 1.05);
+      sb.rotation.y = a + Math.PI / 2;
+      k.add(sb);
     }
-  }
-  // Corniche sous le plancher et porte basse cote echelle.
-  k.add(rbox(2.5, 0.22, 2.5, TOWER_STONE[2]!, 0.06, 0, legH - 0.14, 0));
-  const door = rbox(0.7, 1.1, 0.08, 0x3a2e24, 0.05, 1.07, 0.55, 0.2);
-  door.rotation.y = Math.PI / 2;
-  k.add(door);
-  if (stage >= 2) {
-    // Cercles d'acier rivetes, et parapet blinde de plaques.
-    for (const y of [1.25, 2.85]) {
-      k.add(rbox(2.24, 0.14, 2.24, TOWER_STEEL, 0.03, 0, y, 0));
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.add(sphere(0.045, 0x8a9096, sx * 0.9, y, sz * 1.13, 6));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.add(rot(plank(0.1, 2.4, 0.1, C.woodDark, sx * 1.0, 1.6, sz * 1.0), sz * 0.25, 0, -sx * 0.25));
+    k.add(cyl(0.025, 0.025, 1.6, C.metal, 6, 0.95, legH + 1.6, 0.95), plank(0.5, 0.3, 0.02, 0xc9412f, 1.2, legH + 2.2, 0.95));
+  } else {
+    // Fut de pierre (ou de briques) : six assises, a peine evase vers le bas, joints en retrait.
+    const brick = stage === 4;
+    const tones = brick ? [0xa8553a, 0x9a4a32, 0xb8623f, 0x8a4430] : TOWER_STONE;
+    const courses = brick ? 12 : 6;
+    const h = legH / courses;
+    for (let i = 0; i < courses; i++) {
+      const w = 2.16 - i * (brick ? 0.02 : 0.04);
+      const y = h * (i + 0.5);
+      k.add(brick ? box(w, h - 0.04, w, tones[i % 4]!, 0, y, 0) : rbox(w, h - 0.07, w, tones[i % 4]!, 0.07, 0, y, 0));
+      k.add(box(w - 0.06, brick ? 0.04 : 0.07, w - 0.06, brick ? 0xd8ccb8 : TOWER_MORTAR, 0, h * (i + 1) - 0.02, 0));
+      if (brick) continue;
+      // Quelques pierres qui ressortent : la facade n'est pas un aplat.
+      for (let f = 0; f < 4; f++) {
+        const a = (f * Math.PI) / 2;
+        const along = (r() - 0.5) * w * 0.7;
+        const out = w / 2 + 0.02;
+        const s = blob(0.16 + r() * 0.06, tones[(i + f + 1) % 4]!, Math.cos(a) * out - Math.sin(a) * along, y + (r() - 0.5) * h * 0.4, Math.sin(a) * out + Math.cos(a) * along);
+        s.scale.set(1, 0.7, 0.45);
+        s.rotation.y = -a;
+        k.add(s);
+      }
     }
-    for (let f = 0; f < 4; f++) {
-      const p = rbox(2.72, 0.95, 0.07, f % 2 ? TOWER_STEEL : 0x5e646a, 0.03, 0, legH + 0.62, 0);
-      const a = (f * Math.PI) / 2;
-      p.position.set(Math.sin(a) * 1.33, legH + 0.62, Math.cos(a) * 1.33);
-      p.rotation.y = a;
-      k.add(p);
+    // Corniche sous le plancher et porte basse cote echelle.
+    k.add(rbox(2.5, 0.22, 2.5, brick ? 0xb8b0a0 : TOWER_STONE[2]!, 0.06, 0, legH - 0.14, 0));
+    const door = rbox(0.7, 1.1, 0.08, 0x3a2e24, 0.05, 1.07, 0.55, 0.2);
+    door.rotation.y = Math.PI / 2;
+    k.add(door);
+    if (brick) {
+      // Creneaux de briques tout autour du plancher.
+      for (let f = 0; f < 4; f++) for (let i = 0; i < 3; i++) {
+        const a = (f * Math.PI) / 2;
+        const along = -0.9 + i * 0.9;
+        k.add(box(0.42, 0.55, 0.42, tones[(i + f) % 4]!, Math.sin(a) * 1.15 + Math.cos(a) * along, legH + 0.3, Math.cos(a) * 1.15 - Math.sin(a) * along));
+      }
+    }
+    if (stage === 5) {
+      // Cercles d'acier rivetes, et parapet blinde de plaques.
+      for (const y of [1.25, 2.85]) {
+        k.add(rbox(2.24, 0.14, 2.24, TOWER_STEEL, 0.03, 0, y, 0));
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.add(sphere(0.045, 0x8a9096, sx * 0.9, y, sz * 1.13, 6));
+      }
+      for (let f = 0; f < 4; f++) {
+        const p = rbox(2.72, 0.95, 0.07, f % 2 ? TOWER_STEEL : 0x5e646a, 0.03, 0, legH + 0.62, 0);
+        const a = (f * Math.PI) / 2;
+        p.position.set(Math.sin(a) * 1.33, legH + 0.62, Math.cos(a) * 1.33);
+        p.rotation.y = a;
+        k.add(p);
+      }
+      // Projecteur et mitrailleuse sur leur pied, au bord du parapet.
+      k.add(cyl(0.05, 0.05, 0.7, IRON, 6, 0.9, legH + 1.35, -0.9), rot(cyl(0.2, 0.24, 0.3, 0x3a3d40, 10, 0.9, legH + 1.75, -0.9), 0.5, 0, 0), rot(cyl(0.17, 0.17, 0.02, 0xfff0c0, 10, 0.9, legH + 1.84, -0.77), 0.5, 0, 0));
+      k.add(cyl(0.05, 0.05, 0.5, IRON, 6, -0.9, legH + 1.25, 0.9), box(0.16, 0.16, 0.45, 0x2b2b2b, -0.9, legH + 1.55, 1.0), rot(cyl(0.03, 0.03, 0.6, 0x2b2b2b, 6, -0.9, legH + 1.57, 1.45), Math.PI / 2, 0, 0));
     }
   }
   const m = mergeColored(k);

@@ -5,8 +5,9 @@
 import type { Cost } from './progress';
 
 export type BId = 'bed1' | 'bed2' | 'bed3' | 'bed4' | 'field1' | 'field2' | 'field3' | 'sawmill' | 'kitchen' | 'armory'
-  | 'mill' | 'stall' | 'reserve' | 'shelter' | 'quarry' | 'foundry' | 'dock' | 'house1' | 'house2' | 'house3' | 'house4' | 'brickworks';
-type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm' | 'mill' | 'stall' | 'res' | 'shel' | 'quarry' | 'forge' | 'dock' | 'house' | 'brick';
+  | 'mill' | 'stall' | 'reserve' | 'shelter' | 'quarry' | 'foundry' | 'dock' | 'house1' | 'house2' | 'house3' | 'house4' | 'brickworks'
+  | 'tower' | 'towerNE' | 'towerNW' | 'towerSW' | 'farmTowerSE' | 'farmTowerNW';
+type Kind = 'bed' | 'field' | 'saw' | 'cook' | 'arm' | 'mill' | 'stall' | 'res' | 'shel' | 'quarry' | 'forge' | 'dock' | 'house' | 'brick' | 'tower';
 
 export const BMAX = 10;
 
@@ -42,6 +43,12 @@ export const BDEFS: BDef[] = [
   { id: 'house3', kind: 'house', name: 'Maison 3', icon: '🏡', base: 450 },
   { id: 'house4', kind: 'house', name: 'Maison 4', icon: '🏡', base: 450 },
   { id: 'brickworks', kind: 'brick', name: 'Fonderie de pierre', icon: '🧱', base: 700 },
+  { id: 'tower', kind: 'tower', name: 'Tour de guet', icon: '🗼', base: 600 },
+  { id: 'towerNE', kind: 'tower', name: 'Tour nord-est', icon: '🗼', base: 600 },
+  { id: 'towerNW', kind: 'tower', name: 'Tour nord-ouest', icon: '🗼', base: 600 },
+  { id: 'towerSW', kind: 'tower', name: 'Tour sud-ouest', icon: '🗼', base: 600 },
+  { id: 'farmTowerSE', kind: 'tower', name: 'Tour de la ferme (est)', icon: '🗼', base: 500 },
+  { id: 'farmTowerNW', kind: 'tower', name: 'Tour de la ferme (ouest)', icon: '🗼', base: 500 },
 ];
 export const bdef = (id: string): BDef | undefined => BDEFS.find((d) => d.id === id);
 
@@ -60,6 +67,7 @@ const STAGES: Record<Kind, string[]> = {
   forge: ['Bas fourneau', 'Four de briques', 'Halle d’acier', 'Creuset au palan', 'Usine'],
   dock: ['Planches de fortune', 'Ponton', 'Ponton et barque', 'Ponton à garde-corps', 'Port de pêche'],
   brick: ['Fosse et moules', 'Four de briques', 'Briqueterie', 'Fours jumeaux', 'Fonderie industrielle'],
+  tower: ['Tour de bois', 'Tour renforcée', 'Tour de pierre', 'Tour de briques', 'Tour blindée'],
   house: ['Cabane sous bâche', 'Cabane de rondins', 'Maison de rondins', 'Maison à véranda', 'Maison à étage'],
 };
 
@@ -76,13 +84,17 @@ export function bCost(d: BDef, next: number): Cost {
   const k = d.kind;
   if (next <= 4) {
     if (k === 'saw') c.log = 8 * (next - 1);
-    else if (k === 'arm') { c.scrap = 10 * (next - 1); c.plank = 10; }
+    else if (k === 'arm' || k === 'tower') { c.scrap = 10 * (next - 1); c.plank = 10; }
     else if (k === 'shel') { c.plank = 6 * (next - 1); c.scrap = 4 * (next - 1); }
     else c.plank = (k === 'bed' ? 4 : k === 'cook' || k === 'stall' || k === 'res' ? 5 : 6) * (next - 1);
   } else if (next <= 6) {
     c.plank = k === 'arm' ? 0 : 10;
     c.stone = (k === 'bed' ? 6 : k === 'arm' ? 10 : 8) * (next - 4);
     if (k === 'arm') c.scrap = 20;
+  } else if (next <= 8 && k === 'tower') {
+    // Les tours passent a la brique (aspect « tour de briques ») : fonderie de pierre.
+    c.brick = 12 * (next - 6);
+    c.scrap = 10;
   } else if (next <= 8) {
     c.stone = (k === 'bed' ? 10 : 12) * (next - 6);
     c.scrap = k === 'arm' ? 25 : k === 'bed' ? 8 : 10;
@@ -97,10 +109,10 @@ export function bCost(d: BDef, next: number): Cost {
   return c;
 }
 
-/** Il faut la carriere pour la pierre (niveaux 5 a 8), la fonderie pour le metal (9 et 10). */
-export const needOf = (d: BDef, next: number): 'quarry' | 'foundry' | null => {
+/** Il faut la carriere pour la pierre, la fonderie de pierre pour les briques, la fonderie pour le metal. */
+export const needOf = (d: BDef, next: number): 'quarry' | 'foundry' | 'brickworks' | null => {
   const c = bCost(d, next);
-  return c.metal ? 'foundry' : c.stone ? 'quarry' : null;
+  return c.metal ? 'foundry' : c.brick ? 'brickworks' : c.stone ? 'quarry' : null;
 };
 
 // ---- les bonus
@@ -118,6 +130,10 @@ export const fishOf = (lv: number): number => 1 + 0.15 * (lv - 1);
 /** Maison : son habitant travaille 8 % plus vite par niveau et porte un objet de plus. */
 export const workOf = (lv: number): number => 1 + 0.08 * (lv - 1);
 export const carryOf = (lv: number): number => lv - 1;
+/** Tours : degats +1, tirs 8 % plus frequents et portee +0,5 m par niveau. */
+export const towerDmgOf = (lv: number): number => lv - 1;
+export const towerRateOf = (lv: number): number => 1 + 0.08 * (lv - 1);
+export const towerRangeOf = (lv: number): number => 0.5 * (lv - 1);
 /** Abri : les survivants, mieux reposes, travaillent 5 % plus vite par niveau. */
 export const crewOf = (lv: number): number => 1 + 0.05 * (lv - 1);
 
@@ -156,6 +172,8 @@ export function bonusText(d: BDef, lv: number): string {
       return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · lingot en plus ${Math.round(100 * extraOf(lv))} %`;
     case 'brick':
       return `Cadence +${Math.round(100 * (speedOf(lv) - 1))} % · brique en plus ${Math.round(100 * extraOf(lv))} %`;
+    case 'tower':
+      return `Dégâts +${towerDmgOf(lv)} · tirs +${Math.round(100 * (towerRateOf(lv) - 1))} % · portée +${towerRangeOf(lv)} m`;
     case 'dock':
       return `Pêche +${Math.round(100 * (fishOf(lv) - 1))} % plus rapide · poisson double ${Math.round(100 * extraOf(lv))} %`;
     case 'house':

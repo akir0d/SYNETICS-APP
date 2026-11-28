@@ -7,7 +7,7 @@ import { bakeStatic, consolidate } from './bake';
 import {
   BDEFS, BMAX, WEAPON_NEED, awayOf, bCost, bdef, bonusText, capOf, carryOf, cashCapOf, crewOf, doubleOf, extraOf, fishOf, growOf, huntBonusOf, needOf, regenOf,
   resCapOf, sellOf, workOf,
-  speedOf, stageName, stageOf, wCost,
+  speedOf, stageName, stageOf, towerDmgOf, towerRangeOf, towerRateOf, wCost,
   type BDef,
 } from './blevels';
 import {
@@ -383,6 +383,17 @@ if (!save.seen.includes('blv-v2')) {
 if (!save.seen.includes('wall-brick')) {
   save.seen.push('wall-brick');
   if (save.wallTier >= 4) save.wallTier += 1;
+}
+// Tours a niveaux : le niveau « Tour de guet » de l'etabli et son palier en dur sont repris ;
+// des tours deja en pierre (palissade en pierre) le restent.
+if (!save.seen.includes('blv-towers')) {
+  save.seen.push('blv-towers');
+  const base = 1 + Math.round((save.lv.tower ?? 0) * 0.6);
+  const stoneLook = save.wallTier >= 3 ? 5 : 1;
+  const up = (id: string, n: number) => { save.blv[id] = Math.max(save.blv[id] ?? 1, Math.max(1, Math.min(BMAX, n))); };
+  up('tower', Math.max(base + 2 * ((save.bt.tower ?? 1) - 1), stoneLook));
+  for (const id of ['towerNE', 'towerNW', 'towerSW']) up(id, Math.max(base, stoneLook));
+  for (const id of ['farmTowerSE', 'farmTowerNW']) up(id, Math.max(base, save.farmLv >= 2 ? 5 : 1));
 }
 // Lot 3 : la fonderie en dur (palier) devient un niveau ; carriere, ponton et maisons partent du 1.
 if (!save.seen.includes('blv-v3')) {
@@ -1290,11 +1301,10 @@ function onDynPad(): boolean {
  * palissade de la ferme.
  */
 function refreshTowerSkins(): void {
-  const camp = save.wallTier >= 6 ? 2 : save.wallTier >= 3 ? 1 : 0;
-  towerSkin(tower.group, Math.max(camp, bt('tower') - 1));
-  for (const c of corners) towerSkin(c.tower.group, camp);
-  const farm = save.farmLv >= 2 ? 1 : 0;
-  for (const t of farmTowers) towerSkin(t.tower.group, farm);
+  // Chaque tour a son aspect, selon son propre niveau.
+  towerSkin(tower.group, stageOf(blvOf('tower')));
+  for (const c of corners) towerSkin(c.tower.group, stageOf(blvOf(c.id)));
+  for (const t of farmTowers) towerSkin(t.tower.group, stageOf(blvOf(t.site.id)));
 }
 
 function applyFarmWall(instant: boolean): void {
@@ -1396,7 +1406,7 @@ const hotWall: Record<HuntZone, { s: Section | null; t: number }> = { camp: { s:
 /** Places ouvertes : une avec l'armurerie, deux au camp niveau 3, trois au niveau 4. */
 const huntSlots = () => (isBuilt('armory') ? HUNTER_LV.filter((l) => save.campLv >= l).length : 0);
 /** Un peu plus fort qu'une tour d'angle, moins que le joueur ; il suit la menace et le niveau des tours. */
-const huntDmg = () => 2 + Math.floor(threat() / 4) + lv('tower') + (isBuilt('armory') ? huntBonusOf(blvOf('armory')) : 0);
+const huntDmg = () => 2 + Math.floor(threat() / 4) + (isBuilt('armory') ? huntBonusOf(blvOf('armory')) : 0);
 /** La ferme n'est defendue qu'une fois fortifiee (sinon il reste au camp). */
 const zoneOf = (i: number): HuntZone => (save.hunters[i] === 'farm' && farmWall ? 'farm' : 'camp');
 const mercOn = () => save.cycle && save.merc === save.day;
@@ -2726,7 +2736,6 @@ const bt = (id: string) => save.bt[id] ?? 1;
 const BT_NAMES = ['Bois', 'Pierre', 'Métal'];
 /** Batiments qu'on peut construire en dur, et leur « poids » dans le cout. */
 const TIERABLE: { id: string; name: string; icon: string; w: number }[] = [
-  { id: 'tower', name: 'Tour de guet', icon: '🗼', w: 1.4 },
 ];
 const WALL_COSTS: Cost[] = [
   { coins: 0 },
@@ -2896,6 +2905,9 @@ function bPos(id: string): { x: number; z: number } {
   if (id === 'reserve') return L.chest;
   const ext = EXT.find((e) => e.id === id);
   if (ext) return ext;
+  const ft = farmTowers.find((t) => t.site.id === id);
+  if (ft) return ft.site;
+  if (id === 'tower') return L.tower;
   return B[id]!.group.position;
 }
 
@@ -2914,6 +2926,7 @@ function bState(id: string): BState {
     else if (next > capOf(save.campLv)) locked = `🏰 Camp niv. ${Math.ceil((next - 2) / 2)}`;
     else if (need === 'quarry' && !isBuilt('quarry')) locked = '⛏️ Il faut la carrière';
     else if (need === 'foundry' && !isBuilt('foundry')) locked = '🔥 Il faut la fonderie';
+    else if (need === 'brickworks' && !isBuilt('brickworks')) locked = '🧱 Il faut la fonderie de pierre';
   }
   return { d, lv, next, max, locked, cost, rem: max ? cost : remainingOf(key, cost), key };
 }
@@ -2950,6 +2963,10 @@ function applyLook(id: string, animate: boolean): void {
       resSolid = { x: L.chest.x, z: L.chest.z - 1.9, r: 1.1 };
       world.solids.push(resSolid);
     }
+    return;
+  }
+  if (id.startsWith('tower') || id.startsWith('farmTower')) {
+    refreshTowerSkins();
     return;
   }
   if (id === 'mill' && st === 5 && !siloSolid) {
@@ -3242,7 +3259,7 @@ function placeBldBadges(): void {
     const p = bPos(id);
     const s = bState(id);
     el.classList.toggle('look', !s.max && stageOf(s.next) !== stageOf(s.lv));
-    placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') || id === 'dock' ? 1.3 : id === 'mill' ? 7.0 : id === 'reserve' || id === 'stall' ? 2.4 : id === 'armory' || id.startsWith('house') ? 3.6 : 3.2, p.z);
+    placeLabel(el, p.x, id.startsWith('bed') || id.startsWith('field') || id === 'dock' ? 1.3 : id === 'mill' || id.startsWith('tower') || id.startsWith('farmTower') ? 7.0 : id === 'reserve' || id === 'stall' ? 2.4 : id === 'armory' || id.startsWith('house') ? 3.6 : 3.2, p.z);
   }
 }
 
@@ -3255,8 +3272,11 @@ const UP_AT: Record<string, { x: number; z: number }> = {
   sawmill: { x: 9.6, z: -8.6 }, kitchen: L.pads.kitchen,
   mill: L.pads.mill, shelter: L.pads.shelter, stall: { x: 10.2, z: 9.6 },
   quarry: L.pads.quarry, foundry: L.pads.foundry, dock: L.pads.dock, brickworks: L.pads.brickworks,
-  // Les maisons : la ou on a paye leur chantier.
-  ...Object.fromEntries(EXT.filter((e) => e.id.startsWith('house')).map((e) => [e.id, e.pad])),
+  // Les maisons et les tours d'angle : la ou on a paye leur chantier.
+  ...Object.fromEntries(EXT.filter((e) => e.id.startsWith('house') || e.id.startsWith('tower')).map((e) => [e.id, e.pad])),
+  ...Object.fromEntries(farmTowers.map((t) => [t.site.id, t.site.pad])),
+  // La tour de guet : sa zone suit la tour quand elle part au coin du camp (voir updateUpPads).
+  tower: { x: L.pads.tower.x, z: L.pads.tower.z },
 };
 const UP_RING = new THREE.RingGeometry(0.82, 1.02, 40);
 /** Une fleche couchee au sol, pointe vers le haut de l'ecran. */
@@ -3296,6 +3316,15 @@ let upStill = 0;
 function updateUpPads(time: number): void {
   const p = player.position;
   for (const u of upPads) {
+    if (u.id === 'tower') {
+      const at = towerMoved ? TOWER_CORNER_PAD : L.pads.tower;
+      if (u.x !== at.x || u.z !== at.z) {
+        u.x = at.x;
+        u.z = at.z;
+        u.ring.position.set(at.x, 0.05, at.z);
+        u.arrow.position.set(at.x, 0.055, at.z);
+      }
+    }
     const on = upShown(u);
     u.ring.visible = u.arrow.visible = on;
     if (!on) {
@@ -4325,10 +4354,10 @@ function updateCombat(dt: number): void {
     if (w.id === 'shotgun') shake = Math.max(shake, 0.08);
   }
   if (night && structAlive('tower') && towerClock <= 0) {
-    const tz = horde.nearest(new THREE.Vector3(L.tower.x, 0, L.tower.z), 16);
+    const tz = horde.nearest(new THREE.Vector3(L.tower.x, 0, L.tower.z), 16 + towerRangeOf(blvOf('tower')));
     if (tz) {
-      towerClock = 0.7 / (1 + 0.08 * lv('tower'));
-      shoot(tz, tower.muzzle, 1 + Math.floor(threat() / 3) + lv('tower') + 2 * (bt('tower') - 1), false, true);
+      towerClock = 0.7 / towerRateOf(blvOf('tower'));
+      shoot(tz, tower.muzzle, 1 + Math.floor(threat() / 3) + towerDmgOf(blvOf('tower')), false, true);
     }
   }
   // Tours d'angle (niveau du camp) : elles couvrent les flancs.
@@ -4337,21 +4366,23 @@ function updateCombat(dt: number): void {
       if (!isBuilt(c.id)) return;
       cornerClock[i] = (cornerClock[i] ?? 0) - dt;
       if (cornerClock[i]! > 0) return;
-      const cz = horde.nearest(new THREE.Vector3(c.x, 0, c.z), 15);
+      const cl = blvOf(c.id);
+      const cz = horde.nearest(new THREE.Vector3(c.x, 0, c.z), 15 + towerRangeOf(cl));
       if (!cz) return;
-      cornerClock[i] = 0.8 / (1 + 0.08 * lv('tower'));
+      cornerClock[i] = 0.8 / towerRateOf(cl);
       // Comme la grande tour, leurs degats suivent la menace (sinon elles chatouillent la horde).
-      shoot(cz, c.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false, true);
+      shoot(cz, c.tower.muzzle, 1 + Math.floor(threat() / 4) + towerDmgOf(cl), false, true);
     });
     // Tours de garde de la ferme : memes tirs, toute la palissade de la ferme, jamais le camp.
     for (const t of farmTowers) {
       if (!isBuilt(t.site.id)) continue;
       t.clock -= dt;
       if (t.clock > 0) continue;
-      const fz = horde.nearest(t.at, FARM_TOWER_RANGE, FARM_TOWER_MAXX);
+      const fl = blvOf(t.site.id);
+      const fz = horde.nearest(t.at, FARM_TOWER_RANGE + towerRangeOf(fl), FARM_TOWER_MAXX);
       if (!fz) continue;
-      t.clock = 0.8 / (1 + 0.08 * lv('tower'));
-      shoot(fz, t.tower.muzzle, 1 + Math.floor(threat() / 4) + lv('tower'), false, true);
+      t.clock = 0.8 / towerRateOf(fl);
+      shoot(fz, t.tower.muzzle, 1 + Math.floor(threat() / 4) + towerDmgOf(fl), false, true);
     }
   }
 }

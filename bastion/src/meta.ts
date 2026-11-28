@@ -84,7 +84,6 @@ export const MAX_LEVEL = 15;
 
 export const LEVELS: LevelDef[] = [
   { id: 'foreman', name: 'Contremaître', icon: '📋', needs: 'farmer', base: 300, effect: (l) => `Hors ligne : rendement ${Math.round(15 + 1.5 * l)} %, plafond +${10 * l} %, jusqu'à ${1 + l / 2} h` },
-  { id: 'tower', name: 'Tour de guet', icon: '🗼', needs: 'tower', base: 300, effect: (l) => `Dégâts +${l}, tirs +${8 * l} %` },
 ];
 
 /** Cout en pieces du niveau suivant : exponentiel, pour durer. */
